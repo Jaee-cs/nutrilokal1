@@ -1,9 +1,9 @@
 // Skema database NutriLokal Smart Production & Traceability Kit V1.0.
 //
-// Pada tugas B1 hanya fondasi yang disiapkan: koneksi database dan
-// klien Prisma. Model bisnis (produk, bahan baku, produksi, batch,
-// stok, penjualan, akun, QR, dll.) ditambahkan pada tugas roadmap
-// berikutnya sesuai README.
+// Tugas B1 menyiapkan fondasi koneksi. Tugas B2 menambahkan model
+// pengguna untuk autentikasi dan hak akses. Model bisnis lainnya
+// (produk, bahan baku, produksi, batch, stok, penjualan, QR, dll.)
+// ditambahkan pada tugas roadmap berikutnya sesuai README.
 
 generator client {
   provider = "prisma-client-js"
@@ -12,4 +12,32 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+/// Peran pengguna internal. Hak akses selalu diperiksa di backend.
+enum Role {
+  ADMIN
+  OPERATOR
+}
+
+/// Akun pengguna internal. Tidak ada pendaftaran publik;
+/// akun Admin pertama dibuat melalui skrip bootstrap (npm run admin:create).
+model User {
+  id                String    @id @default(cuid())
+  username          String    @unique
+  /// Nama tampilan, boleh kosong.
+  name              String?
+  /// Kata sandi selalu disimpan sebagai hash (bcrypt), bukan teks biasa.
+  passwordHash      String
+  role              Role
+  /// Akun dinonaktifkan tidak bisa login dan token lama ditolak.
+  isActive          Boolean   @default(true)
+  /// Setelah Admin mereset kata sandi, pengguna wajib menetapkan
+  /// kata sandi baru sebelum bisa menggunakan sistem kembali.
+  mustChangePassword Boolean  @default(false)
+  lastLoginAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@map("users")
 }

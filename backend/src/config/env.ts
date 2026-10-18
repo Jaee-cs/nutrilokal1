@@ -20,7 +20,17 @@ if (!databaseUrl) {
   );
 }
 
+const jwtSecret = process.env.JWT_SECRET;
+
+if (!jwtSecret || jwtSecret.length < 32) {
+  throw new Error(
+    'JWT_SECRET belum diatur atau terlalu pendek (minimal 32 karakter). ' +
+      'Buat nilai acak dengan: openssl rand -hex 32'
+  );
+}
+
 export const env = {
   PORT: port,
   DATABASE_URL: databaseUrl,
+  JWT_SECRET: jwtSecret,
 } as const;
