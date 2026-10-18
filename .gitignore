@@ -1,0 +1,14 @@
+# Dependensi dan artefak build
+node_modules/
+dist/
+
+# Environment lokal (berisi nilai rahasia — jangan pernah di-commit)
+.env
+.env.*
+!.env.example
+
+# Sistem
+.DS_Store
+
+# Log
+*.log

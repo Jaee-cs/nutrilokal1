@@ -1,0 +1,28 @@
+# PostgreSQL lokal untuk pengembangan NutriLokal.
+# Jalankan:       docker compose up -d
+# Hentikan:       docker compose down
+# Lihat log:      docker compose logs -f postgres
+#
+# Nilai di bawah hanya untuk pengembangan lokal.
+# Untuk lingkungan produksi, gunakan kredensial kuat dari environment variables.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nutrilokal-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nutrilokal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nutrilokal_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-nutrilokal}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - nutrilokal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nutrilokal -d nutrilokal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  nutrilokal-postgres-data:

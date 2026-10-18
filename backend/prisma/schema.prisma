@@ -1,0 +1,15 @@
+// Skema database NutriLokal Smart Production & Traceability Kit V1.0.
+//
+// Pada tugas B1 hanya fondasi yang disiapkan: koneksi database dan
+// klien Prisma. Model bisnis (produk, bahan baku, produksi, batch,
+// stok, penjualan, akun, QR, dll.) ditambahkan pada tugas roadmap
+// berikutnya sesuai README.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
