@@ -65,3 +65,65 @@ export function normalizeDescription(value: unknown): string | null {
   }
   return value.trim();
 }
+
+// ---------------------------------------------------------------------------
+// Validator untuk catatan stok bahan baku (B4)
+// ---------------------------------------------------------------------------
+
+/** Jumlah stok harus angka finit > 0 dengan maksimal 3 angka di belakang koma. */
+export function validateQuantity(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'Jumlah harus berupa angka.';
+  }
+  if (value <= 0) {
+    return 'Jumlah harus lebih besar dari nol.';
+  }
+  if (value >= 1e11) {
+    return 'Jumlah terlalu besar.';
+  }
+  const asText = String(value);
+  if (asText.includes('e')) {
+    return 'Jumlah maksimal 3 angka di belakang koma.';
+  }
+  const [, decimals] = asText.split('.');
+  if (decimals && decimals.length > 3) {
+    return 'Jumlah maksimal 3 angka di belakang koma.';
+  }
+  return null;
+}
+
+/** Tanggal bisnis wajib berupa tanggal valid (format YYYY-MM-DD atau ISO). */
+export function validateDateOnly(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return 'Tanggal wajib diisi.';
+  }
+  if (Number.isNaN(Date.parse(value))) {
+    return 'Tanggal tidak valid. Gunakan format YYYY-MM-DD.';
+  }
+  return null;
+}
+
+/** Alasan (wajib untuk saldo awal). */
+export function validateReason(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return 'Alasan wajib diisi.';
+  }
+  if (value.trim().length > 500) {
+    return 'Alasan maksimal 500 karakter.';
+  }
+  return null;
+}
+
+/** Catatan opsional penerimaan. */
+export function validateNote(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    return 'Catatan harus berupa teks.';
+  }
+  if (value.length > 500) {
+    return 'Catatan maksimal 500 karakter.';
+  }
+  return null;
+}

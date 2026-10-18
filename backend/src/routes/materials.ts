@@ -13,8 +13,10 @@ import { pathId } from '../lib/http';
 import { hasOperationalHistory } from '../lib/master-history';
 import { toPublicMaterial } from '../lib/material';
 import { prisma } from '../lib/prisma';
+import { getMaterialStock } from '../lib/stock';
 import { validateName, validateUnit } from '../lib/validate';
 import { authenticate, requireAdmin } from '../middleware/auth';
+import { materialOpeningBalancesRouter, materialReceiptsRouter } from './material-records';
 
 export const materialsRouter = Router();
 
@@ -22,7 +24,14 @@ export const materialsRouter = Router();
 
 materialsRouter.get('/', authenticate, async (_req, res) => {
   const materials = await prisma.material.findMany({ orderBy: { name: 'asc' } });
-  res.json({ data: materials.map(toPublicMaterial) });
+
+  // Stok ditampilkan sebagai total per jenis bahan baku (README 5.2).
+  const stocks = await prisma.materialStock.findMany({
+    where: { materialId: { in: materials.map((m) => m.id) } },
+  });
+  const stockByMaterial = new Map(stocks.map((s) => [s.materialId, Number(s.quantity)]));
+
+  res.json({ data: materials.map((m) => toPublicMaterial(m, stockByMaterial.get(m.id) ?? 0)) });
 });
 
 materialsRouter.get('/:id', authenticate, async (req, res) => {
@@ -33,7 +42,7 @@ materialsRouter.get('/:id', authenticate, async (req, res) => {
     return;
   }
 
-  res.json({ material: toPublicMaterial(material) });
+  res.json({ material: toPublicMaterial(material, await getMaterialStock(prisma, material.id)) });
 });
 
 // ---------- Mengubah (hanya Admin) ----------
@@ -57,7 +66,7 @@ materialsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
     data: { name: name.trim(), unit: unit.trim() },
   });
 
-  res.status(201).json({ material: toPublicMaterial(material) });
+  res.status(201).json({ material: toPublicMaterial(material, 0) });
 });
 
 materialsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
@@ -111,7 +120,7 @@ materialsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
   }
 
   const material = await prisma.material.update({ where: { id: target.id }, data });
-  res.json({ material: toPublicMaterial(material) });
+  res.json({ material: toPublicMaterial(material, await getMaterialStock(prisma, material.id)) });
 });
 
 materialsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
@@ -134,3 +143,7 @@ materialsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
   await prisma.material.delete({ where: { id: target.id } });
   res.json({ message: `Bahan baku "${target.name}" berhasil dihapus.` });
 });
+
+// Riwayat penerimaan dan saldo awal per bahan baku.
+materialsRouter.use('/:id/receipts', materialReceiptsRouter);
+materialsRouter.use('/:id/opening-balances', materialOpeningBalancesRouter);

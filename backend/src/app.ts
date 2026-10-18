@@ -4,8 +4,13 @@
  * sehingga bisa dipakai juga oleh pengujian (supertest).
  */
 import express from 'express';
+import { ensureMaterialHistoryCheckRegistered } from './lib/material-history';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
 import { apiRouter } from './routes';
+
+// Pemeriksa riwayat operasional bahan baku (README 5.1) —
+// dipakai endpoint hapus/ubah satuan master bahan baku.
+ensureMaterialHistoryCheckRegistered();
 
 export function createApp(): express.Express {
   const app = express();

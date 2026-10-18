@@ -2,9 +2,10 @@
 //
 // Tugas B1 menyiapkan fondasi koneksi. Tugas B2 menambahkan model
 // pengguna untuk autentikasi dan hak akses. Tugas B3 menambahkan
-// master produk dan master bahan baku. Model lainnya (penerimaan,
-// produksi, batch, stok, penjualan, QR, dll.) ditambahkan pada
-// tugas roadmap berikutnya sesuai README.
+// master produk dan master bahan baku. Tugas B4 menambahkan stok
+// bahan baku, penerimaan, saldo awal, dan jejak pergerakan stok.
+// Model lainnya (produksi, batch, stok produk jadi, penjualan, QR,
+// dll.) ditambahkan pada tugas roadmap berikutnya sesuai README.
 
 generator client {
   provider = "prisma-client-js"
@@ -40,7 +41,115 @@ model User {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
+  materialReceipts        MaterialReceipt[]
+  materialOpeningBalances MaterialOpeningBalance[]
+  materialStockMovements  MaterialStockMovement[]
+
   @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Stok bahan baku, penerimaan, dan saldo awal (README 5.2 dan 5.4)
+// ---------------------------------------------------------------------------
+
+/// Jenis pergerakan stok bahan baku. Nilai tambahan (pemakaian produksi,
+/// penyesuaian, penjualan) ditambahkan pada tugas roadmap berikutnya.
+enum StockMovementType {
+  RECEIPT
+  OPENING_BALANCE
+}
+
+/// Saldo stok bahan baku per jenis bahan (README 5.2: stok dihitung sebagai
+/// total per jenis bahan baku, bukan per penerimaan).
+model MaterialStock {
+  id         String   @id @default(cuid())
+  material   Material @relation(fields: [materialId], references: [id])
+  materialId String   @unique
+  /// Selalu >= 0; setiap perubahan dicatat di MaterialStockMovement.
+  quantity   Decimal  @db.Decimal(14, 3)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("material_stocks")
+}
+
+/// Jejak setiap pergerakan stok (README 5.4). Setiap pergerakan dikaitkan
+/// dengan catatan sumbernya (penerimaan atau saldo awal).
+model MaterialStockMovement {
+  id         String              @id @default(cuid())
+  material   Material            @relation(fields: [materialId], references: [id])
+  materialId String
+  type       StockMovementType
+  /// Jumlah selalu positif; arah pergerakan ditentukan oleh jenisnya.
+  /// Pada B4 semua jenis menambah stok; pemakaian/penyesuaian menyusul.
+  quantity   Decimal             @db.Decimal(14, 3)
+  /// Tanggal bisnis (tanggal penerimaan atau tanggal saldo awal).
+  occurredAt DateTime
+  /// Waktu pencatatan disimpan terpisah dari tanggal bisnis.
+  recordedAt DateTime            @default(now())
+  recordedBy User                @relation(fields: [recordedById], references: [id])
+  recordedById String
+  /// Alasan; wajib diisi untuk saldo awal.
+  reason     String?
+  receipt    MaterialReceipt?    @relation(fields: [receiptId], references: [id])
+  receiptId  String?             @unique
+  openingBalance   MaterialOpeningBalance? @relation(fields: [openingBalanceId], references: [id])
+  openingBalanceId String?                @unique
+
+  @@index([materialId])
+  @@map("material_stock_movements")
+}
+
+/// Catatan penerimaan bahan baku (riwayat tetap tersimpan, tidak diedit/dihapus).
+model MaterialReceipt {
+  id         String   @id @default(cuid())
+  material   Material @relation(fields: [materialId], references: [id])
+  materialId String
+  quantity   Decimal  @db.Decimal(14, 3)
+  /// Tanggal penerimaan (tanggal bisnis).
+  receivedAt DateTime
+  note       String?
+  recordedBy User     @relation(fields: [recordedById], references: [id])
+  recordedById String
+  createdAt  DateTime @default(now())
+  movement   MaterialStockMovement?
+
+  @@index([materialId])
+  @@map("material_receipts")
+}
+
+/// Saldo awal bahan baku (README 5.2): dicatat Admin secara terpisah dari
+/// penerimaan biasa; wajib memuat tanggal, alasan, dan pengguna pencatat.
+model MaterialOpeningBalance {
+  id         String   @id @default(cuid())
+  material   Material @relation(fields: [materialId], references: [id])
+  materialId String
+  quantity   Decimal  @db.Decimal(14, 3)
+  /// Tanggal saldo awal (tanggal bisnis).
+  date       DateTime
+  reason     String
+  recordedBy User     @relation(fields: [recordedById], references: [id])
+  recordedById String
+  createdAt  DateTime @default(now())
+  movement   MaterialStockMovement?
+
+  @@index([materialId])
+  @@map("material_opening_balances")
+}
+
+/// Kunci idempotensi (README 5.4 dan 6): mencegah permintaan berulang
+/// menambah stok dua kali. Kunci disimpan dalam transaksi yang sama
+/// dengan perubahan stok; permintaan ulang menerima respons tersimpan.
+model IdempotencyKey {
+  key            String
+  endpoint       String
+  userId         String
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime @default(now())
+
+  @@id([key, endpoint, userId])
+  @@map("idempotency_keys")
 }
 
 /// Master produk (README 5.1). Setiap produk memiliki SATU satuan dasar;
@@ -78,6 +187,11 @@ model Material {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  stock            MaterialStock?
+  receipts         MaterialReceipt[]
+  openingBalances  MaterialOpeningBalance[]
+  stockMovements   MaterialStockMovement[]
 
   @@map("materials")
 }
