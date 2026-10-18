@@ -373,7 +373,9 @@ describe('Bootstrap akun Admin pertama', () => {
     const outcome = await prisma
       .$transaction(async (tx) => {
         // Simulasikan kondisi awal: belum ada satupun akun Admin.
-        await tx.user.deleteMany({ where: { role: 'ADMIN' } });
+        // Ubah peran (bukan hapus baris) agar tidak melanggar foreign key
+        // riwayat yang mereferensikan akun Admin yang sudah ada di database.
+        await tx.user.updateMany({ where: { role: 'ADMIN' }, data: { role: 'OPERATOR' } });
 
         const admin = await createInitialAdmin(
           { username: `${runId}-initial-admin`, password: 'bootstrap-rahasia-123', name: 'Admin Awal' },
