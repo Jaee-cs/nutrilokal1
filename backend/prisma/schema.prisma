@@ -1,9 +1,10 @@
 // Skema database NutriLokal Smart Production & Traceability Kit V1.0.
 //
 // Tugas B1 menyiapkan fondasi koneksi. Tugas B2 menambahkan model
-// pengguna untuk autentikasi dan hak akses. Model bisnis lainnya
-// (produk, bahan baku, produksi, batch, stok, penjualan, QR, dll.)
-// ditambahkan pada tugas roadmap berikutnya sesuai README.
+// pengguna untuk autentikasi dan hak akses. Tugas B3 menambahkan
+// master produk dan master bahan baku. Model lainnya (penerimaan,
+// produksi, batch, stok, penjualan, QR, dll.) ditambahkan pada
+// tugas roadmap berikutnya sesuai README.
 
 generator client {
   provider = "prisma-client-js"
@@ -40,4 +41,43 @@ model User {
   updatedAt         DateTime  @updatedAt
 
   @@map("users")
+}
+
+/// Master produk (README 5.1). Setiap produk memiliki SATU satuan dasar;
+/// produksi, stok, dan penjualan memakai satuan yang sama —
+/// tidak ada konversi satuan otomatis.
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  /// Deskripsi produk untuk keperluan katalog (divalidasi & diterbitkan Admin pada tahap B8).
+  description String?
+  /// Satuan dasar produk (mis. "pcs", "botol", "kg").
+  unit        String
+  /// Harga jual per satuan dasar; ditetapkan di master dan dipakai
+  /// otomatis saat penjualan (README 5.5).
+  sellingPrice Decimal @db.Decimal(14, 2)
+  /// Produk nonaktif tidak tersedia untuk produksi atau penjualan baru
+  /// dan tidak muncul di katalog aktif. Riwayat yang tersimpan tetap utuh.
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("products")
+}
+
+/// Master bahan baku (README 5.1). Setiap bahan baku memiliki SATU satuan
+/// dasar; penerimaan dan pemakaian memakai satuan yang sama —
+/// tidak ada konversi satuan otomatis.
+model Material {
+  id        String   @id @default(cuid())
+  name      String
+  /// Satuan dasar bahan baku (mis. "kg", "liter", "sachet").
+  unit      String
+  /// Bahan baku nonaktif tidak dipakai untuk pencatatan baru; riwayat
+  /// penerimaan/pemakaian yang tersimpan tetap utuh.
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("materials")
 }

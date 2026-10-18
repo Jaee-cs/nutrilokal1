@@ -6,7 +6,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app';
 import { createInitialAdmin } from './lib/bootstrap';
-import { hashPassword } from './lib/password';
+import { hashPassword, verifyPassword } from './lib/password';
 import { prisma } from './lib/prisma';
 
 const app = createApp();
@@ -369,27 +369,46 @@ describe('Bootstrap akun Admin pertama', () => {
     ).rejects.toThrow(/minimal 8/);
   });
 
-  it('berhasil membuat Admin pertama saat belum ada Admin', async () => {
-    // Bersihkan semua akun uji agar benar-benar belum ada Admin.
-    await prisma.user.deleteMany({ where: { username: { startsWith: runId } } });
-    const adminCount = await prisma.user.count({ where: { role: 'ADMIN' } });
-    expect(adminCount).toBe(0);
+  it('berhasil membuat Admin pertama saat belum ada Admin (diuji dalam transaksi yang di-rollback)', async () => {
+    const outcome = await prisma
+      .$transaction(async (tx) => {
+        // Simulasikan kondisi awal: belum ada satupun akun Admin.
+        await tx.user.deleteMany({ where: { role: 'ADMIN' } });
 
-    const admin = await createInitialAdmin({
-      username: `${runId}-initial-admin`,
-      password: 'bootstrap-rahasia-123',
-      name: 'Admin Awal',
-    });
+        const admin = await createInitialAdmin(
+          { username: `${runId}-initial-admin`, password: 'bootstrap-rahasia-123', name: 'Admin Awal' },
+          tx
+        );
 
-    const created = await prisma.user.findUniqueOrThrow({ where: { id: admin.id } });
-    expect(created.role).toBe('ADMIN');
+        const created = await tx.user.findUniqueOrThrow({ where: { id: admin.id } });
+        expect(created.role).toBe('ADMIN');
+        expect(created.name).toBe('Admin Awal');
 
-    // Admin hasil bootstrap bisa login.
-    const loginRes = await login(created.username, 'bootstrap-rahasia-123');
-    expect(loginRes.status).toBe(200);
+        // Kata sandi tersimpan sebagai hash bcrypt, bukan teks biasa.
+        expect(created.passwordHash).not.toBe('bootstrap-rahasia-123');
+        expect(await verifyPassword('bootstrap-rahasia-123', created.passwordHash)).toBe(true);
+
+        throw new Error('ROLLBACK_UJI');
+      })
+      .catch((error: unknown) => error);
+
+    // Pastikan transaksi benar-benar di-rollback sehingga data sungguhan tidak berubah.
+    expect((outcome as Error).message).toBe('ROLLBACK_UJI');
   });
 
   it('menolak pembuatan Admin kedua', async () => {
+    // Pastikan minimal ada satu Admin (data uji atau data lokal).
+    const adminCount = await prisma.user.count({ where: { role: 'ADMIN' } });
+    if (adminCount === 0) {
+      await prisma.user.create({
+        data: {
+          username: `${runId}-admin-nyata`,
+          passwordHash: await hashPassword('kata-sandi-tes'),
+          role: 'ADMIN',
+        },
+      });
+    }
+
     await expect(
       createInitialAdmin({ username: `${runId}-admin-kedua`, password: 'bootstrap-rahasia-123' })
     ).rejects.toThrow(/sudah ada/i);

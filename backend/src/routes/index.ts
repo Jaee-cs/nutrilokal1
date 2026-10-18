@@ -4,6 +4,8 @@
 import { Router } from 'express';
 import { authRouter } from './auth';
 import { healthRouter } from './health';
+import { materialsRouter } from './materials';
+import { productsRouter } from './products';
 import { usersRouter } from './users';
 
 export const apiRouter = Router();
@@ -11,3 +13,5 @@ export const apiRouter = Router();
 apiRouter.use('/health', healthRouter);
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/users', usersRouter);
+apiRouter.use('/products', productsRouter);
+apiRouter.use('/materials', materialsRouter);
