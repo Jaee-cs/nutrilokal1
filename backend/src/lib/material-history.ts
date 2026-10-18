@@ -22,11 +22,12 @@ export function ensureMaterialHistoryCheckRegistered(): void {
       return false;
     }
 
-    const [receipts, openingBalances] = await Promise.all([
+    const [receipts, openingBalances, productionUsages] = await Promise.all([
       prisma.materialReceipt.count({ where: { materialId: id } }),
       prisma.materialOpeningBalance.count({ where: { materialId: id } }),
+      prisma.productionMaterialUsage.count({ where: { materialId: id } }),
     ]);
 
-    return receipts > 0 || openingBalances > 0;
+    return receipts > 0 || openingBalances > 0 || productionUsages > 0;
   });
 }

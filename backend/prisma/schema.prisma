@@ -4,8 +4,10 @@
 // pengguna untuk autentikasi dan hak akses. Tugas B3 menambahkan
 // master produk dan master bahan baku. Tugas B4 menambahkan stok
 // bahan baku, penerimaan, saldo awal, dan jejak pergerakan stok.
-// Model lainnya (produksi, batch, stok produk jadi, penjualan, QR,
-// dll.) ditambahkan pada tugas roadmap berikutnya sesuai README.
+// Tugas B5 menambahkan produksi, kode batch, pemakaian bahan aktual,
+// dan koreksi catatan produksi. Model lainnya (penyesuaian stok,
+// penjualan, QR, dll.) ditambahkan pada tugas roadmap berikutnya
+// sesuai README.
 
 generator client {
   provider = "prisma-client-js"
@@ -44,6 +46,9 @@ model User {
   materialReceipts        MaterialReceipt[]
   materialOpeningBalances MaterialOpeningBalance[]
   materialStockMovements  MaterialStockMovement[]
+  productions             Production[]
+  productionCorrections   ProductionCorrection[]
+  batchStockMovements     BatchStockMovement[]
 
   @@map("users")
 }
@@ -52,11 +57,13 @@ model User {
 // Stok bahan baku, penerimaan, dan saldo awal (README 5.2 dan 5.4)
 // ---------------------------------------------------------------------------
 
-/// Jenis pergerakan stok bahan baku. Nilai tambahan (pemakaian produksi,
-/// penyesuaian, penjualan) ditambahkan pada tugas roadmap berikutnya.
+/// Jenis pergerakan stok bahan baku. Nilai tambahan (penyesuaian,
+/// penjualan/pembatalan) ditambahkan pada tugas roadmap berikutnya.
 enum StockMovementType {
   RECEIPT
   OPENING_BALANCE
+  /// Pemakaian aktual bahan pada produksi (README 5.2); mengurangi stok.
+  PRODUCTION_USAGE
 }
 
 /// Saldo stok bahan baku per jenis bahan (README 5.2: stok dihitung sebagai
@@ -95,6 +102,9 @@ model MaterialStockMovement {
   receiptId  String?             @unique
   openingBalance   MaterialOpeningBalance? @relation(fields: [openingBalanceId], references: [id])
   openingBalanceId String?                @unique
+  /// Pemakaian produksi (B5): pergerakan dikaitkan dengan catatan sumbernya.
+  productionUsage  ProductionMaterialUsage? @relation(fields: [productionUsageId], references: [id])
+  productionUsageId String?                 @unique
 
   @@index([materialId])
   @@map("material_stock_movements")
@@ -152,6 +162,143 @@ model IdempotencyKey {
   @@map("idempotency_keys")
 }
 
+// ---------------------------------------------------------------------------
+// Produksi dan kode batch (README 5.3 dan 5.4)
+// ---------------------------------------------------------------------------
+
+/// Satu catatan produksi berarti produksi telah SELESAI (README 5.3).
+/// Setelah tersimpan atomik: stok bahan berkurang sesuai pemakaian aktual
+/// dan stok produk jadi batch bertambah sesuai jumlah hasil.
+model Production {
+  id        String   @id @default(cuid())
+  product   Product  @relation(fields: [productId], references: [id])
+  productId String
+  /// Tanggal produksi SEBENARNYA (bukan tanggal pencatatan); tidak boleh
+  /// masa depan; pencatatan mundur diperbolehkan (README 5.3).
+  productionDate DateTime
+  /// Jumlah hasil produksi (satuan dasar produk).
+  yieldQuantity   Decimal  @db.Decimal(14, 3)
+  note            String?
+  recordedBy      User     @relation(fields: [recordedById], references: [id])
+  recordedById    String
+  /// Waktu pencatatan disimpan terpisah dari tanggal produksi (README 5.3).
+  recordedAt      DateTime @default(now())
+  batch           Batch?   @relation(fields: [batchId], references: [id])
+  batchId         String?  @unique
+  usages          ProductionMaterialUsage[]
+  corrections     ProductionCorrection[]
+  movements       BatchStockMovement[]
+
+  @@index([productId])
+  @@map("productions")
+}
+
+/// Pemakaian AKTUAL bahan baku pada suatu produksi (README 5.2: dicatat
+/// manual berdasarkan jumlah aktual, tidak dihitung otomatis dari resep
+/// dan tidak dialokasikan ke penerimaan tertentu).
+model ProductionMaterialUsage {
+  id           String      @id @default(cuid())
+  production   Production  @relation(fields: [productionId], references: [id])
+  productionId String
+  material     Material    @relation(fields: [materialId], references: [id])
+  materialId   String
+  quantity     Decimal     @db.Decimal(14, 3)
+  createdAt    DateTime    @default(now())
+  movement     MaterialStockMovement?
+
+  @@unique([productionId, materialId])
+  @@index([materialId])
+  @@map("productions_material_usage")
+}
+
+/// Batch produk jadi. Kode batch unik dijamin constraint UNIQUE database
+/// (README 6), termasuk untuk penyimpanan bersamaan dan pencatatan mundur.
+model Batch {
+  id    String  @id @default(cuid())
+  /// Kode aktif saat ini: NL-YYYYMMDD-NNN (README 5.3).
+  code  String  @unique
+  product Product @relation(fields: [productId], references: [id])
+  productId String
+  /// Tanggal produksi sesuai kode batch.
+  productionDate DateTime
+  /// Stok batch; dimulai dari jumlah hasil produksi (B5), berkurang saat
+  /// penjualan (B7). Selalu >= 0; setiap perubahan dicatat di BatchStockMovement.
+  stockQuantity  Decimal @default(0) @db.Decimal(14, 3)
+  production     Production?
+  aliases        BatchAlias[]
+  stockMovements BatchStockMovement[]
+  createdAt      DateTime @default(now())
+
+  @@index([productId])
+  @@map("batches")
+}
+
+/// Alias kode batch lama ketika tanggal produksi dikoreksi (README 5.3):
+/// QR atau label lama tetap mengarah ke batch yang sama.
+model BatchAlias {
+  id        String   @id @default(cuid())
+  batch     Batch    @relation(fields: [batchId], references: [id])
+  batchId   String
+  code      String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([batchId])
+  @@map("batch_aliases")
+}
+
+/// Jejak audit koreksi catatan produksi oleh Admin (README 5.3).
+/// Riwayat pergerakan stok tidak pernah diedit — koreksi menambah
+/// catatan pergerakan dan koreksi baru.
+model ProductionCorrection {
+  id            String     @id @default(cuid())
+  production    Production @relation(fields: [productionId], references: [id])
+  productionId  String
+  changedBy     User       @relation(fields: [changedById], references: [id])
+  changedById   String
+  changedAt     DateTime   @default(now())
+  /// 'productionDate' | 'yieldQuantity' | 'batchCode'
+  field         String
+  previousValue String
+  newValue      String
+
+  @@index([productionId])
+  @@map("production_corrections")
+}
+
+/// Jenis pergerakan stok produk jadi per batch (README 5.4).
+/// Nilai tambahan (penyesuaian stok, penjualan, pembatalan) ditambahkan
+/// pada tugas roadmap berikutnya.
+enum BatchMovementType {
+  /// Hasil produksi menambah stok batch.
+  PRODUCTION_YIELD
+  /// Koreksi jumlah hasil oleh Admin; quantity bernilai tanda.
+  YIELD_CORRECTION
+}
+
+/// Jejak setiap pergerakan stok produk jadi per batch (README 5.4).
+/// Terpisah dari ledger bahan baku (MaterialStockMovement).
+model BatchStockMovement {
+  id        String   @id @default(cuid())
+  batch     Batch    @relation(fields: [batchId], references: [id])
+  batchId   String
+  type      BatchMovementType
+  /// Nilai TANDA: positif menambah stok batch, negatif mengurangi.
+  quantity  Decimal  @db.Decimal(14, 3)
+  /// Tanggal bisnis pergerakan.
+  occurredAt DateTime
+  /// Waktu pencatatan disimpan terpisah dari tanggal bisnis.
+  recordedAt DateTime @default(now())
+  recordedBy User     @relation(fields: [recordedById], references: [id])
+  recordedById String
+  reason    String?
+  /// Pergerakan dikaitkan dengan catatan sumbernya (README 5.4).
+  production Production? @relation(fields: [productionId], references: [id])
+  productionId String?
+
+  @@index([batchId])
+  @@map("batch_stock_movements")
+}
+
 /// Master produk (README 5.1). Setiap produk memiliki SATU satuan dasar;
 /// produksi, stok, dan penjualan memakai satuan yang sama —
 /// tidak ada konversi satuan otomatis.
@@ -170,6 +317,9 @@ model Product {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  batches     Batch[]
+  productions Production[]
 
   @@map("products")
 }
@@ -192,6 +342,7 @@ model Material {
   receipts         MaterialReceipt[]
   openingBalances  MaterialOpeningBalance[]
   stockMovements   MaterialStockMovement[]
+  productionUsages ProductionMaterialUsage[]
 
   @@map("materials")
 }

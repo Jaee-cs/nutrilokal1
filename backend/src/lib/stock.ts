@@ -9,6 +9,11 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 
 export type StockDb = PrismaClient | Prisma.TransactionClient;
 
+/**
+ * Error stok tidak mencukupi; dipetakan route ke respons 409.
+ */
+export class InsufficientStockError extends Error {}
+
 /** Stok saat ini; 0 bila belum pernah ada pergerakan. */
 export async function getMaterialStock(db: StockDb, materialId: string): Promise<number> {
   const stock = await db.materialStock.findUnique({ where: { materialId } });
@@ -30,7 +35,7 @@ export async function applyMaterialStockChange(
   }
 
   if (delta.isNegative() && (await getMaterialStock(db, materialId)) < Math.abs(Number(delta))) {
-    throw new Error('Stok bahan baku tidak mencukupi.');
+    throw new InsufficientStockError('Stok bahan baku tidak mencukupi.');
   }
 
   // Perbarui baris stok yang ada; syarat quantity >= 0 mencegah stok negatif.
@@ -61,6 +66,44 @@ export async function applyMaterialStockChange(
   });
 
   if (retried.count !== 1) {
-    throw new Error('Stok bahan baku tidak mencukupi.');
+    throw new InsufficientStockError('Stok bahan baku tidak mencukupi.');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stok produk jadi per batch (README 5.3 dan 5.4)
+// ---------------------------------------------------------------------------
+
+/** Stok produk jadi pada suatu batch. */
+export async function getBatchStock(db: StockDb, batchId: string): Promise<number> {
+  const batch = await db.batch.findUnique({ where: { id: batchId } });
+  return batch ? Number(batch.stockQuantity) : 0;
+}
+
+/**
+ * Menambah (delta > 0) atau mengurangi (delta < 0) stok suatu batch.
+ * Harus dipanggil di dalam transaksi yang sama dengan penyimpanan riwayat
+ * (BatchStockMovement). Menolak perubahan yang membuat stok batch negatif.
+ */
+export async function applyBatchStockChange(
+  db: StockDb,
+  batchId: string,
+  delta: Prisma.Decimal
+): Promise<void> {
+  if (delta.isZero()) {
+    return;
+  }
+
+  const updated = await db.batch.updateMany({
+    where: {
+      id: batchId,
+      // Syarat stockQuantity + delta >= 0 — mencegah stok batch negatif.
+      stockQuantity: { gte: delta.isNegative() ? delta.abs() : new Prisma.Decimal(0) },
+    },
+    data: { stockQuantity: { increment: delta } },
+  });
+
+  if (updated.count !== 1) {
+    throw new InsufficientStockError('Stok batch tidak mencukupi.');
   }
 }

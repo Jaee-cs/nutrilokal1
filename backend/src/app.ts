@@ -5,12 +5,14 @@
  */
 import express from 'express';
 import { ensureMaterialHistoryCheckRegistered } from './lib/material-history';
+import { ensureProductHistoryCheckRegistered } from './lib/product-history';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
 import { apiRouter } from './routes';
 
-// Pemeriksa riwayat operasional bahan baku (README 5.1) —
-// dipakai endpoint hapus/ubah satuan master bahan baku.
+// Pemeriksa riwayat operasional master (README 5.1) — dipakai endpoint
+// hapus/ubah satuan master produk dan bahan baku.
 ensureMaterialHistoryCheckRegistered();
+ensureProductHistoryCheckRegistered();
 
 export function createApp(): express.Express {
   const app = express();
