@@ -13,6 +13,7 @@ import { SalesPage } from './pages/SalesPage'
 import { CatalogPage } from './pages/CatalogPage'
 import { QrTracePage } from './pages/QrTracePage'
 import { QrManagementPage } from './pages/QrManagementPage'
+import { ReportsPage } from './pages/ReportsPage'
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
               <Route path="material-stock" element={<MaterialStockPage />} />
               <Route path="production" element={<ProductionPage />} />
               <Route path="sales" element={<SalesPage />} />
+                <Route path="reports" element={<ReportsPage />} />
             </Route>
             <Route element={<AdminRoute />}>
               <Route path="users" element={<UsersPage />} />

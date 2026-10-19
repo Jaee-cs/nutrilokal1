@@ -22,7 +22,7 @@ export function Layout() {
               NutriLokal
             </NavLink>
             <nav style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', fontSize: '0.9rem' }}>
-              <NavLink to="/dashboard">Dashboard</NavLink><NavLink to="/products">Produk</NavLink><NavLink to="/materials">Master Bahan</NavLink><NavLink to="/material-stock">Bahan Baku & Stok</NavLink><NavLink to="/production">Produksi & Batch</NavLink><NavLink to="/sales">Penjualan</NavLink>
+              <NavLink to="/dashboard">Dashboard</NavLink><NavLink to="/products">Produk</NavLink><NavLink to="/materials">Master Bahan</NavLink><NavLink to="/material-stock">Bahan Baku & Stok</NavLink><NavLink to="/production">Produksi & Batch</NavLink><NavLink to="/sales">Penjualan</NavLink><NavLink to="/reports">Dashboard & Laporan</NavLink>
               {user?.role === 'ADMIN' && <NavLink to="/users">Pengguna</NavLink>}
             </nav>
           </div>
