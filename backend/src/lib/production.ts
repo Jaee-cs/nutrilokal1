@@ -35,7 +35,8 @@ export interface PublicProduction {
   batch: {
     id: string;
     code: string;
-    productionDate: Date;
+    /** KOSONG hanya untuk batch stok awal (bukan bagian dari produksi). */
+    productionDate: Date | null;
     stock: number;
     aliases: string[];
   } | null;

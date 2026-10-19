@@ -114,6 +114,32 @@ export function validateReason(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Jumlah penyesuaian stok (README 5.4): angka finit, TIDAK boleh nol,
+ * maksimal 3 angka di belakang koma. Positif menambah stok, negatif
+ * mengurangi.
+ */
+export function validateAdjustmentQuantity(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'Jumlah penyesuaian harus berupa angka.';
+  }
+  if (value === 0) {
+    return 'Jumlah penyesuaian tidak boleh nol.';
+  }
+  if (Math.abs(value) >= 1e11) {
+    return 'Jumlah penyesuaian terlalu besar.';
+  }
+  const asText = String(value);
+  if (asText.includes('e')) {
+    return 'Jumlah penyesuaian maksimal 3 angka di belakang koma.';
+  }
+  const [, decimals] = asText.split('.');
+  if (decimals && decimals.length > 3) {
+    return 'Jumlah penyesuaian maksimal 3 angka di belakang koma.';
+  }
+  return null;
+}
+
 /** Catatan opsional penerimaan. */
 export function validateNote(value: unknown): string | null {
   if (value === null || value === undefined) {

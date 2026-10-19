@@ -5,8 +5,9 @@
 // master produk dan master bahan baku. Tugas B4 menambahkan stok
 // bahan baku, penerimaan, saldo awal, dan jejak pergerakan stok.
 // Tugas B5 menambahkan produksi, kode batch, pemakaian bahan aktual,
-// dan koreksi catatan produksi. Model lainnya (penyesuaian stok,
-// penjualan, QR, dll.) ditambahkan pada tugas roadmap berikutnya
+// dan koreksi catatan produksi. Tugas B6 menambahkan stok awal produk
+// jadi per batch dan penyesuaian stok oleh Admin. Model lainnya
+// (penjualan, QR, dll.) ditambahkan pada tugas roadmap berikutnya
 // sesuai README.
 
 generator client {
@@ -49,6 +50,8 @@ model User {
   productions             Production[]
   productionCorrections   ProductionCorrection[]
   batchStockMovements     BatchStockMovement[]
+  batchOpeningBalances    BatchOpeningBalance[]
+  stockAdjustments        StockAdjustment[]
 
   @@map("users")
 }
@@ -57,13 +60,15 @@ model User {
 // Stok bahan baku, penerimaan, dan saldo awal (README 5.2 dan 5.4)
 // ---------------------------------------------------------------------------
 
-/// Jenis pergerakan stok bahan baku. Nilai tambahan (penyesuaian,
-/// penjualan/pembatalan) ditambahkan pada tugas roadmap berikutnya.
+/// Jenis pergerakan stok bahan baku. Nilai tambahan (penjualan/
+/// pembatalan) ditambahkan pada tugas roadmap berikutnya.
 enum StockMovementType {
   RECEIPT
   OPENING_BALANCE
   /// Pemakaian aktual bahan pada produksi (README 5.2); mengurangi stok.
   PRODUCTION_USAGE
+  /// Penyesuaian stok oleh Admin (README 5.4); quantity bernilai tanda.
+  ADJUSTMENT
 }
 
 /// Saldo stok bahan baku per jenis bahan (README 5.2: stok dihitung sebagai
@@ -87,8 +92,8 @@ model MaterialStockMovement {
   material   Material            @relation(fields: [materialId], references: [id])
   materialId String
   type       StockMovementType
-  /// Jumlah selalu positif; arah pergerakan ditentukan oleh jenisnya.
-  /// Pada B4 semua jenis menambah stok; pemakaian/penyesuaian menyusul.
+  /// Nilai selalu positif kecuali penyesuaian (ADJUSTMENT) yang bernilai
+  /// tanda: positif menambah stok, negatif mengurangi.
   quantity   Decimal             @db.Decimal(14, 3)
   /// Tanggal bisnis (tanggal penerimaan atau tanggal saldo awal).
   occurredAt DateTime
@@ -105,6 +110,9 @@ model MaterialStockMovement {
   /// Pemakaian produksi (B5): pergerakan dikaitkan dengan catatan sumbernya.
   productionUsage  ProductionMaterialUsage? @relation(fields: [productionUsageId], references: [id])
   productionUsageId String?                 @unique
+  /// Penyesuaian stok (B6): pergerakan dikaitkan dengan catatan sumbernya.
+  adjustment   StockAdjustment? @relation(fields: [adjustmentId], references: [id])
+  adjustmentId String?          @unique
 
   @@index([materialId])
   @@map("material_stock_movements")
@@ -215,18 +223,23 @@ model ProductionMaterialUsage {
 /// (README 6), termasuk untuk penyimpanan bersamaan dan pencatatan mundur.
 model Batch {
   id    String  @id @default(cuid())
-  /// Kode aktif saat ini: NL-YYYYMMDD-NNN (README 5.3).
+  /// Kode aktif saat ini: NL-YYYYMMDD-NNN, atau NL-OPEN-YYYYMMDD-NNN
+  /// untuk stok awal tanpa tanggal produksi yang diketahui (README 5.3).
   code  String  @unique
   product Product @relation(fields: [productId], references: [id])
   productId String
-  /// Tanggal produksi sesuai kode batch.
-  productionDate DateTime
-  /// Stok batch; dimulai dari jumlah hasil produksi (B5), berkurang saat
-  /// penjualan (B7). Selalu >= 0; setiap perubahan dicatat di BatchStockMovement.
+  /// Tanggal produksi sesuai kode batch. KOSONG untuk batch stok awal
+  /// yang tidak diketahui tanggal produksinya (README 5.3).
+  productionDate DateTime?
+  /// Stok batch; dimulai dari jumlah hasil produksi (B5) atau stok awal
+  /// (B6), berkurang saat penjualan (B7). Selalu >= 0; setiap perubahan
+  /// dicatat di BatchStockMovement.
   stockQuantity  Decimal @default(0) @db.Decimal(14, 3)
   production     Production?
+  openingBalance BatchOpeningBalance?
   aliases        BatchAlias[]
   stockMovements BatchStockMovement[]
+  stockAdjustments StockAdjustment[]
   createdAt      DateTime @default(now())
 
   @@index([productId])
@@ -266,13 +279,17 @@ model ProductionCorrection {
 }
 
 /// Jenis pergerakan stok produk jadi per batch (README 5.4).
-/// Nilai tambahan (penyesuaian stok, penjualan, pembatalan) ditambahkan
-/// pada tugas roadmap berikutnya.
+/// Nilai tambahan (penjualan, pembatalan) ditambahkan pada tugas
+/// roadmap berikutnya.
 enum BatchMovementType {
   /// Hasil produksi menambah stok batch.
   PRODUCTION_YIELD
   /// Koreksi jumlah hasil oleh Admin; quantity bernilai tanda.
   YIELD_CORRECTION
+  /// Stok awal produk jadi per batch (README 5.3); menambah stok.
+  OPENING_BALANCE
+  /// Penyesuaian stok oleh Admin (README 5.4); quantity bernilai tanda.
+  ADJUSTMENT
 }
 
 /// Jejak setiap pergerakan stok produk jadi per batch (README 5.4).
@@ -294,9 +311,69 @@ model BatchStockMovement {
   /// Pergerakan dikaitkan dengan catatan sumbernya (README 5.4).
   production Production? @relation(fields: [productionId], references: [id])
   productionId String?
+  /// Stok awal batch (B6): pergerakan dikaitkan dengan catatan sumbernya.
+  openingBalance  BatchOpeningBalance? @relation(fields: [openingBalanceId], references: [id])
+  openingBalanceId String?              @unique
+  /// Penyesuaian stok (B6): pergerakan dikaitkan dengan catatan sumbernya.
+  adjustment   StockAdjustment? @relation(fields: [adjustmentId], references: [id])
+  adjustmentId String?          @unique
 
   @@index([batchId])
   @@map("batch_stock_movements")
+}
+
+// ---------------------------------------------------------------------------
+// Stok awal produk jadi dan penyesuaian stok (README 5.3 dan 5.4)
+// ---------------------------------------------------------------------------
+
+/// Stok awal produk jadi per batch (README 5.3): dicatat Admin; hanya
+/// informasi yang benar-benar diketahui boleh dicatat. Riwayat catatan
+/// tidak pernah diedit atau dihapus.
+model BatchOpeningBalance {
+  id        String   @id @default(cuid())
+  batch     Batch    @relation(fields: [batchId], references: [id])
+  batchId   String   @unique
+  quantity  Decimal  @db.Decimal(14, 3)
+  /// Catatan opsional (komposisi, tanggal kedaluwarsa, dsb. dicatat di
+  /// modulnya masing-masing — jangan dikarang di sini).
+  note      String?
+  recordedBy User    @relation(fields: [recordedById], references: [id])
+  recordedById String
+  createdAt DateTime @default(now())
+  movement  BatchStockMovement?
+
+  @@map("batch_opening_balances")
+}
+
+/// Sasaran penyesuaian stok (README 5.4): bahan baku atau suatu batch.
+enum StockAdjustmentTargetType {
+  MATERIAL
+  BATCH
+}
+
+/// Penyesuaian stok oleh Admin melalui fungsi khusus (README 5.4).
+/// Nilai positif menambah stok, negatif mengurangi. Alasan, waktu, dan
+/// pengguna wajib tercatat. Catatan tidak pernah diedit atau dihapus.
+model StockAdjustment {
+  id         String   @id @default(cuid())
+  targetType StockAdjustmentTargetType
+  material   Material? @relation(fields: [materialId], references: [id])
+  materialId String?
+  batch      Batch?    @relation(fields: [batchId], references: [id])
+  batchId    String?
+  /// Nilai TANDA: positif menambah stok, negatif mengurangi.
+  quantity   Decimal  @db.Decimal(14, 3)
+  reason     String
+  adjustedBy User     @relation(fields: [adjustedById], references: [id])
+  adjustedById String
+  adjustedAt DateTime @default(now())
+  /// Pergerakan stok terkait (dikaitkan dua arah dengan catatan sumber).
+  materialMovement MaterialStockMovement?
+  batchMovement    BatchStockMovement?
+
+  @@index([materialId])
+  @@index([batchId])
+  @@map("stock_adjustments")
 }
 
 /// Master produk (README 5.1). Setiap produk memiliki SATU satuan dasar;
@@ -343,6 +420,7 @@ model Material {
   openingBalances  MaterialOpeningBalance[]
   stockMovements   MaterialStockMovement[]
   productionUsages ProductionMaterialUsage[]
+  stockAdjustments StockAdjustment[]
 
   @@map("materials")
 }

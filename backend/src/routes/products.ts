@@ -30,7 +30,28 @@ export const productsRouter = Router();
 
 productsRouter.get('/', authenticate, async (_req, res) => {
   const products = await prisma.product.findMany({ orderBy: { name: 'asc' } });
-  res.json({ data: products.map(toPublicProduct) });
+
+  // Total stok per produk = jumlah stok seluruh batch (README 5.4),
+  // diturunkan dari data batch — bukan angka tersimpan terpisah.
+  const totals = await prisma.batch.groupBy({
+    by: ['productId'],
+    _sum: { stockQuantity: true },
+    _count: { _all: true },
+  });
+  const totalsByProduct = new Map(
+    totals.map((t) => [
+      t.productId,
+      { stock: Number(t._sum.stockQuantity ?? 0), batchCount: t._count._all },
+    ])
+  );
+
+  res.json({
+    data: products.map((product) =>
+      // Produk tanpa batch tetap memperlihatkan total 0 dan batchCount 0
+      // agar bentuk respons konsisten.
+      toPublicProduct(product, totalsByProduct.get(product.id) ?? { stock: 0, batchCount: 0 })
+    ),
+  });
 });
 
 productsRouter.get('/:id', authenticate, async (req, res) => {
@@ -41,7 +62,18 @@ productsRouter.get('/:id', authenticate, async (req, res) => {
     return;
   }
 
-  res.json({ product: toPublicProduct(product) });
+  const totals = await prisma.batch.aggregate({
+    where: { productId: product.id },
+    _sum: { stockQuantity: true },
+    _count: { _all: true },
+  });
+
+  res.json({
+    product: toPublicProduct(product, {
+      stock: Number(totals._sum.stockQuantity ?? 0),
+      batchCount: totals._count._all,
+    }),
+  });
 });
 
 // ---------- Mengubah (hanya Admin) ----------
