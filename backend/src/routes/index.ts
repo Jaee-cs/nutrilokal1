@@ -4,11 +4,13 @@
 import { Router } from 'express';
 import { authRouter } from './auth';
 import { batchesRouter } from './batches';
+import { dashboardRouter } from './dashboard';
 import { healthRouter } from './health';
 import { materialsRouter } from './materials';
 import { productsRouter } from './products';
 import { productionsRouter } from './productions';
 import { publicRouter } from './public';
+import { reportsRouter } from './reports';
 import { salesRouter } from './sales';
 import { stockAdjustmentsRouter } from './stock-adjustments';
 import { usersRouter } from './users';
@@ -26,3 +28,6 @@ apiRouter.use('/stock-adjustments', stockAdjustmentsRouter);
 apiRouter.use('/sales', salesRouter);
 // Endpoint publik tanpa login (katalog & QR traceability, README 5.6).
 apiRouter.use('/public', publicRouter);
+// Dashboard usaha dan laporan operasional (README 6: data aktual, bukan demo).
+apiRouter.use('/dashboard', dashboardRouter);
+apiRouter.use('/reports', reportsRouter);
