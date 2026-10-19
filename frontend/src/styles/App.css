@@ -681,6 +681,120 @@ table tbody tr:hover { background: var(--surface-low); }
   word-break: break-all;
 }
 
+/* Pratinjau QR & label cetak -------------------------------------------------- */
+.qr-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+  background: var(--surface-low);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-md);
+}
+
+.qr-preview-image img,
+.qr-placeholder {
+  display: block;
+  width: 180px;
+  height: 180px;
+  padding: 0.5rem;
+  background: #ffffff;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-sm);
+}
+
+.qr-preview-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 220px;
+}
+
+.label-modal-panel { max-width: 26rem; }
+
+.label-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: #ffffff;
+  color: #12211a;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-md);
+}
+
+.label-brand {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #2f6b4f;
+}
+
+.label-body {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.label-qr {
+  width: 140px;
+  height: 140px;
+  flex-shrink: 0;
+}
+
+.label-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.label-product {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.label-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.label-expiry { font-size: 13px; }
+
+.label-foot {
+  padding-top: 0.5rem;
+  border-top: 1px dashed #c8d3cc;
+  font-size: 11.5px;
+  color: #4a5b52;
+}
+
+/* Cetak: hanya lembar label yang terlihat. */
+@media print {
+  body * { visibility: hidden !important; }
+
+  .label-sheet,
+  .label-sheet * { visibility: visible !important; }
+
+  .label-sheet {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    border: none;
+    box-shadow: none;
+  }
+
+  .modal-overlay,
+  .modal-title,
+  .modal-actions { display: none !important; }
+}
+
 .row-actions {
   display: flex;
   gap: 0.5rem;
