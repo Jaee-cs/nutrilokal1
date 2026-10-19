@@ -265,6 +265,9 @@ table tbody tr:hover { background: var(--surface-low); }
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  /* Pada layar sempit (mis. 390px) judul + kontrol filter wrap ke baris
+     berikutnya alih-alih mendorong field melewati viewport (bug F14). */
+  flex-wrap: wrap;
   gap: 1rem;
   margin-bottom: 1rem;
 }

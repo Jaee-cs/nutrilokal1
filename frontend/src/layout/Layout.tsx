@@ -71,7 +71,12 @@ export function Layout() {
           <div className="profile-card">
             <div className="profile-info">
               <div className="profile-name">{user?.name || user?.username || 'Pengguna'}</div>
-              <div className="profile-role">{user?.role === 'ADMIN' ? 'Administrator' : 'Operator'}</div>
+              <div className="profile-role">
+                {/* Role hanya diklaim bila terkonfirmasi backend; sesi tanpa
+                    identitas terverifikasi (mis. mustChangePassword) jangan
+                    menampilkan peran yang belum pasti. */}
+                {user ? (user.role === 'ADMIN' ? 'Administrator' : 'Operator') : 'Sesi terbatas'}
+              </div>
             </div>
             <button className="logout-btn" onClick={handleLogout} title="Keluar">
               <span className="material-symbols-outlined">logout</span>
