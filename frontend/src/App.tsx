@@ -8,6 +8,7 @@ import { ProductsPage } from './pages/ProductsPage'
 import { MaterialsPage } from './pages/MaterialsPage'
 import { MaterialStockPage } from './pages/MaterialStockPage'
 import { ProductionPage } from './pages/ProductionPage'
+import { SalesPage } from './pages/SalesPage'
 import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute'
 import './styles/App.css'
 
@@ -25,6 +26,7 @@ function App() {
               <Route path="materials" element={<MaterialsPage />} />
               <Route path="material-stock" element={<MaterialStockPage />} />
               <Route path="production" element={<ProductionPage />} />
+              <Route path="sales" element={<SalesPage />} />
             </Route>
             <Route element={<AdminRoute />}>
               <Route path="users" element={<UsersPage />} />
