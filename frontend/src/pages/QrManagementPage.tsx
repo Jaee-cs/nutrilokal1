@@ -8,7 +8,34 @@ interface Batch {
   productionDate: string
   stockQuantity: number
   isActive: boolean
-  qrPublication?: { publishedAt?: string | null; withdrawnAt?: string | null; validatedAt?: string | null } | null
+}
+
+interface QrDetail {
+  batchId: string
+  code: string
+  publicPath: string
+  status: 'NOT_CONFIGURED' | 'DRAFT' | 'VALIDATED' | 'PUBLISHED' | 'WITHDRAWN'
+  validatedAt: string | null
+  validatedBy: { username: string; name?: string | null } | null
+  publishedAt: string | null
+  publishedBy: { username: string; name?: string | null } | null
+  withdrawnAt: string | null
+  withdrawnBy: { username: string; name?: string | null } | null
+}
+
+const STATUS_LABEL: Record<QrDetail['status'], { label: string; cls: string }> = {
+  NOT_CONFIGURED: { label: 'Belum Dikonfigurasi', cls: 'neutral' },
+  DRAFT: { label: 'Draf', cls: 'neutral' },
+  VALIDATED: { label: 'Tervalidasi', cls: 'warning' },
+  PUBLISHED: { label: 'Diterbitkan', cls: 'success' },
+  WITHDRAWN: { label: 'Ditarik', cls: 'error' },
+}
+
+function formatDate(iso: string | null) {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 export function QrManagementPage() {
@@ -16,8 +43,7 @@ export function QrManagementPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [selected, setSelected] = useState<Batch | null>(null)
-  const [detail, setDetail] = useState<any>(null)
+  const [detail, setDetail] = useState<QrDetail | null>(null)
   const [acting, setActing] = useState(false)
 
   async function fetchBatches() {
@@ -39,8 +65,7 @@ export function QrManagementPage() {
       setError(null)
       setSuccess(null)
       const res = await api.get(`/batches/${id}/qr`)
-      setDetail(res.data)
-      setSelected(batches.find(b => b.id === id) || null)
+      setDetail(res.data.qr)
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal memuat detail QR')
     }
@@ -52,58 +77,140 @@ export function QrManagementPage() {
     setSuccess(null)
     try {
       await api.post(`/batches/${id}/qr/${action}`, {})
-      setSuccess(`Aksi ${action} berhasil`)
+      const label = action === 'validate' ? 'Validasi' : action === 'publish' ? 'Publikasi' : 'Penarikan'
+      setSuccess(`${label} QR berhasil`)
       await fetchDetail(id)
       await fetchBatches()
     } catch (err: any) {
-      setError(err.response?.data?.message || `Gagal ${action}`)
+      const label = action === 'validate' ? 'memvalidasi' : action === 'publish' ? 'menerbitkan' : 'menarik'
+      setError(err.response?.data?.message || `Gagal ${label} QR`)
     } finally {
       setActing(false)
     }
   }
 
+  const statusInfo = detail ? STATUS_LABEL[detail.status] : null
+
   return (
     <div className="container">
-      <h1 className="page-title">QR Traceability — Validasi & Publikasi (Admin)</h1>
-      <p className="page-subtitle">Kelola status QR per batch sesuai aturan backend.</p>
+      <div className="page-head">
+        <h1 className="page-title">QR Traceability</h1>
+        <p className="page-subtitle">
+          Validasi dan publikasi informasi QR per batch — siklus: validasi → terbitkan → (tarik).
+        </p>
+      </div>
 
       {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert" style={{ borderColor: '#bbf7d0', background: '#f0fdf4', color: '#166534' }}>{success}</div>}
+      {success && <div className="alert success">{success}</div>}
 
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <h2 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Daftar Batch</h2>
+      <section className="card section-card">
+        <div className="section-head">
+          <h2 className="card-title">Daftar Batch</h2>
+          <span className="text-muted">{batches.length} batch</span>
+        </div>
         <div className="table-wrapper">
           <table>
             <thead>
-              <tr><th>Kode Batch</th><th>Produk</th><th>Tgl Produksi</th><th>Stok</th><th>Aksi</th></tr>
+              <tr>
+                <th>Kode Batch</th>
+                <th>Produk</th>
+                <th>Tgl Produksi</th>
+                <th>Stok</th>
+                <th>Aksi</th>
+              </tr>
             </thead>
             <tbody>
-              {loading ? <tr><td colSpan={5}>Memuat...</td></tr> : batches.length === 0 ? (
-                <tr><td colSpan={5} style={{ color: 'var(--color-muted)' }}>Belum ada batch</td></tr>
-              ) : batches.slice(0, 30).map(b => (
-                <tr key={b.id}>
-                  <td>{b.code}</td>
-                  <td>{b.product.name}</td>
-                  <td>{b.productionDate}</td>
-                  <td>{Number(b.stockQuantity).toLocaleString('id-ID')}</td>
-                  <td><button className="button secondary" onClick={() => fetchDetail(b.id)}>Detail QR</button></td>
-                </tr>
-              ))}
+              {loading ? (
+                <tr><td colSpan={5}>Memuat...</td></tr>
+              ) : batches.length === 0 ? (
+                <tr><td colSpan={5} className="text-muted">Belum ada batch</td></tr>
+              ) : (
+                batches.slice(0, 30).map(b => (
+                  <tr key={b.id} className={detail?.batchId === b.id ? 'row-active' : ''}>
+                    <td><span className="badge neutral">{b.code}</span></td>
+                    <td className="cell-primary">{b.product.name}</td>
+                    <td>{b.productionDate}</td>
+                    <td className="num">{Number(b.stockQuantity).toLocaleString('id-ID')}</td>
+                    <td>
+                      <button className="button secondary" onClick={() => fetchDetail(b.id)}>
+                        Detail QR
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
 
-      {detail && (
-        <div className="card">
-          <h2 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Detail QR — {selected?.code}</h2>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-            <button className="button secondary" disabled={acting} onClick={() => act(selected!.id, 'validate')}>Validasi</button>
-            <button className="button" disabled={acting} onClick={() => act(selected!.id, 'publish')}>Publikasi</button>
-            <button className="button secondary" disabled={acting} onClick={() => act(selected!.id, 'withdraw')}>Tarik Publikasi</button>
+      {detail && statusInfo && (
+        <section className="card section-card">
+          <div className="section-head">
+            <h2 className="card-title">Detail QR — {detail.code}</h2>
+            <span className={`badge ${statusInfo.cls}`}>{statusInfo.label}</span>
           </div>
-          <pre style={{ overflowX: 'auto', fontSize: '0.875rem' }}>{JSON.stringify(detail, null, 2)}</pre>
-        </div>
+
+          <div className="qr-actions">
+            <button
+              className="button secondary"
+              disabled={acting}
+              onClick={() => act(detail.batchId, 'validate')}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>verified</span>
+              {detail.status === 'DRAFT' || detail.status === 'NOT_CONFIGURED' ? 'Validasi' : 'Validasi Ulang'}
+            </button>
+            <button
+              className="button"
+              disabled={acting || detail.status === 'PUBLISHED'}
+              onClick={() => act(detail.batchId, 'publish')}
+              title={detail.status !== 'VALIDATED' && detail.status !== 'PUBLISHED' ? 'Wajib divalidasi terlebih dahulu' : undefined}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>publish</span>
+              Terbitkan
+            </button>
+            <button
+              className="button secondary"
+              disabled={acting || detail.status !== 'PUBLISHED'}
+              onClick={() => act(detail.batchId, 'withdraw')}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>undo</span>
+              Tarik Publikasi
+            </button>
+          </div>
+
+          <div className="qr-meta">
+            <div className="qr-meta-item">
+              <span className="card-label">Status</span>
+              <span className="qr-meta-value">{statusInfo.label}</span>
+            </div>
+            <div className="qr-meta-item">
+              <span className="card-label">Path Publik</span>
+              <span className="qr-meta-value mono">{detail.publicPath}</span>
+            </div>
+            <div className="qr-meta-item">
+              <span className="card-label">Divalidasi</span>
+              <span className="qr-meta-value">
+                {formatDate(detail.validatedAt)}
+                {detail.validatedBy && <span className="cell-secondary">oleh {detail.validatedBy.username}</span>}
+              </span>
+            </div>
+            <div className="qr-meta-item">
+              <span className="card-label">Diterbitkan</span>
+              <span className="qr-meta-value">
+                {formatDate(detail.publishedAt)}
+                {detail.publishedBy && <span className="cell-secondary">oleh {detail.publishedBy.username}</span>}
+              </span>
+            </div>
+            <div className="qr-meta-item">
+              <span className="card-label">Ditarik</span>
+              <span className="qr-meta-value">
+                {formatDate(detail.withdrawnAt)}
+                {detail.withdrawnBy && <span className="cell-secondary">oleh {detail.withdrawnBy.username}</span>}
+              </span>
+            </div>
+          </div>
+        </section>
       )}
     </div>
   )

@@ -2,4 +2,93 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
-export function LoginPage(){ const [u,setU]=useState(''); const [p,setP]=useState(''); const [e,setE]=useState<string|null>(null); const [l,setL]=useState(false); const {login}=useAuth(); const nav=useNavigate(); async function submit(ev:React.FormEvent){ ev.preventDefault(); setL(true); setE(null); try{ const r=await api.post('/auth/login',{username:u,password:p}); login(r.data.token,r.data.user); nav('/dashboard') }catch(err:any){ setE(err.response?.data?.message||'Gagal login') }finally{ setL(false) } } return <div className="container" style={{maxWidth:'420px',marginTop:'4rem'}}><div className="card"><h1 className="page-title" style={{fontSize:'1.5rem'}}>Masuk</h1>{e&&<div className="alert error">{e}</div>}<form onSubmit={submit} style={{display:'flex',flexDirection:'column',gap:'1rem'}}><div className="field"><label>Username</label><input value={u} onChange={e=>setU(e.target.value)}/></div><div className="field"><label>Kata sandi</label><input type="password" value={p} onChange={e=>setP(e.target.value)}/></div><button className="button" disabled={l}>{l?'Memproses...':'Masuk'}</button></form></div></div> }
+import './LoginPage.css'
+
+export function LoginPage() {
+  const [u, setU] = useState('')
+  const [p, setP] = useState('')
+  const [e, setE] = useState<string | null>(null)
+  const [l, setL] = useState(false)
+  const { login } = useAuth()
+  const nav = useNavigate()
+
+  async function submit(ev: React.FormEvent) {
+    ev.preventDefault()
+    setL(true)
+    setE(null)
+    try {
+      const r = await api.post('/auth/login', { username: u, password: p })
+      login(r.data.token, r.data.user)
+      nav('/dashboard')
+    } catch (err: any) {
+      setE(err.response?.data?.message || 'Gagal login')
+    } finally {
+      setL(false)
+    }
+  }
+
+  return (
+    <div className="login-shell">
+      {/* Panel branding kiri */}
+      <aside className="login-hero">
+        <div className="login-hero-inner">
+          <div className="login-brand">
+            <span className="material-symbols-outlined login-brand-icon">eco</span>
+            <span className="login-brand-name">NutriLokal</span>
+          </div>
+          <h1 className="login-hero-title">
+            Ketahanan pangan lokal,
+            <br />
+            terlacak hingga batch.
+          </h1>
+          <p className="login-hero-text">
+            Sistem produksi &amp; traceability KWT Gogor, Kalurahan Salam — Patuk, Gunungkidul.
+          </p>
+          <div className="login-hero-tags">
+            <span className="badge success">Sertifikasi Halal</span>
+            <span className="badge neutral">TKI 5342</span>
+            <span className="badge neutral">TKI 5342</span>
+          </div>
+        </div>
+        <div className="login-hero-footer">© 2026 NutriLokal · KWT Gogor</div>
+      </aside>
+
+      {/* Form kanan */}
+      <main className="login-main">
+        <div className="login-card">
+          <h2 className="login-title">Masuk</h2>
+          <p className="login-subtitle">Gunakan akun Admin atau Operator untuk melanjutkan.</p>
+
+          {e && <div className="alert error">{e}</div>}
+
+          <form onSubmit={submit} className="login-form">
+            <div className="field">
+              <label htmlFor="login-username">Username</label>
+              <input
+                id="login-username"
+                value={u}
+                onChange={ev => setU(ev.target.value)}
+                placeholder="Masukkan username"
+                autoComplete="username"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="login-password">Kata sandi</label>
+              <input
+                id="login-password"
+                type="password"
+                value={p}
+                onChange={ev => setP(ev.target.value)}
+                placeholder="Masukkan kata sandi"
+                autoComplete="current-password"
+              />
+            </div>
+            <button className="button login-submit" disabled={l}>
+              {l ? 'Memproses...' : 'Masuk'}
+            </button>
+          </form>
+        </div>
+      </main>
+    </div>
+  )
+}

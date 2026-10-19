@@ -1,0 +1,124 @@
+/* ==========================================================================
+   Login — split layout sesuai design system referensi
+   ========================================================================== */
+
+.login-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--canvas);
+}
+
+/* Panel branding ---------------------------------------------------------- */
+.login-hero {
+  display: none;
+  flex: 1;
+  background:
+    radial-gradient(1200px 600px at 10% 10%, rgba(163, 211, 175, 0.25), transparent 60%),
+    linear-gradient(160deg, var(--primary-container) 0%, var(--primary) 100%);
+  color: var(--on-primary);
+  padding: 3rem;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+@media (min-width: 900px) {
+  .login-hero { display: flex; }
+}
+
+.login-hero-inner { max-width: 32rem; margin-top: 4rem; }
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 2.5rem;
+}
+
+.login-brand-icon { font-size: 32px; color: var(--on-primary-container); }
+.login-brand-name {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.login-hero-title {
+  font-family: var(--font-display);
+  font-size: 36px;
+  line-height: 44px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--on-primary);
+}
+
+.login-hero-text {
+  margin-top: 1rem;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--on-primary-container);
+  max-width: 28rem;
+}
+
+.login-hero-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 2rem;
+}
+
+.login-hero-tags .badge.neutral {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--on-primary);
+}
+
+.login-hero-footer {
+  font-size: 12px;
+  color: var(--on-primary-container);
+  opacity: 0.8;
+}
+
+/* Form area --------------------------------------------------------------- */
+.login-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 26rem;
+  background: var(--surface-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  box-shadow: var(--shadow-2);
+}
+
+.login-title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.login-subtitle {
+  margin-top: 0.25rem;
+  margin-bottom: 1.5rem;
+  font-size: 14px;
+  color: var(--on-surface-variant);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.login-submit {
+  height: 3rem;
+  margin-top: 0.5rem;
+  font-size: 14px;
+}

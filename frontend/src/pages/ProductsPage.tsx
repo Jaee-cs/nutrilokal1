@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
+import { Drawer } from '../components/Drawer'
 
 interface Product {
   id: string
@@ -9,18 +10,29 @@ interface Product {
   description?: string | null
   composition?: string | null
   storageInstructions?: string | null
+  stock?: number
+  batchCount?: number
   isActive: boolean
-  createdAt: string
-  updatedAt?: string | null
+}
+
+const EMPTY_FORM = {
+  name: '',
+  unit: '',
+  sellingPrice: '',
+  description: '',
+  composition: '',
+  storageInstructions: '',
 }
 
 export function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', unit: '', sellingPrice: '', description: '', composition: '', storageInstructions: '' })
-  const [creating, setCreating] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
+
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [submitting, setSubmitting] = useState(false)
 
   async function fetchProducts() {
     try {
@@ -37,9 +49,15 @@ export function ProductsPage() {
     fetchProducts()
   }, [])
 
+  function openDrawer() {
+    setForm(EMPTY_FORM)
+    setError(null)
+    setDrawerOpen(true)
+  }
+
   async function createProduct(e: React.FormEvent) {
     e.preventDefault()
-    setCreating(true)
+    setSubmitting(true)
     setError(null)
     setSuccess(null)
     try {
@@ -52,12 +70,12 @@ export function ProductsPage() {
         storageInstructions: form.storageInstructions || undefined,
       })
       setSuccess('Produk berhasil ditambahkan')
-      setForm({ name: '', unit: '', sellingPrice: '', description: '', composition: '', storageInstructions: '' })
+      setDrawerOpen(false)
       await fetchProducts()
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal menambah produk')
     } finally {
-      setCreating(false)
+      setSubmitting(false)
     }
   }
 
@@ -70,81 +88,175 @@ export function ProductsPage() {
     }
   }
 
+  const activeCount = products.filter(p => p.isActive).length
+  const inactiveCount = products.length - activeCount
+
   return (
     <div className="container">
-      <h1 className="page-title">Master Produk</h1>
-      <p className="page-subtitle">Kelola produk sesuai data yang didukung backend.</p>
+      <div className="page-head">
+        <h1 className="page-title">Kelola Produk KWT</h1>
+        <p className="page-subtitle">
+          Data produk olahan, satuan dasar, dan harga jual mengikuti backend.
+        </p>
+      </div>
 
-      {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert" style={{ borderColor: '#bbf7d0', background: '#f0fdf4', color: '#166534' }}>{success}</div>}
+      {error && !drawerOpen && <div className="alert error">{error}</div>}
+      {success && <div className="alert success">{success}</div>}
 
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>Tambah Produk</h2>
-        <form onSubmit={createProduct}>
-          <div className="form-row" style={{ marginBottom: '1rem' }}>
+      {/* Ringkasan singkat */}
+      <div className="summary-row">
+        <div className="summary-item">
+          <span className="card-label">Total Produk</span>
+          <span className="summary-value">{products.length}</span>
+        </div>
+        <div className="summary-item">
+          <span className="card-label">Aktif Diproduksi</span>
+          <span className="summary-value">{activeCount}</span>
+        </div>
+        <div className="summary-item">
+          <span className="card-label">Diarsipkan</span>
+          <span className="summary-value">{inactiveCount}</span>
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="toolbar">
+        <h2 className="card-title">Daftar Produk</h2>
+        <button className="button" onClick={openDrawer}>
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
+          Tambah Produk
+        </button>
+      </div>
+
+      {/* Grid kartu produk */}
+      {loading ? (
+        <p className="text-muted">Memuat produk...</p>
+      ) : products.length === 0 ? (
+        <div className="card">
+          <p className="text-muted">Belum ada produk. Klik “Tambah Produk” untuk menambah.</p>
+        </div>
+      ) : (
+        <div className="product-grid">
+          {products.map(p => (
+            <div key={p.id} className="card product-card">
+              <div className="product-card-head">
+                <div className="product-info">
+                  <h3 className="product-name">{p.name}</h3>
+                  <p className="product-unit">Satuan: {p.unit}</p>
+                </div>
+                {p.isActive ? (
+                  <span className="badge success">Aktif</span>
+                ) : (
+                  <span className="badge neutral">Diarsipkan</span>
+                )}
+              </div>
+
+              <div className="product-price">
+                <span className="card-label">Harga Jual</span>
+                <span className="price-value">
+                  Rp {Number(p.sellingPrice).toLocaleString('id-ID')}
+                </span>
+              </div>
+
+              <div className="product-meta">
+                <div className="meta-item">
+                  <span className="card-label">Stok Total</span>
+                  <span className="meta-value">{Number(p.stock ?? 0).toLocaleString('id-ID')}</span>
+                </div>
+                <div className="meta-item">
+                  <span className="card-label">Batch</span>
+                  <span className="meta-value">{Number(p.batchCount ?? 0).toLocaleString('id-ID')}</span>
+                </div>
+              </div>
+
+              <div className="product-actions">
+                <button
+                  className="button secondary"
+                  onClick={() => toggleActive(p.id, p.isActive)}
+                >
+                  {p.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Drawer tambah produk */}
+      <Drawer open={drawerOpen} title="Tambah Produk" onClose={() => setDrawerOpen(false)}>
+        {error && <div className="alert error">{error}</div>}
+        <form onSubmit={createProduct} className="drawer-form">
+          <div className="field">
+            <label htmlFor="p-name">Nama Produk</label>
+            <input
+              id="p-name"
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="Contoh: Keripik Singkong Balado"
+              required
+            />
+          </div>
+          <div className="form-row">
             <div className="field">
-              <label>Nama Produk</label>
-              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
+              <label htmlFor="p-unit">Satuan Dasar</label>
+              <input
+                id="p-unit"
+                value={form.unit}
+                onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
+                placeholder="Contoh: pcs"
+                required
+              />
             </div>
             <div className="field">
-              <label>Satuan Dasar</label>
-              <input value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} required />
-            </div>
-            <div className="field">
-              <label>Harga Jual</label>
-              <input type="number" step="0.01" value={form.sellingPrice} onChange={e => setForm(f => ({ ...f, sellingPrice: e.target.value }))} required />
+              <label htmlFor="p-price">Harga Jual (Rp)</label>
+              <input
+                id="p-price"
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.sellingPrice}
+                onChange={e => setForm(f => ({ ...f, sellingPrice: e.target.value }))}
+                required
+              />
             </div>
           </div>
-          <div className="form-row" style={{ marginBottom: '1rem' }}>
-            <div className="field">
-              <label>Deskripsi (opsional)</label>
-              <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={2} />
-            </div>
-            <div className="field">
-              <label>Komposisi (opsional)</label>
-              <textarea value={form.composition} onChange={e => setForm(f => ({ ...f, composition: e.target.value }))} rows={2} />
-            </div>
-            <div className="field">
-              <label>Petunjuk Penyimpanan (opsional)</label>
-              <textarea value={form.storageInstructions} onChange={e => setForm(f => ({ ...f, storageInstructions: e.target.value }))} rows={2} />
-            </div>
+          <div className="field">
+            <label htmlFor="p-desc">Deskripsi (opsional)</label>
+            <textarea
+              id="p-desc"
+              rows={2}
+              value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            />
           </div>
-          <button className="button" disabled={creating}>{creating ? 'Menyimpan...' : 'Tambah Produk'}</button>
+          <div className="field">
+            <label htmlFor="p-comp">Komposisi (opsional)</label>
+            <textarea
+              id="p-comp"
+              rows={2}
+              value={form.composition}
+              onChange={e => setForm(f => ({ ...f, composition: e.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="p-storage">Petunjuk Penyimpanan (opsional)</label>
+            <textarea
+              id="p-storage"
+              rows={2}
+              value={form.storageInstructions}
+              onChange={e => setForm(f => ({ ...f, storageInstructions: e.target.value }))}
+            />
+          </div>
+          <div className="drawer-actions">
+            <button type="button" className="button secondary" onClick={() => setDrawerOpen(false)}>
+              Batal
+            </button>
+            <button className="button" disabled={submitting}>
+              {submitting ? 'Menyimpan...' : 'Simpan Produk'}
+            </button>
+          </div>
         </form>
-      </div>
-
-      <div className="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Nama</th>
-              <th>Satuan</th>
-              <th>Harga Jual</th>
-              <th>Status</th>
-              <th>Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={5}>Memuat...</td></tr>
-            ) : products.length === 0 ? (
-              <tr><td colSpan={5} style={{ color: 'var(--color-muted)' }}>Belum ada produk</td></tr>
-            ) : (
-              products.map(p => (
-                <tr key={p.id}>
-                  <td>{p.name}</td>
-                  <td>{p.unit}</td>
-                  <td>{Number(p.sellingPrice).toLocaleString('id-ID')}</td>
-                  <td>{p.isActive ? 'Aktif' : 'Nonaktif'}</td>
-                  <td style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button className="button secondary" onClick={() => toggleActive(p.id, p.isActive)}>{p.isActive ? 'Nonaktifkan' : 'Aktifkan'}</button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      </Drawer>
     </div>
   )
 }

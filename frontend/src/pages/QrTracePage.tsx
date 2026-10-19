@@ -2,20 +2,34 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import api from '../lib/api'
 
-interface QrInfo {
-  productName: string
-  batchCode: string
-  productionDate: string
-  expiryDate?: string | null
-  composition?: string | null
-  storageInstructions?: string | null
-  description?: string | null
-  published: boolean
+// Respons backend: GET /api/public/qr/:code
+// { status: 'PUBLISHED', product: {...}, batch: {...} } | { status: 'UNAVAILABLE', message }
+interface QrPublished {
+  status: 'PUBLISHED'
+  product: {
+    name: string
+    unit: string
+    description?: string
+    composition?: string
+    storageInstructions?: string
+  }
+  batch: {
+    code: string
+    productionDate?: string
+    expiryDate?: string
+  }
 }
+
+interface QrUnavailable {
+  status: 'UNAVAILABLE'
+  message: string
+}
+
+type QrResponse = QrPublished | QrUnavailable
 
 export function QrTracePage() {
   const { code } = useParams()
-  const [info, setInfo] = useState<QrInfo | null>(null)
+  const [info, setInfo] = useState<QrResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [input, setInput] = useState(code || '')
@@ -42,38 +56,93 @@ export function QrTracePage() {
     }
   }, [code])
 
+  const published = info?.status === 'PUBLISHED' ? (info as QrPublished) : null
+
   return (
     <div className="container">
-      <h1 className="page-title">Traceability QR (Publik)</h1>
-      <p className="page-subtitle">Cek informasi batch yang telah divalidasi &amp; dipublikasikan.</p>
-
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <div className="form-row">
-          <div className="field">
-            <label>Kode Batch / QR</label>
-            <input value={input} onChange={e => setInput(e.target.value)} placeholder="Masukkan kode batch" />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'end' }}>
-            <button className="button" onClick={() => fetchQr(input)}>Cek</button>
-          </div>
-        </div>
+      <div className="page-head">
+        <h1 className="page-title">Traceability QR (Publik)</h1>
+        <p className="page-subtitle">
+          Cek informasi batch yang telah divalidasi &amp; dipublikasikan Admin.
+        </p>
       </div>
 
-      {error && <div className="alert error">{error}</div>}
-      {loading && <div className="card">Memuat...</div>}
-
-      {info && (
-        <div className="card">
-          <h2 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>{info.productName} — Batch {info.batchCode}</h2>
-          <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-            <div><strong>Tanggal Produksi:</strong> {info.productionDate}</div>
-            {info.expiryDate && <div><strong>Kedaluwarsa:</strong> {info.expiryDate}</div>}
-            {info.description && <div style={{ gridColumn: '1 / -1' }}><strong>Deskripsi:</strong> {info.description}</div>}
-            {info.composition && <div style={{ gridColumn: '1 / -1' }}><strong>Komposisi:</strong> {info.composition}</div>}
-            {info.storageInstructions && <div style={{ gridColumn: '1 / -1' }}><strong>Petunjuk Penyimpanan:</strong> {info.storageInstructions}</div>}
-            <div style={{ gridColumn: '1 / -1', color: 'var(--color-muted)' }}>Status publik: {info.published ? 'Tersedia' : 'Tidak tersedia'}</div>
+      <section className="card section-card">
+        <div className="form-row">
+          <div className="field">
+            <label htmlFor="qr-code">Kode Batch / QR</label>
+            <input
+              id="qr-code"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="Contoh: NL-SKG-202410-008"
+            />
+          </div>
+          <div className="form-actions">
+            <button className="button" onClick={() => fetchQr(input)} disabled={loading}>
+              {loading ? 'Mengecek...' : 'Cek QR'}
+            </button>
           </div>
         </div>
+      </section>
+
+      {error && <div className="alert error">{error}</div>}
+
+      {info && info.status === 'UNAVAILABLE' && (
+        <div className="alert error">{info.message}</div>
+      )}
+
+      {published && (
+        <section className="card section-card">
+          <div className="section-head">
+            <div>
+              <h2 className="card-title" style={{ marginBottom: '0.25rem' }}>
+                {published.product.name}
+              </h2>
+              <span className="text-muted">Batch {published.batch.code}</span>
+            </div>
+            <span className="badge success">Tersedia Publik</span>
+          </div>
+
+          <div className="qr-meta">
+            <div className="qr-meta-item">
+              <span className="card-label">Tanggal Produksi</span>
+              <span className="qr-meta-value">{published.batch.productionDate || '-'}</span>
+            </div>
+            <div className="qr-meta-item">
+              <span className="card-label">Kedaluwarsa</span>
+              <span className="qr-meta-value">{published.batch.expiryDate || '-'}</span>
+            </div>
+            <div className="qr-meta-item">
+              <span className="card-label">Satuan</span>
+              <span className="qr-meta-value">{published.product.unit}</span>
+            </div>
+            {published.product.description && (
+              <div className="qr-meta-item" style={{ gridColumn: '1 / -1' }}>
+                <span className="card-label">Deskripsi</span>
+                <span className="qr-meta-value" style={{ fontWeight: 400 }}>
+                  {published.product.description}
+                </span>
+              </div>
+            )}
+            {published.product.composition && (
+              <div className="qr-meta-item" style={{ gridColumn: '1 / -1' }}>
+                <span className="card-label">Komposisi</span>
+                <span className="qr-meta-value" style={{ fontWeight: 400 }}>
+                  {published.product.composition}
+                </span>
+              </div>
+            )}
+            {published.product.storageInstructions && (
+              <div className="qr-meta-item" style={{ gridColumn: '1 / -1' }}>
+                <span className="card-label">Petunjuk Penyimpanan</span>
+                <span className="qr-meta-value" style={{ fontWeight: 400 }}>
+                  {published.product.storageInstructions}
+                </span>
+              </div>
+            )}
+          </div>
+        </section>
       )}
     </div>
   )

@@ -73,16 +73,24 @@ export function ReportsPage() {
 
   return (
     <div className="container">
-      <h1 className="page-title">Laporan Operasional</h1>
-      <p className="page-subtitle">
-        Angka diturunkan dari catatan historis di database. Transaksi batal tidak dihitung sebagai omzet.
-      </p>
+      <div className="page-head">
+        <h1 className="page-title">Laporan Operasional</h1>
+        <p className="page-subtitle">
+          Angka diturunkan dari catatan historis di database. Transaksi batal tidak dihitung sebagai omzet.
+        </p>
+      </div>
 
       {error && <div className="alert error">{error}</div>}
 
-      <div className="card" style={{ marginBottom: '1rem' }}>
-        <h3 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Filter tanggal (opsional)</h3>
-        <div className="form-row" style={{ alignItems: 'end' }}>
+      {/* Filter tanggal */}
+      <section className="card section-card">
+        <div className="section-head">
+          <h2 className="card-title">Filter tanggal (opsional)</h2>
+          <button type="button" className="button" onClick={fetchReports} disabled={loading}>
+            {loading ? 'Memuat...' : 'Terapkan'}
+          </button>
+        </div>
+        <div className="form-row">
           <div className="field">
             <label htmlFor="report-from">Dari</label>
             <input id="report-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -91,124 +99,206 @@ export function ReportsPage() {
             <label htmlFor="report-to">Sampai</label>
             <input id="report-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
-          <button type="button" className="button" onClick={fetchReports} disabled={loading}>
-            {loading ? 'Memuat...' : 'Terapkan'}
-          </button>
         </div>
-      </div>
+      </section>
 
-      {loading && <div className="card">Memuat laporan...</div>}
+      {loading && <p className="text-muted">Memuat laporan...</p>}
 
+      {/* Ringkasan penjualan */}
       {!loading && sales && (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h3 style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Ringkasan Penjualan{(sales.from || sales.to) ? ' (periode dipilih)' : ''}</h3>
-          <div className="form-row" style={{ marginBottom: '0.5rem' }}>
-            <div><strong>Transaksi aktif:</strong> {sales.summary.transactionCount}</div>
-            <div><strong>Dibatalkan:</strong> {sales.summary.cancelledCount}</div>
-            <div><strong>Omzet:</strong> Rp {nf(sales.summary.omzet)}</div>
+        <section className="card section-card">
+          <div className="section-head">
+            <h2 className="card-title">
+              Ringkasan Penjualan{(sales.from || sales.to) ? ' (periode dipilih)' : ''}
+            </h2>
           </div>
+          <div className="summary-row" style={{ marginBottom: '1rem' }}>
+            <div className="summary-item">
+              <span className="card-label">Transaksi Aktif</span>
+              <span className="summary-value">{sales.summary.transactionCount}</span>
+            </div>
+            <div className="summary-item">
+              <span className="card-label">Dibatalkan</span>
+              <span className="summary-value">{sales.summary.cancelledCount}</span>
+            </div>
+            <div className="summary-item">
+              <span className="card-label">Omzet</span>
+              <span className="summary-value" style={{ color: 'var(--primary)' }}>
+                Rp {nf(sales.summary.omzet)}
+              </span>
+            </div>
+          </div>
+
           {sales.byDay.length > 0 && (
-            <div className="table-wrapper" style={{ marginTop: '0.5rem' }}>
-              <table>
-                <thead><tr><th>Tanggal</th><th>Transaksi</th><th>Omzet</th></tr></thead>
-                <tbody>
-                  {sales.byDay.map((d, i) => (
-                    <tr key={i}><td>{d.date}</td><td>{d.transactionCount}</td><td>Rp {nf(d.omzet)}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <h3 className="sub-heading">Omzet per Hari</h3>
+              <div className="table-wrapper">
+                <table>
+                  <thead><tr><th>Tanggal</th><th>Transaksi</th><th>Omzet</th></tr></thead>
+                  <tbody>
+                    {sales.byDay.map((d, i) => (
+                      <tr key={i}>
+                        <td>{d.date}</td>
+                        <td className="num">{d.transactionCount}</td>
+                        <td className="num">Rp {nf(d.omzet)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
+
           {sales.byProduct.length > 0 && (
-            <div className="table-wrapper" style={{ marginTop: '0.5rem' }}>
-              <table>
-                <thead><tr><th>Produk</th><th>Qty</th><th>Omzet</th></tr></thead>
-                <tbody>
-                  {sales.byProduct.map((p, i) => (
-                    <tr key={i}><td>{p.name}</td><td>{nf(p.quantity)} {p.unit}</td><td>Rp {nf(p.value)}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <h3 className="sub-heading">Penjualan per Produk</h3>
+              <div className="table-wrapper">
+                <table>
+                  <thead><tr><th>Produk</th><th>Qty</th><th>Omzet</th></tr></thead>
+                  <tbody>
+                    {sales.byProduct.map((p, i) => (
+                      <tr key={i}>
+                        <td className="cell-primary">{p.name}</td>
+                        <td className="num">{nf(p.quantity)} <span className="text-muted">{p.unit}</span></td>
+                        <td className="num">Rp {nf(p.value)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
+
           {sales.byDay.length === 0 && sales.byProduct.length === 0 && (
-            <p style={{ color: 'var(--color-muted)' }}>Tidak ada data penjualan pada periode ini.</p>
+            <p className="text-muted">Tidak ada data penjualan pada periode ini.</p>
           )}
-        </div>
+        </section>
       )}
 
+      {/* Ringkasan produksi */}
       {!loading && productions && (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h3 style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Ringkasan Produksi</h3>
-          <p><strong>Catatan:</strong> {productions.summary.recordCount}</p>
+        <section className="card section-card">
+          <div className="section-head">
+            <h2 className="card-title">Ringkasan Produksi</h2>
+            <span className="text-muted">{productions.summary.recordCount} catatan</span>
+          </div>
+
           {productions.summary.byProduct.length > 0 && (
-            <div className="table-wrapper" style={{ marginTop: '0.5rem' }}>
-              <table>
-                <thead><tr><th>Produk</th><th>Catatan</th><th>Total hasil</th></tr></thead>
-                <tbody>
-                  {productions.summary.byProduct.map((p, i) => (
-                    <tr key={i}><td>{p.productName}</td><td>{p.recordCount}</td><td>{nf(p.totalYield)} {p.unit}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <h3 className="sub-heading">Per Produk</h3>
+              <div className="table-wrapper">
+                <table>
+                  <thead><tr><th>Produk</th><th>Catatan</th><th>Total Hasil</th></tr></thead>
+                  <tbody>
+                    {productions.summary.byProduct.map((p, i) => (
+                      <tr key={i}>
+                        <td className="cell-primary">{p.productName}</td>
+                        <td className="num">{p.recordCount}</td>
+                        <td className="num">{nf(p.totalYield)} <span className="text-muted">{p.unit}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
+
           {productions.records.length > 0 && (
-            <div className="table-wrapper" style={{ marginTop: '0.5rem' }}>
-              <table>
-                <thead><tr><th>Tanggal</th><th>Produk</th><th>Hasil</th></tr></thead>
-                <tbody>
-                  {productions.records.slice(0, 20).map((r) => (
-                    <tr key={r.id}><td>{new Date(r.productionDate).toLocaleDateString('id-ID')}</td><td>{r.productName}</td><td>{nf(r.yieldQuantity)} {r.unit}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <h3 className="sub-heading">Catatan Terakhir</h3>
+              <div className="table-wrapper">
+                <table>
+                  <thead><tr><th>Tanggal</th><th>Produk</th><th>Hasil</th></tr></thead>
+                  <tbody>
+                    {productions.records.slice(0, 20).map((r) => (
+                      <tr key={r.id}>
+                        <td>{new Date(r.productionDate).toLocaleDateString('id-ID')}</td>
+                        <td className="cell-primary">{r.productName}</td>
+                        <td className="num">{nf(r.yieldQuantity)} <span className="text-muted">{r.unit}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
-        </div>
+        </section>
       )}
 
+      {/* Pergerakan bahan baku */}
       {!loading && materials && (
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h3 style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Pergerakan Bahan Baku</h3>
+        <section className="card section-card">
+          <div className="section-head">
+            <h2 className="card-title">Pergerakan Bahan Baku</h2>
+            {(materials.from || materials.to) && <span className="text-muted">periode dipilih</span>}
+          </div>
           <div className="table-wrapper">
             <table>
-              <thead><tr><th>Bahan</th><th>Diterima</th><th>Saldo awal</th><th>Dipakai</th><th>Disesuaikan</th><th>Stok saat ini</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Bahan</th>
+                  <th>Diterima</th>
+                  <th>Saldo Awal</th>
+                  <th>Dipakai</th>
+                  <th>Disesuaikan</th>
+                  <th>Stok Saat Ini</th>
+                </tr>
+              </thead>
               <tbody>
                 {materials.materials.map((m, i) => (
                   <tr key={i}>
-                    <td>{m.name}</td><td>{nf(m.received)}</td><td>{nf(m.openingBalance)}</td>
-                    <td>{nf(m.used)}</td><td>{nf(m.adjusted)}</td><td>{nf(m.currentStock)} {m.unit}</td>
+                    <td className="cell-primary">{m.name}</td>
+                    <td className="num">{nf(m.received)}</td>
+                    <td className="num">{nf(m.openingBalance)}</td>
+                    <td className="num">{nf(m.used)}</td>
+                    <td className="num">{nf(m.adjusted)}</td>
+                    <td className="num"><strong>{nf(m.currentStock)}</strong> <span className="text-muted">{m.unit}</span></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       )}
 
+      {/* Snapshot stok */}
       {!loading && stock && (
-        <div className="card">
-          <h3 style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Snapshot Stok Saat Ini</h3>
-          <h4 style={{ margin: '0.5rem 0' }}>Bahan baku</h4>
+        <section className="card section-card">
+          <div className="section-head">
+            <h2 className="card-title">Snapshot Stok Saat Ini</h2>
+          </div>
+
+          <h3 className="sub-heading">Bahan Baku</h3>
           <div className="table-wrapper">
             <table>
               <thead><tr><th>Bahan</th><th>Stok</th></tr></thead>
-              <tbody>{stock.materials.map((m, i) => (<tr key={i}><td>{m.name}</td><td>{nf(m.stock)} {m.unit}</td></tr>))}</tbody>
+              <tbody>
+                {stock.materials.map((m, i) => (
+                  <tr key={i}>
+                    <td className="cell-primary">{m.name}</td>
+                    <td className="num"><strong>{nf(m.stock)}</strong> <span className="text-muted">{m.unit}</span></td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
-          <h4 style={{ margin: '0.5rem 0' }}>Produk jadi</h4>
+
+          <h3 className="sub-heading">Produk Jadi</h3>
           <div className="table-wrapper">
             <table>
               <thead><tr><th>Produk</th><th>Stok</th><th>Batch</th></tr></thead>
               <tbody>
                 {stock.products.map((p, i) => (
-                  <tr key={i}><td>{p.name}</td><td>{nf(p.stock)}</td><td>{p.batches.map((b) => b.code).join(', ') || '-'}</td></tr>
+                  <tr key={i}>
+                    <td className="cell-primary">{p.name}</td>
+                    <td className="num"><strong>{nf(p.stock)}</strong></td>
+                    <td className="text-muted">{p.batches.map((b) => b.code).join(', ') || '-'}</td>
+                  </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       )}
     </div>
   )

@@ -6,5 +6,22 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Backend tidak menyediakan header CORS; di pengembangan semua request
+    // /api diproksikan ke backend supaya same-origin di browser.
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
+  preview: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
   },
 })

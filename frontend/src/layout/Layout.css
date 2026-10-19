@@ -1,0 +1,229 @@
+/* ==========================================================================
+   Layout: sidebar kiri fixed + header sticky — mengikuti design referensi
+   ========================================================================== */
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--canvas);
+}
+
+/* Sidebar ------------------------------------------------------------------ */
+.sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--sidebar-w);
+  background: var(--surface-low);
+  border-right: 1px solid var(--outline-variant);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  z-index: 50;
+  transition: transform 0.2s ease;
+}
+
+.sidebar-top {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.brand-icon { color: var(--primary); font-size: 28px; }
+
+.brand-name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--primary);
+}
+
+.sidebar-badge {
+  align-self: flex-start;
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--radius-full);
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  font-family: var(--font-display);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  font-family: var(--font-display);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--on-surface-variant);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.nav-item:hover {
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+}
+
+.nav-item.active {
+  background: var(--primary-container);
+  color: var(--on-primary);
+  box-shadow: var(--shadow-1);
+}
+
+.nav-icon { font-size: 20px; }
+
+/* Sidebar footer (profile) -------------------------------------------------- */
+.sidebar-footer {
+  padding: 1rem;
+  margin: 1rem;
+  border-radius: var(--radius-lg);
+  background: var(--surface-lowest);
+  box-shadow: var(--shadow-1);
+}
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.profile-info { min-width: 0; }
+
+.profile-name {
+  font-family: var(--font-display);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-role {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--on-surface-variant);
+}
+
+.logout-btn {
+  padding: 0.5rem;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.logout-btn:hover {
+  background: var(--error-container);
+  color: var(--error);
+}
+
+/* Overlay for mobile -------------------------------------------------------- */
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(36, 53, 42, 0.35);
+  z-index: 40;
+}
+
+@media (min-width: 1024px) {
+  .sidebar-overlay { display: none; }
+}
+
+/* Main area ----------------------------------------------------------------- */
+.main-area {
+  flex: 1;
+  margin-left: var(--sidebar-w);
+  min-width: 0;
+}
+
+.top-header {
+  position: sticky;
+  top: 0;
+  height: var(--header-h);
+  background: rgba(249, 250, 245, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--outline-variant);
+  box-shadow: var(--shadow-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  z-index: 30;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.menu-toggle {
+  display: none;
+  padding: 0.5rem;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--surface-container);
+  color: var(--on-surface);
+  cursor: pointer;
+}
+
+.header-location {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-display);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.location-icon { color: var(--primary); }
+.location-sep { color: var(--outline-variant); }
+.location-detail { color: var(--on-surface-variant); font-weight: 400; font-family: var(--font-body); font-size: 14px; }
+
+/* Main content -------------------------------------------------------------- */
+.main-content {
+  min-height: calc(100vh - var(--header-h));
+}
+
+/* Responsive ---------------------------------------------------------------- */
+@media (max-width: 1024px) {
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: translateX(0); }
+  .main-area { margin-left: 0; }
+  .menu-toggle { display: inline-flex; }
+  .location-detail { display: none; }
+  .top-header { padding: 0 1rem; }
+}

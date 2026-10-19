@@ -1,23 +1,27 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
+import { Drawer } from '../components/Drawer'
 
 interface Material {
   id: string
   name: string
   unit: string
   description?: string | null
+  stock?: number
   isActive: boolean
-  createdAt: string
-  updatedAt?: string | null
 }
+
+const EMPTY_FORM = { name: '', unit: '', description: '' }
 
 export function MaterialsPage() {
   const [materials, setMaterials] = useState<Material[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', unit: '', description: '' })
-  const [creating, setCreating] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
+
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [submitting, setSubmitting] = useState(false)
 
   async function fetchMaterials() {
     try {
@@ -34,9 +38,15 @@ export function MaterialsPage() {
     fetchMaterials()
   }, [])
 
+  function openDrawer() {
+    setForm(EMPTY_FORM)
+    setError(null)
+    setDrawerOpen(true)
+  }
+
   async function createMaterial(e: React.FormEvent) {
     e.preventDefault()
-    setCreating(true)
+    setSubmitting(true)
     setError(null)
     setSuccess(null)
     try {
@@ -46,12 +56,12 @@ export function MaterialsPage() {
         description: form.description || undefined,
       })
       setSuccess('Bahan baku berhasil ditambahkan')
-      setForm({ name: '', unit: '', description: '' })
+      setDrawerOpen(false)
       await fetchMaterials()
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal menambah bahan baku')
     } finally {
-      setCreating(false)
+      setSubmitting(false)
     }
   }
 
@@ -66,63 +76,115 @@ export function MaterialsPage() {
 
   return (
     <div className="container">
-      <h1 className="page-title">Master Bahan Baku</h1>
-      <p className="page-subtitle">Kelola bahan baku sesuai struktur backend.</p>
-
-      {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert" style={{ borderColor: '#bbf7d0', background: '#f0fdf4', color: '#166534' }}>{success}</div>}
-
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>Tambah Bahan Baku</h2>
-        <form onSubmit={createMaterial}>
-          <div className="form-row" style={{ marginBottom: '1rem' }}>
-            <div className="field">
-              <label>Nama Bahan</label>
-              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
-            </div>
-            <div className="field">
-              <label>Satuan Dasar</label>
-              <input value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} required />
-            </div>
-            <div className="field">
-              <label>Deskripsi (opsional)</label>
-              <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-            </div>
-          </div>
-          <button className="button" disabled={creating}>{creating ? 'Menyimpan...' : 'Tambah Bahan Baku'}</button>
-        </form>
+      <div className="page-head">
+        <h1 className="page-title">Master Bahan Baku</h1>
+        <p className="page-subtitle">
+          Kelola jenis bahan baku, satuan dasar, dan status aktif.
+        </p>
       </div>
 
-      <div className="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Nama</th>
-              <th>Satuan</th>
-              <th>Status</th>
-              <th>Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={4}>Memuat...</td></tr>
-            ) : materials.length === 0 ? (
-              <tr><td colSpan={4} style={{ color: 'var(--color-muted)' }}>Belum ada bahan baku</td></tr>
-            ) : (
-              materials.map(m => (
+      {error && !drawerOpen && <div className="alert error">{error}</div>}
+      {success && <div className="alert success">{success}</div>}
+
+      <div className="toolbar">
+        <h2 className="card-title">Daftar Bahan Baku</h2>
+        <button className="button" onClick={openDrawer}>
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
+          Tambah Bahan
+        </button>
+      </div>
+
+      {loading ? (
+        <p className="text-muted">Memuat bahan baku...</p>
+      ) : materials.length === 0 ? (
+        <div className="card">
+          <p className="text-muted">Belum ada bahan baku. Klik “Tambah Bahan” untuk menambah.</p>
+        </div>
+      ) : (
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Nama Bahan</th>
+                <th>Satuan</th>
+                <th>Stok</th>
+                <th>Status</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {materials.map(m => (
                 <tr key={m.id}>
-                  <td>{m.name}</td>
+                  <td>
+                    <div className="cell-primary">{m.name}</div>
+                    {m.description && <div className="cell-secondary">{m.description}</div>}
+                  </td>
                   <td>{m.unit}</td>
-                  <td>{m.isActive ? 'Aktif' : 'Nonaktif'}</td>
-                  <td style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button className="button secondary" onClick={() => toggleActive(m.id, m.isActive)}>{m.isActive ? 'Nonaktifkan' : 'Aktifkan'}</button>
+                  <td className="num">{Number(m.stock ?? 0).toLocaleString('id-ID')}</td>
+                  <td>
+                    {m.isActive ? (
+                      <span className="badge success">Aktif</span>
+                    ) : (
+                      <span className="badge neutral">Nonaktif</span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      className="button secondary"
+                      onClick={() => toggleActive(m.id, m.isActive)}
+                    >
+                      {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                    </button>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Drawer open={drawerOpen} title="Tambah Bahan Baku" onClose={() => setDrawerOpen(false)}>
+        {error && <div className="alert error">{error}</div>}
+        <form onSubmit={createMaterial} className="drawer-form">
+          <div className="field">
+            <label htmlFor="m-name">Nama Bahan</label>
+            <input
+              id="m-name"
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="Contoh: Sapi Segar"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="m-unit">Satuan Dasar</label>
+            <input
+              id="m-unit"
+              value={form.unit}
+              onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
+              placeholder="Contoh: kg"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="m-desc">Deskripsi (opsional)</label>
+            <textarea
+              id="m-desc"
+              rows={2}
+              value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            />
+          </div>
+          <div className="drawer-actions">
+            <button type="button" className="button secondary" onClick={() => setDrawerOpen(false)}>
+              Batal
+            </button>
+            <button className="button" disabled={submitting}>
+              {submitting ? 'Menyimpan...' : 'Simpan Bahan'}
+            </button>
+          </div>
+        </form>
+      </Drawer>
     </div>
   )
 }

@@ -32,42 +32,51 @@ export function CatalogPage() {
 
   return (
     <div className="container">
-      <h1 className="page-title">Katalog Publik</h1>
-      <p className="page-subtitle">Produk aktif yang tersedia untuk publik.</p>
+      <div className="page-head">
+        <h1 className="page-title">Katalog Publik</h1>
+        <p className="page-subtitle">
+          Produk aktif KWT Gogor yang tersedia untuk umum.
+        </p>
+      </div>
 
       {error && <div className="alert error">{error}</div>}
 
       {loading ? (
-        <div className="card">Memuat...</div>
+        <p className="text-muted">Memuat katalog...</p>
       ) : products.length === 0 ? (
-        <div className="card" style={{ color: 'var(--color-muted)' }}>Belum ada produk aktif.</div>
+        <div className="card">
+          <p className="text-muted">Belum ada produk aktif.</p>
+        </div>
       ) : (
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Produk</th>
-                <th>Satuan</th>
-                <th>Harga Jual</th>
-                <th>Deskripsi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {products.map((p, idx) => (
-                <tr key={idx}>
-                  <td>{p.name}</td>
-                  <td>{p.unit}</td>
-                  <td>Rp {Number(p.sellingPrice).toLocaleString('id-ID')}</td>
-                  <td>{p.description || '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="product-grid">
+          {products.map((p, idx) => (
+            <div key={idx} className="card product-card">
+              <div className="product-card-head">
+                <div className="product-info">
+                  <h3 className="product-name">{p.name}</h3>
+                  <p className="product-unit">Per {p.unit}</p>
+                </div>
+                <span className="badge success">Aktif</span>
+              </div>
+
+              <div className="product-price">
+                <span className="card-label">Harga Jual</span>
+                <span className="price-value">
+                  Rp {Number(p.sellingPrice).toLocaleString('id-ID')}
+                </span>
+              </div>
+
+              {p.description && <p className="product-desc">{p.description}</p>}
+            </div>
+          ))}
         </div>
       )}
 
-      <div style={{ marginTop: '1rem' }}>
-        <Link to="/qr-trace" style={{ color: 'var(--color-primary)' }}>Cek Traceability QR</Link>
+      <div className="catalog-foot">
+        <Link to="/qr-trace" className="button secondary">
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>qr_code_2</span>
+          Cek Traceability QR
+        </Link>
       </div>
     </div>
   )

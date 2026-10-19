@@ -118,7 +118,6 @@ export function SalesPage() {
 
   async function submitSale(e: React.FormEvent) {
     e.preventDefault()
-    // Basic validation
     for (const it of formItems) {
       if (!it.productId || !it.batchId || !it.quantity) {
         setError('Semua item wajib diisi (produk, batch, jumlah)')
@@ -172,58 +171,103 @@ export function SalesPage() {
 
   return (
     <div className="container">
-      <h1 className="page-title">Penjualan & Pembatalan Transaksi</h1>
-      <p className="page-subtitle">Pencatatan penjualan berdasarkan stok batch aktual.</p>
-
-      {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert" style={{ borderColor: '#bbf7d0', background: '#f0fdf4', color: '#166534' }}>{success}</div>}
-
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>Transaksi Penjualan</h2>
-        <form onSubmit={submitSale}>
-          {formItems.map((it, idx) => (
-            <div key={idx} className="form-row" style={{ marginBottom: '0.75rem', alignItems: 'end' }}>
-              <div className="field">
-                <label>Produk</label>
-                <select value={it.productId} onChange={e => { updateFormItem(idx, 'productId', e.target.value); updateFormItem(idx, 'batchId', ''); }} required>
-                  <option value="">Pilih produk</option>
-                  {products.filter(p => p.isActive).map(p => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.unit}) - Rp {Number(p.sellingPrice).toLocaleString('id-ID')}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>Batch</label>
-                <select value={it.batchId} onChange={e => updateFormItem(idx, 'batchId', e.target.value)} required disabled={!it.productId}>
-                  <option value="">Pilih batch (stok tersedia)</option>
-                  {getBatchesForProduct(it.productId).map(b => (
-                    <option key={b.id} value={b.id}>{b.code} — stok {b.stockQuantity.toLocaleString('id-ID')}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>Jumlah ({it.productId ? getProductUnit(it.productId) : ''})</label>
-                <input type="number" step="0.001" value={it.quantity} onChange={e => updateFormItem(idx, 'quantity', e.target.value)} required />
-              </div>
-              <div className="field" style={{ minWidth: 120 }}>
-                <label>Subtotal</label>
-                <input value={it.productId && it.quantity ? (getProductPrice(it.productId)*Number(it.quantity)).toLocaleString('id-ID') : '0'} readOnly />
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                {formItems.length > 1 && <button type="button" className="button secondary" onClick={() => removeFormItem(idx)}>Hapus</button>}
-              </div>
-            </div>
-          ))}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.75rem' }}>
-            <button type="button" className="button secondary" onClick={addFormItem}>Tambah Item</button>
-            <div style={{ fontWeight: 600 }}>Total: Rp {computeTotal().toLocaleString('id-ID')}</div>
-            <button className="button" disabled={submitting}>{submitting ? 'Menyimpan...' : 'Simpan Penjualan'}</button>
-          </div>
-        </form>
+      <div className="page-head">
+        <h1 className="page-title">Penjualan &amp; Pembatalan</h1>
+        <p className="page-subtitle">
+          Pencatatan penjualan berdasarkan stok batch aktual — riwayat tidak dapat diubah, hanya dibatalkan.
+        </p>
       </div>
 
-      <div className="card">
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>Riwayat Penjualan</h2>
+      {error && !cancelTarget && <div className="alert error">{error}</div>}
+      {success && <div className="alert success">{success}</div>}
+
+      {/* Form penjualan */}
+      <section className="card section-card">
+        <h2 className="card-title">Transaksi Penjualan</h2>
+        <form onSubmit={submitSale}>
+          <div className="sale-items">
+            {formItems.map((it, idx) => (
+              <div key={idx} className="sale-item-row">
+                <div className="sale-item-fields">
+                  <div className="field">
+                    <label htmlFor={`si-prod-${idx}`}>Produk</label>
+                    <select
+                      id={`si-prod-${idx}`}
+                      value={it.productId}
+                      onChange={e => { updateFormItem(idx, 'productId', e.target.value); updateFormItem(idx, 'batchId', ''); }}
+                      required
+                    >
+                      <option value="">Pilih produk</option>
+                      {products.filter(p => p.isActive).map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.unit}) - Rp {Number(p.sellingPrice).toLocaleString('id-ID')}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor={`si-batch-${idx}`}>Batch</label>
+                    <select
+                      id={`si-batch-${idx}`}
+                      value={it.batchId}
+                      onChange={e => updateFormItem(idx, 'batchId', e.target.value)}
+                      required
+                      disabled={!it.productId}
+                    >
+                      <option value="">Pilih batch (stok tersedia)</option>
+                      {getBatchesForProduct(it.productId).map(b => (
+                        <option key={b.id} value={b.id}>{b.code} — stok {b.stockQuantity.toLocaleString('id-ID')}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor={`si-qty-${idx}`}>Jumlah ({it.productId ? getProductUnit(it.productId) : ''})</label>
+                    <input
+                      id={`si-qty-${idx}`}
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={it.quantity}
+                      onChange={e => updateFormItem(idx, 'quantity', e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="field sale-item-subtotal">
+                    <label>Subtotal</label>
+                    <div className="subtotal-value">
+                      Rp {(it.productId && it.quantity ? getProductPrice(it.productId) * Number(it.quantity) : 0).toLocaleString('id-ID')}
+                    </div>
+                  </div>
+                </div>
+                {formItems.length > 1 && (
+                  <button type="button" className="icon-btn danger" onClick={() => removeFormItem(idx)} title="Hapus item">
+                    <span className="material-symbols-outlined">delete</span>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="sale-footer">
+            <button type="button" className="button secondary" onClick={addFormItem}>
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
+              Tambah Item
+            </button>
+            <div className="sale-total">
+              <span className="card-label">Total</span>
+              <span className="sale-total-value">Rp {computeTotal().toLocaleString('id-ID')}</span>
+            </div>
+            <button className="button" disabled={submitting}>
+              {submitting ? 'Menyimpan...' : 'Simpan Penjualan'}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* Riwayat */}
+      <section className="card section-card">
+        <div className="section-head">
+          <h2 className="card-title">Riwayat Penjualan</h2>
+          <span className="text-muted">{sales.length} transaksi</span>
+        </div>
         <div className="table-wrapper">
           <table>
             <thead>
@@ -239,14 +283,20 @@ export function SalesPage() {
               {loading ? (
                 <tr><td colSpan={5}>Memuat...</td></tr>
               ) : sales.length === 0 ? (
-                <tr><td colSpan={5} style={{ color: 'var(--color-muted)' }}>Belum ada transaksi</td></tr>
+                <tr><td colSpan={5} className="text-muted">Belum ada transaksi</td></tr>
               ) : (
                 sales.slice(0, 20).map(s => (
                   <tr key={s.id}>
-                    <td>{s.saleNumber}</td>
+                    <td className="cell-primary">{s.saleNumber}</td>
                     <td>{s.saleDate}</td>
-                    <td>Rp {Number(s.total).toLocaleString('id-ID')}</td>
-                    <td>{s.status === 'CANCELLED' ? 'Dibatalkan' : 'Selesai'}</td>
+                    <td className="num"><strong>Rp {Number(s.total).toLocaleString('id-ID')}</strong></td>
+                    <td>
+                      {s.status === 'CANCELLED' ? (
+                        <span className="badge error">Dibatalkan</span>
+                      ) : (
+                        <span className="badge success">Selesai</span>
+                      )}
+                    </td>
                     <td>
                       {user?.role === 'ADMIN' && s.status !== 'CANCELLED' && (
                         <button className="button secondary" onClick={() => setCancelTarget(s)}>Batalkan</button>
@@ -258,18 +308,39 @@ export function SalesPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
 
+      {/* Modal pembatalan */}
       {cancelTarget && (
-        <div className="card" style={{ marginTop: '1rem' }}>
-          <h3 style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Batalkan Transaksi {cancelTarget.saleNumber}</h3>
-          <div className="field">
-            <label>Alasan pembatalan (wajib)</label>
-            <input value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="Masukkan alasan" />
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-            <button className="button secondary" onClick={() => { setCancelTarget(null); setCancelReason('') }}>Batal</button>
-            <button className="button" disabled={cancelling || !cancelReason.trim()} onClick={cancelSale}>{cancelling ? 'Membatalkan...' : 'Konfirmasi Pembatalan'}</button>
+        <div className="modal-root">
+          <div className="modal-overlay" onClick={() => setCancelTarget(null)} />
+          <div className="modal-panel" role="dialog" aria-modal="true" aria-label="Batalkan transaksi">
+            <h3 className="modal-title">Batalkan Transaksi {cancelTarget.saleNumber}</h3>
+            <p className="text-muted" style={{ marginBottom: '1rem' }}>
+              Transaksi tidak dihapus — statusnya diubah menjadi dibatalkan dan stok batch dikembalikan.
+            </p>
+            {error && <div className="alert error">{error}</div>}
+            <div className="field">
+              <label htmlFor="cancel-reason">Alasan pembatalan (wajib)</label>
+              <input
+                id="cancel-reason"
+                value={cancelReason}
+                onChange={e => setCancelReason(e.target.value)}
+                placeholder="Masukkan alasan"
+              />
+            </div>
+            <div className="modal-actions">
+              <button className="button secondary" onClick={() => { setCancelTarget(null); setCancelReason('') }}>
+                Kembali
+              </button>
+              <button
+                className="button danger"
+                disabled={cancelling || !cancelReason.trim()}
+                onClick={cancelSale}
+              >
+                {cancelling ? 'Membatalkan...' : 'Konfirmasi Pembatalan'}
+              </button>
+            </div>
           </div>
         </div>
       )}

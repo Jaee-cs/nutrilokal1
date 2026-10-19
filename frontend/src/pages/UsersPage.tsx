@@ -72,70 +72,150 @@ export function UsersPage() {
     }
   }
 
+  const adminCount = users.filter(u => u.role === 'ADMIN').length
+  const operatorCount = users.filter(u => u.role === 'OPERATOR').length
+
   return (
     <div className="container">
-      <h1 className="page-title">Manajemen Pengguna</h1>
-      <p className="page-subtitle">Hanya Admin yang dapat mengakses halaman ini.</p>
+      <div className="page-head">
+        <h1 className="page-title">Manajemen Pengguna</h1>
+        <p className="page-subtitle">
+          Hanya Admin yang dapat mengelola akun Operator.
+        </p>
+      </div>
 
       {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert" style={{ borderColor: '#bbf7d0', background: '#f0fdf4', color: '#166534' }}>{success}</div>}
+      {success && <div className="alert success">{success}</div>}
 
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>Buat Akun Operator</h2>
+      <div className="summary-row">
+        <div className="summary-item">
+          <span className="card-label">Total Pengguna</span>
+          <span className="summary-value">{users.length}</span>
+        </div>
+        <div className="summary-item">
+          <span className="card-label">Admin</span>
+          <span className="summary-value">{adminCount}</span>
+        </div>
+        <div className="summary-item">
+          <span className="card-label">Operator</span>
+          <span className="summary-value">{operatorCount}</span>
+        </div>
+      </div>
+
+      <section className="card section-card">
+        <h2 className="card-title">Buat Akun Operator</h2>
         <form onSubmit={createOperator} className="form-row">
           <div className="field">
-            <label>Username</label>
-            <input value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} required minLength={3} />
+            <label htmlFor="u-username">Username</label>
+            <input
+              id="u-username"
+              value={form.username}
+              onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
+              required
+              minLength={3}
+              placeholder="Minimal 3 karakter"
+            />
           </div>
           <div className="field">
-            <label>Password</label>
-            <input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required minLength={8} />
+            <label htmlFor="u-password">Kata Sandi</label>
+            <input
+              id="u-password"
+              type="password"
+              value={form.password}
+              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+              required
+              minLength={8}
+              placeholder="Minimal 8 karakter"
+            />
           </div>
           <div className="field">
-            <label>Nama (opsional)</label>
-            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            <label htmlFor="u-name">Nama (opsional)</label>
+            <input
+              id="u-name"
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+            />
           </div>
-          <div style={{ display: 'flex', alignItems: 'end' }}>
-            <button className="button" disabled={creating}>{creating ? 'Menyimpan...' : 'Buat Operator'}</button>
+          <div className="form-actions">
+            <button className="button" disabled={creating}>
+              {creating ? 'Menyimpan...' : 'Buat Operator'}
+            </button>
           </div>
         </form>
-      </div>
+      </section>
 
-      <div className="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Wajib ganti password</th>
-              <th>Terakhir login</th>
-              <th>Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={6}>Memuat...</td></tr>
-            ) : users.length === 0 ? (
-              <tr><td colSpan={6} style={{ color: 'var(--color-muted)' }}>Belum ada pengguna</td></tr>
-            ) : (
-              users.map(u => (
-                <tr key={u.id}>
-                  <td>{u.username}</td>
-                  <td>{u.role}</td>
-                  <td>{u.isActive ? 'Aktif' : 'Nonaktif'}</td>
-                  <td>{u.mustChangePassword ? 'Ya' : 'Tidak'}</td>
-                  <td>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('id-ID') : '-'}</td>
-                  <td style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button className="button secondary" onClick={() => toggleActive(u.id, u.isActive)} disabled={u.role === 'ADMIN'}>{u.isActive ? 'Nonaktifkan' : 'Aktifkan'}</button>
-                    <button className="button secondary" onClick={() => resetPassword(u.id)} disabled={u.role === 'ADMIN'}>Reset Password</button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      <section className="card section-card">
+        <div className="section-head">
+          <h2 className="card-title">Daftar Pengguna</h2>
+          <span className="text-muted">{users.length} akun</span>
+        </div>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Wajib ganti password</th>
+                <th>Terakhir login</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={6}>Memuat...</td></tr>
+              ) : users.length === 0 ? (
+                <tr><td colSpan={6} className="text-muted">Belum ada pengguna</td></tr>
+              ) : (
+                users.map(u => (
+                  <tr key={u.id}>
+                    <td>
+                      <div className="cell-primary">{u.username}</div>
+                      {u.name && <div className="cell-secondary">{u.name}</div>}
+                    </td>
+                    <td>
+                      {u.role === 'ADMIN' ? (
+                        <span className="badge neutral">Admin</span>
+                      ) : (
+                        <span className="badge success">Operator</span>
+                      )}
+                    </td>
+                    <td>
+                      {u.isActive ? (
+                        <span className="badge success">Aktif</span>
+                      ) : (
+                        <span className="badge neutral">Nonaktif</span>
+                      )}
+                    </td>
+                    <td>{u.mustChangePassword ? <span className="badge warning">Ya</span> : 'Tidak'}</td>
+                    <td className="text-muted">
+                      {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('id-ID') : '-'}
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          className="button secondary"
+                          onClick={() => toggleActive(u.id, u.isActive)}
+                          disabled={u.role === 'ADMIN'}
+                        >
+                          {u.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                        </button>
+                        <button
+                          className="button secondary"
+                          onClick={() => resetPassword(u.id)}
+                          disabled={u.role === 'ADMIN'}
+                        >
+                          Reset Password
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   )
 }

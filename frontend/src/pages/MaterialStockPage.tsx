@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
-import { useAuth } from '../hooks/useAuth'
 
 interface Material {
   id: string
@@ -21,7 +20,6 @@ interface Receipt {
 }
 
 export function MaterialStockPage() {
-  const { user } = useAuth()
   const [materials, setMaterials] = useState<Material[]>([])
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [receiptMaterialId, setReceiptMaterialId] = useState('')
@@ -94,78 +92,137 @@ export function MaterialStockPage() {
     }
   }
 
+  const activeCount = materials.filter(m => m.isActive).length
+  const inactiveCount = materials.length - activeCount
+
   return (
     <div className="container">
-      <h1 className="page-title">Bahan Baku & Stok</h1>
-      <p className="page-subtitle">Saldo stok aktual, penerimaan, dan riwayat pergerakan (data dari backend).</p>
-
-      {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert" style={{ borderColor: '#bbf7d0', background: '#f0fdf4', color: '#166534' }}>{success}</div>}
-
-      <div className="table-wrapper" style={{ marginBottom: '1.5rem' }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Bahan Baku</th>
-              <th>Satuan</th>
-              <th>Stok Aktual</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={4}>Memuat...</td></tr>
-            ) : materials.length === 0 ? (
-              <tr><td colSpan={4} style={{ color: 'var(--color-muted)' }}>Belum ada bahan baku</td></tr>
-            ) : (
-              materials.map(m => (
-                <tr key={m.id}>
-                  <td>{m.name}</td>
-                  <td>{m.unit}</td>
-                  <td>{m.stock !== undefined ? m.stock.toLocaleString('id-ID') : '-'}</td>
-                  <td>{m.isActive ? 'Aktif' : 'Nonaktif'}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <div className="page-head">
+        <h1 className="page-title">Bahan Baku &amp; Stok</h1>
+        <p className="page-subtitle">
+          Saldo stok aktual, penerimaan, dan riwayat pergerakan — data dari backend.
+        </p>
       </div>
 
-      {user?.role === 'ADMIN' || user?.role === 'OPERATOR' ? (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>Catat Penerimaan Bahan Baku</h2>
-          <form onSubmit={submitReceipt} className="form-row">
-            <div className="field">
-              <label>Bahan Baku</label>
-              <select value={form.materialId} onChange={e => setForm(f => ({ ...f, materialId: e.target.value }))} required>
-                <option value="">Pilih bahan baku</option>
-                {materials.filter(m => m.isActive).map(m => (
-                  <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Jumlah</label>
-              <input type="number" step="0.001" value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} required />
-            </div>
-            <div className="field">
-              <label>Tanggal Penerimaan (opsional)</label>
-              <input type="date" value={form.receivedAt} onChange={e => setForm(f => ({ ...f, receivedAt: e.target.value }))} />
-            </div>
-            <div className="field">
-              <label>Catatan (opsional)</label>
-              <input value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'end' }}>
-              <button className="button" disabled={submitting}>{submitting ? 'Menyimpan...' : 'Catat Penerimaan'}</button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      {error && <div className="alert error">{error}</div>}
+      {success && <div className="alert success">{success}</div>}
 
-      <div className="card">
-        <div style={{ display: 'flex', alignItems: 'end', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0, flex: '1 1 auto' }}>Riwayat Penerimaan</h2>
+      {/* Ringkasan */}
+      <div className="summary-row">
+        <div className="summary-item">
+          <span className="card-label">Total Bahan</span>
+          <span className="summary-value">{materials.length}</span>
+        </div>
+        <div className="summary-item">
+          <span className="card-label">Bahan Aktif</span>
+          <span className="summary-value">{activeCount}</span>
+        </div>
+        <div className="summary-item">
+          <span className="card-label">Diarsipkan</span>
+          <span className="summary-value">{inactiveCount}</span>
+        </div>
+      </div>
+
+      {/* Stok per bahan */}
+      <section className="card section-card">
+        <h2 className="card-title">Stok per Bahan Baku</h2>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Bahan Baku</th>
+                <th>Satuan</th>
+                <th>Stok Aktual</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={4}>Memuat...</td></tr>
+              ) : materials.length === 0 ? (
+                <tr><td colSpan={4} className="text-muted">Belum ada bahan baku</td></tr>
+              ) : (
+                materials.map(m => (
+                  <tr key={m.id}>
+                    <td className="cell-primary">{m.name}</td>
+                    <td>{m.unit}</td>
+                    <td className="num">
+                      <strong>{m.stock !== undefined ? m.stock.toLocaleString('id-ID') : '-'}</strong>
+                    </td>
+                    <td>
+                      {m.isActive ? (
+                        <span className="badge success">Aktif</span>
+                      ) : (
+                        <span className="badge neutral">Nonaktif</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Form penerimaan */}
+      <section className="card section-card">
+        <h2 className="card-title">Catat Penerimaan Bahan Baku</h2>
+        <form onSubmit={submitReceipt} className="form-row">
+          <div className="field">
+            <label htmlFor="rs-material">Bahan Baku</label>
+            <select
+              id="rs-material"
+              value={form.materialId}
+              onChange={e => setForm(f => ({ ...f, materialId: e.target.value }))}
+              required
+            >
+              <option value="">Pilih bahan baku</option>
+              {materials.filter(m => m.isActive).map(m => (
+                <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="rs-qty">Jumlah</label>
+            <input
+              id="rs-qty"
+              type="number"
+              step="0.001"
+              min="0"
+              value={form.quantity}
+              onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))}
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="rs-date">Tanggal Penerimaan (opsional)</label>
+            <input
+              id="rs-date"
+              type="date"
+              value={form.receivedAt}
+              onChange={e => setForm(f => ({ ...f, receivedAt: e.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="rs-note">Catatan (opsional)</label>
+            <input
+              id="rs-note"
+              value={form.note}
+              onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
+            />
+          </div>
+          <div className="form-actions">
+            <button className="button" disabled={submitting}>
+              {submitting ? 'Menyimpan...' : 'Catat Penerimaan'}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* Riwayat penerimaan */}
+      <section className="card section-card">
+        <div className="section-head">
+          <h2 className="card-title">Riwayat Penerimaan</h2>
           <div className="field" style={{ minWidth: '240px' }}>
             <label htmlFor="receipt-material">Bahan baku</label>
             <select
@@ -186,7 +243,6 @@ export function MaterialStockPage() {
               <tr>
                 <th>Bahan</th>
                 <th>Jumlah</th>
-                <th>Satuan</th>
                 <th>Tanggal Terima</th>
                 <th>Dicatat oleh</th>
                 <th>Catatan</th>
@@ -194,27 +250,29 @@ export function MaterialStockPage() {
             </thead>
             <tbody>
               {!receiptMaterialId ? (
-                <tr><td colSpan={6} style={{ color: 'var(--color-muted)' }}>Pilih bahan baku untuk melihat riwayat penerimaan</td></tr>
+                <tr><td colSpan={5} className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</td></tr>
               ) : loadingReceipts ? (
-                <tr><td colSpan={6}>Memuat riwayat...</td></tr>
+                <tr><td colSpan={5}>Memuat riwayat...</td></tr>
               ) : receipts.length === 0 ? (
-                <tr><td colSpan={6} style={{ color: 'var(--color-muted)' }}>Belum ada riwayat penerimaan</td></tr>
+                <tr><td colSpan={5} className="text-muted">Belum ada riwayat penerimaan</td></tr>
               ) : (
                 receipts.slice(0, 20).map(r => (
                   <tr key={r.id}>
                     <td>{materials.find(m => m.id === r.materialId)?.name || r.materialId}</td>
-                    <td>{Number(r.quantity).toLocaleString('id-ID')}</td>
-                    <td>{materials.find(m => m.id === r.materialId)?.unit || '-'}</td>
+                    <td className="num">
+                      {Number(r.quantity).toLocaleString('id-ID')}{' '}
+                      <span className="text-muted">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
+                    </td>
                     <td>{r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}</td>
                     <td>{r.recordedBy?.username || '-'}</td>
-                    <td>{r.note || '-'}</td>
+                    <td className="text-muted">{r.note || '-'}</td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
     </div>
   )
 }
