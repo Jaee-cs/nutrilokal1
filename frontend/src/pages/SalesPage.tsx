@@ -10,43 +10,78 @@ interface Product {
   isActive: boolean
 }
 
+// Bentuk API GET /batches (toPublicBatch): product.id dan stock — bukan
+// productId/stockQuantity. expiryValidated menandai tanggal kedaluwarsa
+// sudah divalidasi Admin (README 5.5).
 interface Batch {
   id: string
   code: string
-  productId: string
-  stockQuantity: number
-  productionDate: string
+  product: { id: string; name: string; unit: string }
+  productionDate: string | null
+  stock: number
   expiryDate: string | null
-  isActive: boolean
+  expiryValidated: boolean
+}
+
+// Bentuk respons API penjualan (toPublicSale).
+interface SaleAllocation {
+  batchId: string
+  batchCode: string
+  quantity: number
 }
 
 interface SaleItem {
-  id: string
   productId: string
-  productName: string
+  product: { id: string; name: string; unit: string }
   quantity: number
   unitPrice: number
-  subtotal: number
-  allocations?: Array<{ batchId: string; batchCode: string; quantity: number }>
+  lineTotal: number
+  allocations: SaleAllocation[]
 }
 
 interface Sale {
   id: string
-  saleNumber: string
-  saleDate: string
+  status: 'COMPLETED' | 'CANCELLED'
   total: number
-  status: string
-  cancelledAt?: string | null
-  cancelReason?: string | null
-  createdBy?: { username: string }
   items: SaleItem[]
-  createdAt: string
+  recordedBy: { username: string; name?: string | null }
+  recordedAt: string
+  cancelReason: string | null
+  cancelledAt: string | null
+}
+
+interface AllocationForm {
+  batchId: string
+  quantity: string
 }
 
 interface SaleFormItem {
   productId: string
-  batchId: string
-  quantity: string
+  allocations: AllocationForm[]
+}
+
+const EMPTY_FORM: SaleFormItem[] = [
+  { productId: '', allocations: [{ batchId: '', quantity: '' }] },
+]
+
+// Kode tanggal 'YYYY-MM-DD' menurut kalender WIB — aturan yang sama dengan
+// backend (lib/date.ts), agar penanda kedaluwarsa di UI tidak berbeda.
+function wibDateCode(iso: string): string {
+  return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
+}
+
+// Batch ditandai kedaluwarsa bila tanggal tervalidasi dan sudah lewat
+// (kalender WIB). Penolakan transaksi tetap dilakukan backend — aturan
+// bisnis tidak dipindahkan ke frontend, hanya ditampilkan.
+function isExpired(b: Batch): boolean {
+  if (!b.expiryDate || !b.expiryValidated) return false
+  return wibDateCode(b.expiryDate) < wibDateCode(new Date().toISOString())
+}
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 export function SalesPage() {
@@ -57,7 +92,7 @@ export function SalesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [formItems, setFormItems] = useState<SaleFormItem[]>([{ productId: '', batchId: '', quantity: '' }])
+  const [formItems, setFormItems] = useState<SaleFormItem[]>(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [cancelTarget, setCancelTarget] = useState<Sale | null>(null)
   const [cancelReason, setCancelReason] = useState('')
@@ -84,19 +119,52 @@ export function SalesPage() {
   useEffect(() => { fetchData() }, [])
 
   function addFormItem() {
-    setFormItems(items => [...items, { productId: '', batchId: '', quantity: '' }])
-  }
-
-  function updateFormItem(idx: number, field: keyof SaleFormItem, value: string) {
-    setFormItems(items => items.map((it, i) => i === idx ? { ...it, [field]: value } : it))
+    setFormItems(items => [...items, { productId: '', allocations: [{ batchId: '', quantity: '' }] }])
   }
 
   function removeFormItem(idx: number) {
     setFormItems(items => items.filter((_, i) => i !== idx))
   }
 
-  function getBatchesForProduct(productId: string) {
-    return batches.filter(b => b.productId === productId && b.stockQuantity > 0)
+  // Mengganti produk mereset alokasi batch (batch harus milik produk).
+  function setProduct(idx: number, productId: string) {
+    setFormItems(items => items.map((it, i) =>
+      i === idx ? { productId, allocations: [{ batchId: '', quantity: '' }] } : it
+    ))
+  }
+
+  function addAllocation(idx: number) {
+    setFormItems(items => items.map((it, i) =>
+      i === idx ? { ...it, allocations: [...it.allocations, { batchId: '', quantity: '' }] } : it
+    ))
+  }
+
+  function updateAllocation(itemIdx: number, allocIdx: number, field: keyof AllocationForm, value: string) {
+    setFormItems(items => items.map((it, i) =>
+      i === itemIdx
+        ? {
+            ...it,
+            allocations: it.allocations.map((a, j) => j === allocIdx ? { ...a, [field]: value } : a),
+          }
+        : it
+    ))
+  }
+
+  function removeAllocation(itemIdx: number, allocIdx: number) {
+    setFormItems(items => items.map((it, i) => {
+      if (i !== itemIdx || it.allocations.length <= 1) return it
+      return { ...it, allocations: it.allocations.filter((_, j) => j !== allocIdx) }
+    }))
+  }
+
+  // Batch dengan stok tersedia untuk produk; batch yang sudah dipilih pada
+  // alokasi lain dalam item yang sama disembunyikan (satu batch maksimal
+  // satu alokasi per item — aturan backend). Batch kedaluwarsa tetap
+  // ditampilkan (stok & tanggal terlihat) tetapi tidak dapat dipilih.
+  function getBatchesForProduct(productId: string, excludeIds: string[]) {
+    return batches.filter(b =>
+      b.product.id === productId && b.stock > 0 && !excludeIds.includes(b.id)
+    )
   }
 
   function getProductPrice(productId: string) {
@@ -107,42 +175,76 @@ export function SalesPage() {
     return products.find(p => p.id === productId)?.unit || ''
   }
 
-  function computeTotal() {
-    return formItems.reduce((sum, it) => {
-      if (!it.productId || !it.batchId || !it.quantity) return sum
-      const price = getProductPrice(it.productId)
-      const qty = Number(it.quantity)
+  function itemSubtotal(it: SaleFormItem) {
+    if (!it.productId) return 0
+    const price = getProductPrice(it.productId)
+    return it.allocations.reduce((sum, alloc) => {
+      if (!alloc.batchId || !alloc.quantity) return sum
+      const qty = Number(alloc.quantity)
       return sum + (isNaN(qty) ? 0 : price * qty)
     }, 0)
   }
 
+  function computeTotal() {
+    return formItems.reduce((sum, it) => sum + itemSubtotal(it), 0)
+  }
+
+  function batchOptionLabel(b: Batch) {
+    const parts = [b.code, `stok ${b.stock.toLocaleString('id-ID')}`]
+    if (b.expiryDate) {
+      parts.push(isExpired(b) ? `kedaluwarsa ${wibDateCode(b.expiryDate)} (tidak dapat dijual)` : `kedaluwarsa ${wibDateCode(b.expiryDate)}`)
+    }
+    return parts.join(' — ')
+  }
+
   async function submitSale(e: React.FormEvent) {
     e.preventDefault()
+    const seenProducts = new Set<string>()
     for (const it of formItems) {
-      if (!it.productId || !it.batchId || !it.quantity) {
-        setError('Semua item wajib diisi (produk, batch, jumlah)')
+      if (!it.productId) {
+        setError('Setiap item harus memilih produk.')
         return
       }
-      const qty = Number(it.quantity)
-      if (isNaN(qty) || qty <= 0) {
-        setError('Jumlah harus lebih dari 0')
+      if (seenProducts.has(it.productId)) {
+        setError('Produk yang sama tidak boleh muncul dua kali dalam satu transaksi.')
         return
+      }
+      seenProducts.add(it.productId)
+      const seenBatches = new Set<string>()
+      for (const alloc of it.allocations) {
+        if (!alloc.batchId || !alloc.quantity) {
+          setError('Setiap alokasi wajib memilih batch dan mengisi jumlah.')
+          return
+        }
+        if (seenBatches.has(alloc.batchId)) {
+          setError('Batch yang sama tidak boleh dialokasikan dua kali pada satu item.')
+          return
+        }
+        seenBatches.add(alloc.batchId)
+        const qty = Number(alloc.quantity)
+        if (isNaN(qty) || qty <= 0) {
+          setError('Jumlah harus lebih dari 0')
+          return
+        }
       }
     }
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     try {
-      const itemsPayload = formItems.map(it => {
-        const qty = Number(it.quantity)
-        return {
-          productId: it.productId,
-          allocations: [{ batchId: it.batchId, quantity: qty }]
-        }
-      })
+      const itemsPayload = formItems.map(it => ({
+        productId: it.productId,
+        allocations: it.allocations.map(alloc => ({
+          batchId: alloc.batchId,
+          quantity: Number(alloc.quantity),
+        })),
+      }))
       const res = await api.post('/sales', { items: itemsPayload })
-      setSuccess(`Penjualan berhasil. No: ${res.data.sale.saleNumber}`)
-      setFormItems([{ productId: '', batchId: '', quantity: '' }])
+      const transaction = res.data?.transaction
+      setSuccess(transaction
+        ? `Penjualan berhasil. ID: ${transaction.id}`
+        : 'Penjualan berhasil.')
+      setFormItems(EMPTY_FORM)
       await fetchData()
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal mencatat penjualan')
@@ -188,53 +290,88 @@ export function SalesPage() {
           <div className="sale-items">
             {formItems.map((it, idx) => (
               <div key={idx} className="sale-item-row">
-                <div className="sale-item-fields">
-                  <div className="field">
-                    <label htmlFor={`si-prod-${idx}`}>Produk</label>
-                    <select
-                      id={`si-prod-${idx}`}
-                      value={it.productId}
-                      onChange={e => { updateFormItem(idx, 'productId', e.target.value); updateFormItem(idx, 'batchId', ''); }}
-                      required
-                    >
-                      <option value="">Pilih produk</option>
-                      {products.filter(p => p.isActive).map(p => (
-                        <option key={p.id} value={p.id}>{p.name} ({p.unit}) - Rp {Number(p.sellingPrice).toLocaleString('id-ID')}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label htmlFor={`si-batch-${idx}`}>Batch</label>
-                    <select
-                      id={`si-batch-${idx}`}
-                      value={it.batchId}
-                      onChange={e => updateFormItem(idx, 'batchId', e.target.value)}
-                      required
-                      disabled={!it.productId}
-                    >
-                      <option value="">Pilih batch (stok tersedia)</option>
-                      {getBatchesForProduct(it.productId).map(b => (
-                        <option key={b.id} value={b.id}>{b.code} — stok {b.stockQuantity.toLocaleString('id-ID')}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label htmlFor={`si-qty-${idx}`}>Jumlah ({it.productId ? getProductUnit(it.productId) : ''})</label>
-                    <input
-                      id={`si-qty-${idx}`}
-                      type="number"
-                      step="0.001"
-                      min="0"
-                      value={it.quantity}
-                      onChange={e => updateFormItem(idx, 'quantity', e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="field sale-item-subtotal">
-                    <label>Subtotal</label>
-                    <div className="subtotal-value">
-                      Rp {(it.productId && it.quantity ? getProductPrice(it.productId) * Number(it.quantity) : 0).toLocaleString('id-ID')}
+                <div className="sale-item-main">
+                  <div className="sale-item-fields">
+                    <div className="field">
+                      <label htmlFor={`si-prod-${idx}`}>Produk</label>
+                      <select
+                        id={`si-prod-${idx}`}
+                        value={it.productId}
+                        onChange={e => setProduct(idx, e.target.value)}
+                        required
+                      >
+                        <option value="">Pilih produk</option>
+                        {products.filter(p => p.isActive).map(p => (
+                          <option key={p.id} value={p.id}>{p.name} ({p.unit}) - Rp {Number(p.sellingPrice).toLocaleString('id-ID')}</option>
+                        ))}
+                      </select>
                     </div>
+                    <div className="field sale-item-subtotal">
+                      <label>Subtotal</label>
+                      <div className="subtotal-value">
+                        Rp {itemSubtotal(it).toLocaleString('id-ID')}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="sale-item-allocs">
+                    <span className="card-label">Batch &amp; Jumlah</span>
+                    {it.allocations.map((alloc, aIdx) => {
+                      const otherIds = it.allocations.filter((_, j) => j !== aIdx).map(a => a.batchId)
+                      return (
+                        <div className="sale-alloc-row" key={aIdx}>
+                          <div className="field">
+                            <label htmlFor={`si-batch-${idx}-${aIdx}`}>Batch</label>
+                            <select
+                              id={`si-batch-${idx}-${aIdx}`}
+                              value={alloc.batchId}
+                              onChange={e => updateAllocation(idx, aIdx, 'batchId', e.target.value)}
+                              required
+                              disabled={!it.productId}
+                            >
+                              <option value="">Pilih batch (stok tersedia)</option>
+                              {getBatchesForProduct(it.productId, otherIds).map(b => (
+                                <option key={b.id} value={b.id} disabled={isExpired(b)}>
+                                  {batchOptionLabel(b)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="field">
+                            <label htmlFor={`si-qty-${idx}-${aIdx}`}>Jumlah ({it.productId ? getProductUnit(it.productId) : ''})</label>
+                            <input
+                              id={`si-qty-${idx}-${aIdx}`}
+                              type="number"
+                              step="0.001"
+                              min="0"
+                              value={alloc.quantity}
+                              onChange={e => updateAllocation(idx, aIdx, 'quantity', e.target.value)}
+                              required
+                            />
+                          </div>
+                          {it.allocations.length > 1 && (
+                            <button
+                              type="button"
+                              className="icon-btn danger"
+                              onClick={() => removeAllocation(idx, aIdx)}
+                              title="Hapus alokasi batch"
+                            >
+                              <span className="material-symbols-outlined">delete</span>
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
+                    <button
+                      type="button"
+                      className="button secondary sale-alloc-add"
+                      onClick={() => addAllocation(idx)}
+                      disabled={!it.productId}
+                      title={it.productId ? undefined : 'Pilih produk terlebih dahulu'}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
+                      Tambah Batch
+                    </button>
                   </div>
                 </div>
                 {formItems.length > 1 && (
@@ -272,8 +409,9 @@ export function SalesPage() {
           <table>
             <thead>
               <tr>
-                <th>No. Transaksi</th>
+                <th>ID Transaksi</th>
                 <th>Tanggal</th>
+                <th>Item</th>
                 <th>Total</th>
                 <th>Status</th>
                 <th>Aksi</th>
@@ -281,18 +419,36 @@ export function SalesPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5}>Memuat...</td></tr>
+                <tr><td colSpan={6}>Memuat...</td></tr>
               ) : sales.length === 0 ? (
-                <tr><td colSpan={5} className="text-muted">Belum ada transaksi</td></tr>
+                <tr><td colSpan={6} className="text-muted">Belum ada transaksi</td></tr>
               ) : (
                 sales.slice(0, 20).map(s => (
                   <tr key={s.id}>
-                    <td className="cell-primary">{s.saleNumber}</td>
-                    <td>{s.saleDate}</td>
+                    <td className="cell-primary">{s.id}</td>
+                    <td>
+                      {formatDateTime(s.recordedAt)}
+                      <div className="cell-secondary">oleh {s.recordedBy.username}</div>
+                    </td>
+                    <td>
+                      {s.items.map((item, i) => (
+                        <div key={i}>
+                          <div className="cell-primary">
+                            {item.product.name} × {item.quantity.toLocaleString('id-ID')} {item.product.unit}
+                          </div>
+                          <div className="cell-secondary">
+                            Batch: {item.allocations.map(a => `${a.batchCode} (${a.quantity.toLocaleString('id-ID')})`).join(', ')}
+                          </div>
+                        </div>
+                      ))}
+                    </td>
                     <td className="num"><strong>Rp {Number(s.total).toLocaleString('id-ID')}</strong></td>
                     <td>
                       {s.status === 'CANCELLED' ? (
-                        <span className="badge error">Dibatalkan</span>
+                        <>
+                          <span className="badge error">Dibatalkan</span>
+                          {s.cancelReason && <div className="cell-secondary">Alasan: {s.cancelReason}</div>}
+                        </>
                       ) : (
                         <span className="badge success">Selesai</span>
                       )}
@@ -315,7 +471,7 @@ export function SalesPage() {
         <div className="modal-root">
           <div className="modal-overlay" onClick={() => setCancelTarget(null)} />
           <div className="modal-panel" role="dialog" aria-modal="true" aria-label="Batalkan transaksi">
-            <h3 className="modal-title">Batalkan Transaksi {cancelTarget.saleNumber}</h3>
+            <h3 className="modal-title">Batalkan Transaksi {cancelTarget.id}</h3>
             <p className="text-muted" style={{ marginBottom: '1rem' }}>
               Transaksi tidak dihapus — statusnya diubah menjadi dibatalkan dan stok batch dikembalikan.
             </p>

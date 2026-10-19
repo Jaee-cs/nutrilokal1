@@ -480,6 +480,47 @@ table tbody tr:hover { background: var(--surface-low); }
   gap: 0.75rem;
 }
 
+.sale-item-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.sale-item-allocs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--surface-container);
+  border-radius: var(--radius);
+}
+
+.sale-alloc-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) minmax(120px, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.sale-alloc-row > .field { min-width: 0; }
+
+.sale-alloc-row .icon-btn { margin-bottom: 0.25rem; }
+
+.sale-alloc-add { align-self: flex-start; }
+
+/* Layar sempit: batch satu baris penuh, jumlah + tombol hapus di bawahnya. */
+@media (max-width: 600px) {
+  .sale-alloc-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .sale-alloc-row > .field:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
 .sale-item-subtotal .subtotal-value {
   display: flex;
   align-items: center;

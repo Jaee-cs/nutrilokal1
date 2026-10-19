@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
 
+// Bentuk API GET /batches (toPublicBatch): stock, productionDate bisa null
+// (batch stok awal), tanpa field isActive.
 interface Batch {
   id: string
   code: string
   product: { name: string }
-  productionDate: string
-  stockQuantity: number
-  isActive: boolean
+  productionDate: string | null
+  stock: number
 }
 
 interface QrDetail {
@@ -129,8 +130,8 @@ export function QrManagementPage() {
                   <tr key={b.id} className={detail?.batchId === b.id ? 'row-active' : ''}>
                     <td><span className="badge neutral">{b.code}</span></td>
                     <td className="cell-primary">{b.product.name}</td>
-                    <td>{b.productionDate}</td>
-                    <td className="num">{Number(b.stockQuantity).toLocaleString('id-ID')}</td>
+                    <td>{b.productionDate ?? '-'}</td>
+                    <td className="num">{b.stock.toLocaleString('id-ID')}</td>
                     <td>
                       <button className="button secondary" onClick={() => fetchDetail(b.id)}>
                         Detail QR
