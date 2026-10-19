@@ -13,7 +13,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: 'grid_view' },
   { to: '/products', label: 'Produk', icon: 'inventory_2' },
   { to: '/materials', label: 'Bahan Baku', icon: 'nutrition' },
-  { to: '/material-stock', label: 'Bahan Baku & Stok', icon: 'warehouse' },
   { to: '/production', label: 'Produksi & Batch', icon: 'precision_manufacturing' },
   { to: '/sales', label: 'Penjualan', icon: 'receipt_long' },
   { to: '/reports', label: 'Laporan', icon: 'assessment' },

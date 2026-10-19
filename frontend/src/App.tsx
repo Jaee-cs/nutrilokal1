@@ -7,7 +7,6 @@ import { DashboardPage } from './pages/DashboardPage'
 import { UsersPage } from './pages/UsersPage'
 import { ProductsPage } from './pages/ProductsPage'
 import { MaterialsPage } from './pages/MaterialsPage'
-import { MaterialStockPage } from './pages/MaterialStockPage'
 import { ProductionPage } from './pages/ProductionPage'
 import { SalesPage } from './pages/SalesPage'
 import { CatalogPage } from './pages/CatalogPage'
@@ -30,7 +29,8 @@ export default function App() {
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="products" element={<ProductsPage />} />
               <Route path="materials" element={<MaterialsPage />} />
-              <Route path="material-stock" element={<MaterialStockPage />} />
+              {/* Rute lama digabung ke /materials (Fase D) — redirect agar tautan lama tetap hidup. */}
+              <Route path="material-stock" element={<Navigate to="/materials" replace />} />
               <Route path="production" element={<ProductionPage />} />
               <Route path="sales" element={<SalesPage />} />
                 <Route path="reports" element={<ReportsPage />} />
