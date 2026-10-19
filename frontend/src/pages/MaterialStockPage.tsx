@@ -24,6 +24,8 @@ export function MaterialStockPage() {
   const { user } = useAuth()
   const [materials, setMaterials] = useState<Material[]>([])
   const [receipts, setReceipts] = useState<Receipt[]>([])
+  const [receiptMaterialId, setReceiptMaterialId] = useState('')
+  const [loadingReceipts, setLoadingReceipts] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -33,10 +35,7 @@ export function MaterialStockPage() {
   async function fetchData() {
     try {
       setLoading(true)
-      const [m, r] = await Promise.all([
-        api.get('/materials'),
-        api.get('/materials/any/receipts').catch(() => ({ data: { data: [] } }))
-      ])
+      const m = await api.get('/materials')
       const mats = (m.data.data || m.data).map((x: any) => ({
         id: x.id,
         name: x.name,
@@ -45,11 +44,27 @@ export function MaterialStockPage() {
         stock: x.stock,
       }))
       setMaterials(mats)
-      setReceipts((r.data.data || r.data) || [])
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal memuat data bahan baku')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadReceipts(materialId: string) {
+    if (!materialId) {
+      setReceipts([])
+      return
+    }
+    setLoadingReceipts(true)
+    try {
+      const r = await api.get(`/materials/${materialId}/receipts`)
+      setReceipts(r.data.data || r.data || [])
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Gagal memuat riwayat penerimaan')
+      setReceipts([])
+    } finally {
+      setLoadingReceipts(false)
     }
   }
 
@@ -71,6 +86,7 @@ export function MaterialStockPage() {
       setSuccess('Penerimaan bahan baku berhasil dicatat')
       setForm({ materialId: '', quantity: '', receivedAt: '', note: '' })
       await fetchData()
+      if (receiptMaterialId) await loadReceipts(receiptMaterialId)
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal mencatat penerimaan')
     } finally {
@@ -148,7 +164,22 @@ export function MaterialStockPage() {
       ) : null}
 
       <div className="card">
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem' }}>Riwayat Penerimaan</h2>
+        <div style={{ display: 'flex', alignItems: 'end', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+          <h2 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0, flex: '1 1 auto' }}>Riwayat Penerimaan</h2>
+          <div className="field" style={{ minWidth: '240px' }}>
+            <label htmlFor="receipt-material">Bahan baku</label>
+            <select
+              id="receipt-material"
+              value={receiptMaterialId}
+              onChange={(e) => { setReceiptMaterialId(e.target.value); loadReceipts(e.target.value) }}
+            >
+              <option value="">Pilih bahan baku</option>
+              {materials.map((m) => (
+                <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+              ))}
+            </select>
+          </div>
+        </div>
         <div className="table-wrapper">
           <table>
             <thead>
@@ -162,7 +193,11 @@ export function MaterialStockPage() {
               </tr>
             </thead>
             <tbody>
-              {receipts.length === 0 ? (
+              {!receiptMaterialId ? (
+                <tr><td colSpan={6} style={{ color: 'var(--color-muted)' }}>Pilih bahan baku untuk melihat riwayat penerimaan</td></tr>
+              ) : loadingReceipts ? (
+                <tr><td colSpan={6}>Memuat riwayat...</td></tr>
+              ) : receipts.length === 0 ? (
                 <tr><td colSpan={6} style={{ color: 'var(--color-muted)' }}>Belum ada riwayat penerimaan</td></tr>
               ) : (
                 receipts.slice(0, 20).map(r => (
