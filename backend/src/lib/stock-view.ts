@@ -36,6 +36,10 @@ export interface PublicBatch {
   stock: number;
   /** Batch tanpa catatan produksi (mis. stok awal) — riwayat terbatas. */
   hasLimitedHistory: boolean;
+  /** Tanggal kedaluwarsa (README 5.6); kosong bila belum tersedia/tervalidasi. */
+  expiryDate: Date | null;
+  /** True bila tanggal kedaluwarsa sudah dicatat dan divalidasi Admin. */
+  expiryValidated: boolean;
   createdAt: Date;
 }
 
@@ -48,6 +52,8 @@ export function toPublicBatch(batch: BatchWithSummary): PublicBatch {
     productionDate: batch.productionDate,
     stock: Number(batch.stockQuantity),
     hasLimitedHistory: batch.production === null,
+    expiryDate: batch.expiryDate,
+    expiryValidated: batch.expiryValidatedAt !== null,
     createdAt: batch.createdAt,
   };
 }

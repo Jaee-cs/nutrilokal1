@@ -174,3 +174,41 @@ export function validateUsageList(value: unknown): string | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Validator untuk penjualan (B7, README 5.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Daftar item penjualan: array berisi minimal satu objek
+ * { productId, allocations } dan setiap item wajib berisi minimal satu
+ * alokasi { batchId, quantity }. Validasi jumlah dan keunikan ID dilakukan
+ * pemanggil (validateQuantity) karena label pesan berbeda-beda.
+ */
+export function validateSaleItems(value: unknown): string | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return 'Daftar item penjualan wajib berisi minimal satu item.';
+  }
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      return 'Setiap item penjualan harus berupa objek { productId, allocations }.';
+    }
+    const { productId, allocations } = item as Record<string, unknown>;
+    if (typeof productId !== 'string' || productId.trim() === '') {
+      return 'Setiap item penjualan wajib menyertakan productId.';
+    }
+    if (!Array.isArray(allocations) || allocations.length === 0) {
+      return 'Setiap item penjualan wajib berisi minimal satu alokasi batch.';
+    }
+    for (const allocation of allocations) {
+      if (typeof allocation !== 'object' || allocation === null || Array.isArray(allocation)) {
+        return 'Setiap alokasi batch harus berupa objek { batchId, quantity }.';
+      }
+      const { batchId } = allocation as Record<string, unknown>;
+      if (typeof batchId !== 'string' || batchId.trim() === '') {
+        return 'Setiap alokasi batch wajib menyertakan batchId.';
+      }
+    }
+  }
+  return null;
+}

@@ -8,6 +8,8 @@
  *   NL-OPEN-YYYYMMDD-NNN (tanggal pada kode = tanggal pencatatan).
  * - Total stok per produk = jumlah stok seluruh batch; dihitung dari data
  *   batch (bukan angka tersimpan terpisah) agar tidak ada dua sumber stok.
+ * - Mencatat/membersihkan tanggal kedaluwarsa batch: hanya Admin
+ *   (README 5.5 dan 5.6); tanggal yang dicatat Admin dianggap tervalidasi.
  * - Tidak ada endpoint edit/hapus batch atau riwayat pergerakan stok.
  * - Header `Idempotency-Key` (opsional) mencegah permintaan berulang.
  */
@@ -79,6 +81,64 @@ batchesRouter.get('/:id', authenticate, async (req, res) => {
   }
 
   res.json({ batch: toPublicBatchDetail(batch) });
+});
+
+// ---------------------------------------------------------------------------
+// Mencatat tanggal kedaluwarsa per batch (khusus Admin, README 5.5 & 5.6)
+// ---------------------------------------------------------------------------
+//
+// Tanggal kedaluwarsa BOLEH kosong bila belum tersedia atau belum
+// divalidasi (README 5.6). Pencatatan dilakukan Admin — karena Admin yang
+// memvalidasi informasi (README 4) — sehingga tanggal yang tersimpan ikut
+// ditandai tervalidasi (expiryValidatedAt). Pengosongan mengembalikan
+// kedua kolom ke null. Endpoint ini bersifat idempoten secara alami
+// (hanya menetapkan metadata, tanpa perubahan stok).
+batchesRouter.patch('/:id/expiry', authenticate, requireAdmin, async (req, res) => {
+  const batchId = pathId(req);
+  const body = req.body ?? {};
+
+  if (!('expiryDate' in body)) {
+    res.status(400).json({
+      message: 'Sertakan expiryDate (tanggal YYYY-MM-DD) atau null untuk mengosongkan.',
+    });
+    return;
+  }
+
+  const batch = await prisma.batch.findUnique({ where: { id: batchId } });
+  if (!batch) {
+    res.status(404).json({ message: 'Batch tidak ditemukan.' });
+    return;
+  }
+
+  const value = body.expiryDate;
+  if (value !== null && typeof value !== 'string') {
+    res.status(400).json({ message: 'expiryDate harus berupa tanggal (YYYY-MM-DD) atau null.' });
+    return;
+  }
+
+  if (value === null) {
+    const cleared = await prisma.batch.update({
+      where: { id: batchId },
+      data: { expiryDate: null, expiryValidatedAt: null },
+      include: BATCH_INCLUDE,
+    });
+    res.json({ batch: toPublicBatch(cleared) });
+    return;
+  }
+
+  const dateError = validateDateOnly(value);
+  if (dateError) {
+    res.status(400).json({ message: dateError });
+    return;
+  }
+
+  const updated = await prisma.batch.update({
+    where: { id: batchId },
+    // Tanggal yang dicatat Admin sekaligus menjadi tervalidasi.
+    data: { expiryDate: parseBusinessDate(value), expiryValidatedAt: new Date() },
+    include: BATCH_INCLUDE,
+  });
+  res.json({ batch: toPublicBatch(updated) });
 });
 
 // ---------------------------------------------------------------------------

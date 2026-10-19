@@ -6,8 +6,9 @@
 // bahan baku, penerimaan, saldo awal, dan jejak pergerakan stok.
 // Tugas B5 menambahkan produksi, kode batch, pemakaian bahan aktual,
 // dan koreksi catatan produksi. Tugas B6 menambahkan stok awal produk
-// jadi per batch dan penyesuaian stok oleh Admin. Model lainnya
-// (penjualan, QR, dll.) ditambahkan pada tugas roadmap berikutnya
+// jadi per batch dan penyesuaian stok oleh Admin. Tugas B7 menambahkan
+// transaksi penjualan beserta alokasi batch dan pembatalan oleh Admin.
+// Model lainnya (QR, dll.) ditambahkan pada tugas roadmap berikutnya
 // sesuai README.
 
 generator client {
@@ -52,6 +53,8 @@ model User {
   batchStockMovements     BatchStockMovement[]
   batchOpeningBalances    BatchOpeningBalance[]
   stockAdjustments        StockAdjustment[]
+  saleTransactions        SaleTransaction[] @relation("SaleRecordedBy")
+  saleCancellations       SaleTransaction[] @relation("SaleCancelledBy")
 
   @@map("users")
 }
@@ -235,11 +238,19 @@ model Batch {
   /// (B6), berkurang saat penjualan (B7). Selalu >= 0; setiap perubahan
   /// dicatat di BatchStockMovement.
   stockQuantity  Decimal @default(0) @db.Decimal(14, 3)
+  /// Tanggal kedaluwarsa (README 5.6): BOLEH KOSONG bila belum tersedia
+  /// atau belum divalidasi. Tidak boleh dikarang.
+  expiryDate     DateTime?
+  /// Waktu Admin mencatat sekaligus memvalidasi tanggal kedaluwarsa;
+  /// null = belum divalidasi. Penjualan dari batch yang tanggalnya sudah
+  /// lewat hanya ditolak setelah keduanya tersedia (README 5.5).
+  expiryValidatedAt DateTime?
   production     Production?
   openingBalance BatchOpeningBalance?
   aliases        BatchAlias[]
   stockMovements BatchStockMovement[]
   stockAdjustments StockAdjustment[]
+  saleAllocations SaleAllocation[]
   createdAt      DateTime @default(now())
 
   @@index([productId])
@@ -279,8 +290,6 @@ model ProductionCorrection {
 }
 
 /// Jenis pergerakan stok produk jadi per batch (README 5.4).
-/// Nilai tambahan (penjualan, pembatalan) ditambahkan pada tugas
-/// roadmap berikutnya.
 enum BatchMovementType {
   /// Hasil produksi menambah stok batch.
   PRODUCTION_YIELD
@@ -290,6 +299,12 @@ enum BatchMovementType {
   OPENING_BALANCE
   /// Penyesuaian stok oleh Admin (README 5.4); quantity bernilai tanda.
   ADJUSTMENT
+  /// Penjualan mengurangi stok batch sesuai alokasi (README 5.5);
+  /// quantity bernilai tanda (negatif).
+  SALE
+  /// Pengembalian stok ke batch asal saat transaksi dibatalkan
+  /// (README 5.5); quantity positif.
+  SALE_CANCELLATION
 }
 
 /// Jejak setiap pergerakan stok produk jadi per batch (README 5.4).
@@ -317,8 +332,14 @@ model BatchStockMovement {
   /// Penyesuaian stok (B6): pergerakan dikaitkan dengan catatan sumbernya.
   adjustment   StockAdjustment? @relation(fields: [adjustmentId], references: [id])
   adjustmentId String?          @unique
+  /// Alokasi penjualan (B7): pergerakan PENJUALAN dan PENGEMBALIAN stok
+  /// dikaitkan dengan catatan sumbernya (alokasi item transaksi). Satu
+  /// alokasi dapat memiliki dua pergerakan: SALE lalu SALE_CANCELLATION.
+  saleAllocation  SaleAllocation? @relation(fields: [saleAllocationId], references: [id])
+  saleAllocationId String?
 
   @@index([batchId])
+  @@index([saleAllocationId])
   @@map("batch_stock_movements")
 }
 
@@ -376,6 +397,73 @@ model StockAdjustment {
   @@map("stock_adjustments")
 }
 
+// ---------------------------------------------------------------------------
+// Penjualan dan pembatalan transaksi (README 5.5)
+// ---------------------------------------------------------------------------
+
+/// Satu transaksi penjualan (README 5.5). Total DIHITUNG BACKEND dari
+/// harga satuan master produk × jumlah item — bukan dari input klien.
+/// Transaksi tersimpan tidak pernah diedit atau dihapus; Admin hanya
+/// dapat membatalkannya dengan alasan, dan stok dikembalikan ke batch
+/// asal. Transaksi batal tidak masuk omzet (dicek lewat cancelledAt).
+model SaleTransaction {
+  id           String   @id @default(cuid())
+  /// Total transaksi (jumlah seluruh baris item, dibulatkan 2 desimal).
+  total        Decimal  @db.Decimal(14, 2)
+  recordedBy   User     @relation("SaleRecordedBy", fields: [recordedById], references: [id])
+  recordedById String
+  /// Waktu pencatatan transaksi.
+  recordedAt   DateTime @default(now())
+  /// Alasan pembatalan oleh Admin; wajib diisi bila dibatalkan.
+  cancelReason String?
+  cancelledAt  DateTime?
+  cancelledBy  User?    @relation("SaleCancelledBy", fields: [cancelledById], references: [id])
+  cancelledById String?
+  items        SaleItem[]
+
+  @@index([recordedById])
+  @@index([cancelledById])
+  @@map("sale_transactions")
+}
+
+/// Item penjualan per jenis produk (satu produk maksimal satu item per
+/// transaksi). Harga satuan disimpan dari master pada saat transaksi
+/// sehingga perubahan harga produk tidak mengubah transaksi lama.
+model SaleItem {
+  id            String          @id @default(cuid())
+  transaction   SaleTransaction @relation(fields: [transactionId], references: [id])
+  transactionId String
+  product       Product         @relation(fields: [productId], references: [id])
+  productId     String
+  /// Jumlah terjual (satuan dasar produk) = jumlah seluruh alokasi item.
+  quantity      Decimal         @db.Decimal(14, 3)
+  /// Harga satuan dari master produk pada saat transaksi (README 5.5).
+  unitPrice     Decimal         @db.Decimal(14, 2)
+  allocations   SaleAllocation[]
+
+  @@unique([transactionId, productId])
+  @@index([productId])
+  @@map("sale_items")
+}
+
+/// Alokasi batch per item penjualan (README 5.5): Operator memilih batch
+/// yang benar-benar diambil; satu item dapat dialokasikan ke beberapa
+/// batch. Riwayat alokasi tetap ada walaupun transaksi dibatalkan.
+model SaleAllocation {
+  id       String   @id @default(cuid())
+  item     SaleItem @relation(fields: [itemId], references: [id])
+  itemId   String
+  batch    Batch    @relation(fields: [batchId], references: [id])
+  batchId  String
+  /// Jumlah yang diambil dari batch ini (satuan dasar produk).
+  quantity Decimal  @db.Decimal(14, 3)
+  movements BatchStockMovement[]
+
+  @@unique([itemId, batchId])
+  @@index([batchId])
+  @@map("sale_allocations")
+}
+
 /// Master produk (README 5.1). Setiap produk memiliki SATU satuan dasar;
 /// produksi, stok, dan penjualan memakai satuan yang sama —
 /// tidak ada konversi satuan otomatis.
@@ -397,6 +485,7 @@ model Product {
 
   batches     Batch[]
   productions Production[]
+  saleItems   SaleItem[]
 
   @@map("products")
 }
