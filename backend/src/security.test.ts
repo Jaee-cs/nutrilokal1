@@ -108,6 +108,8 @@ const ROUTES: Array<{ method: 'get' | 'post' | 'patch' | 'delete'; path: string;
   { method: 'post', path: '/api/materials', access: 'admin' },
   { method: 'patch', path: '/api/materials/id-tidak-ada', access: 'admin' },
   { method: 'delete', path: '/api/materials/id-tidak-ada', access: 'admin' },
+  // Riwayat pergerakan stok: hanya baca, Admin dan Operator (Fase C).
+  { method: 'get', path: '/api/materials/id-tidak-ada/movements', access: 'user' },
 
   // Penerimaan (Operator boleh) & saldo awal (Admin)
   { method: 'get', path: '/api/materials/id-tidak-ada/receipts', access: 'user' },

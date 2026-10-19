@@ -12,6 +12,7 @@ import { Router } from 'express';
 import { pathId } from '../lib/http';
 import { hasOperationalHistory } from '../lib/master-history';
 import { toPublicMaterial } from '../lib/material';
+import { MATERIAL_MOVEMENT_INCLUDE, toPublicMaterialMovement } from '../lib/material-records';
 import { prisma } from '../lib/prisma';
 import { getMaterialStock } from '../lib/stock';
 import { validateName, validateUnit } from '../lib/validate';
@@ -43,6 +44,32 @@ materialsRouter.get('/:id', authenticate, async (req, res) => {
   }
 
   res.json({ material: toPublicMaterial(material, await getMaterialStock(prisma, material.id)) });
+});
+
+/**
+ * Riwayat pergerakan stok bahan baku (README 5.4).
+ *
+ * - Dapat dilihat Admin dan Operator (informasi operasional).
+ * - Terurut dari kejadian terbaru ke terlama; waktu pencatatan dan ID dipakai
+ *   sebagai penentu urutan agar hasil selalu deterministik.
+ * - Hanya baca: tidak ada endpoint edit/hapus untuk pergerakan stok.
+ */
+materialsRouter.get('/:id/movements', authenticate, async (req, res) => {
+  const materialId = pathId(req);
+
+  const material = await prisma.material.findUnique({ where: { id: materialId }, select: { id: true } });
+  if (!material) {
+    res.status(404).json({ message: 'Bahan baku tidak ditemukan.' });
+    return;
+  }
+
+  const movements = await prisma.materialStockMovement.findMany({
+    where: { materialId },
+    orderBy: [{ occurredAt: 'desc' }, { recordedAt: 'desc' }, { id: 'desc' }],
+    include: MATERIAL_MOVEMENT_INCLUDE,
+  });
+
+  res.json({ data: movements.map(toPublicMaterialMovement) });
 });
 
 // ---------- Mengubah (hanya Admin) ----------
