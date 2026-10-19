@@ -1,6 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider } from './hooks/useAuth'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from './layout/Layout'
+import { AdminRoute, ProtectedRoute } from './components/ProtectedRoute'
+import { AuthProvider } from './hooks/useAuth'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { UsersPage } from './pages/UsersPage'
@@ -9,15 +10,19 @@ import { MaterialsPage } from './pages/MaterialsPage'
 import { MaterialStockPage } from './pages/MaterialStockPage'
 import { ProductionPage } from './pages/ProductionPage'
 import { SalesPage } from './pages/SalesPage'
-import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute'
-import './styles/App.css'
+import { CatalogPage } from './pages/CatalogPage'
+import { QrTracePage } from './pages/QrTracePage'
+import { QrManagementPage } from './pages/QrManagementPage'
 
-function App() {
+export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
+          <Route path="catalog" element={<CatalogPage />} />
+          <Route path="qr/:code" element={<QrTracePage />} />
+          <Route path="qr-trace" element={<QrTracePage />} />
+          <Route path="login" element={<LoginPage />} />
           <Route path="/" element={<Layout />}>
             <Route element={<ProtectedRoute />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
@@ -30,6 +35,7 @@ function App() {
             </Route>
             <Route element={<AdminRoute />}>
               <Route path="users" element={<UsersPage />} />
+              <Route path="qr-management" element={<QrManagementPage />} />
             </Route>
           </Route>
         </Routes>
@@ -37,6 +43,3 @@ function App() {
     </AuthProvider>
   )
 }
-
-export default App
-
