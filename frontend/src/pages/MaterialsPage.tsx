@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
-import { Drawer } from '../components/Drawer'
 import { useAuth } from '../hooks/useAuth'
 
 interface Material {
@@ -39,6 +38,8 @@ interface Movement {
   sourceId?: string | null
 }
 
+type TabKey = 'list' | 'add' | 'adjust' | 'receipt'
+
 const MOVEMENT_LABELS: Record<MovementType, string> = {
   RECEIPT: 'Penerimaan',
   OPENING_BALANCE: 'Saldo Awal',
@@ -46,7 +47,11 @@ const MOVEMENT_LABELS: Record<MovementType, string> = {
   ADJUSTMENT: 'Penyesuaian',
 }
 
-const EMPTY_FORM = { name: '', unit: '', description: '' }
+const EMPTY_ADD = { name: '', unit: '', description: '' }
+const EMPTY_ADD_OB = { quantity: '', date: '', reason: '' }
+const EMPTY_OB = { materialId: '', quantity: '', date: '', reason: '' }
+const EMPTY_ADJ = { materialId: '', quantity: '', reason: '' }
+const EMPTY_RECEIPT = { materialId: '', quantity: '', receivedAt: '', note: '' }
 
 /** Tanggal bisnis (YYYY-MM-DD) pada kalender WIB. */
 function businessDate(iso: string): string {
@@ -74,23 +79,29 @@ function buildMovementRows(rows: Movement[], currentStock?: number) {
 }
 
 /**
- * Halaman gabungan "Bahan Baku" (Fase D): master bahan baku, stok aktual,
- * riwayat pergerakan, penyesuaian (Admin), penerimaan, dan saldo awal (Admin).
- * Semua data berasal dari backend — tidak ada aturan bisnis baru di sini.
+ * Halaman "Bahan Baku" dengan navigasi tab: Daftar Bahan, Tambah Bahan
+ * (termasuk saldo awal opsional), Penyesuaian Stok (Admin), dan Penerimaan.
+ * Semua data dan aturan berasal dari backend — tidak ada aturan bisnis baru.
  */
 export function MaterialsPage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'ADMIN'
 
+  const [tab, setTab] = useState<TabKey>('list')
   const [materials, setMaterials] = useState<Material[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  // Master: tambah bahan (Admin — ditegakkan backend)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [form, setForm] = useState(EMPTY_FORM)
-  const [submitting, setSubmitting] = useState(false)
+  // Tambah bahan baku (+ saldo awal opsional dalam satu alur, Admin)
+  const [addForm, setAddForm] = useState(EMPTY_ADD)
+  const [obEnabled, setObEnabled] = useState(false)
+  const [addObForm, setAddObForm] = useState(EMPTY_ADD_OB)
+  const [submittingAdd, setSubmittingAdd] = useState(false)
+
+  // Saldo awal bahan yang sudah ada (Admin)
+  const [obForm, setObForm] = useState(EMPTY_OB)
+  const [submittingOb, setSubmittingOb] = useState(false)
 
   // Riwayat pergerakan stok (Admin & Operator)
   const [movements, setMovements] = useState<Movement[]>([])
@@ -98,19 +109,15 @@ export function MaterialsPage() {
   const [loadingMovements, setLoadingMovements] = useState(false)
 
   // Penyesuaian stok (Admin)
-  const [adjForm, setAdjForm] = useState({ materialId: '', quantity: '', reason: '' })
+  const [adjForm, setAdjForm] = useState(EMPTY_ADJ)
   const [submittingAdj, setSubmittingAdj] = useState(false)
 
   // Penerimaan bahan baku (Admin & Operator)
-  const [receiptForm, setReceiptForm] = useState({ materialId: '', quantity: '', receivedAt: '', note: '' })
+  const [receiptForm, setReceiptForm] = useState(EMPTY_RECEIPT)
   const [submittingReceipt, setSubmittingReceipt] = useState(false)
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [receiptMaterialId, setReceiptMaterialId] = useState('')
   const [loadingReceipts, setLoadingReceipts] = useState(false)
-
-  // Saldo awal bahan baku (Admin)
-  const [obForm, setObForm] = useState({ materialId: '', quantity: '', date: '', reason: '' })
-  const [submittingOb, setSubmittingOb] = useState(false)
 
   async function fetchMaterials(): Promise<boolean> {
     try {
@@ -145,18 +152,20 @@ export function MaterialsPage() {
     }
   }
 
-  async function loadReceipts(materialId: string) {
+  async function loadReceipts(materialId: string): Promise<boolean> {
     if (!materialId) {
       setReceipts([])
-      return
+      return true
     }
     setLoadingReceipts(true)
     try {
       const res = await api.get(`/materials/${materialId}/receipts`)
       setReceipts(res.data.data || res.data || [])
+      return true
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal memuat riwayat penerimaan')
       setReceipts([])
+      return false
     } finally {
       setLoadingReceipts(false)
     }
@@ -166,37 +175,117 @@ export function MaterialsPage() {
     fetchMaterials()
   }, [])
 
-  function openDrawer() {
-    setForm(EMPTY_FORM)
-    setError(null)
-    setDrawerOpen(true)
-  }
+  // Tab yang tersedia mengikuti hak akses backend: menambah bahan, menonaktifkan
+  // bahan, dan penyesuaian stok hanya Admin; penerimaan juga untuk Operator.
+  const tabs: Array<{ key: TabKey; label: string; icon: string }> = [
+    { key: 'list', label: 'Daftar Bahan', icon: 'list_alt' },
+    ...(isAdmin ? [{ key: 'add' as TabKey, label: 'Tambah Bahan', icon: 'add_box' }] : []),
+    ...(isAdmin ? [{ key: 'adjust' as TabKey, label: 'Penyesuaian Stok', icon: 'tune' }] : []),
+    { key: 'receipt', label: 'Penerimaan', icon: 'move_to_inbox' },
+  ]
+  const activeTab: TabKey = tabs.some((t) => t.key === tab) ? tab : 'list'
 
-  async function createMaterial(e: React.FormEvent) {
-    e.preventDefault()
-    setSubmitting(true)
+  /** Perpindahan tab tidak pernah mengirim formulir; pesan lama dibersihkan
+      agar tidak ada umpan balik dari tab lain yang menyesatkan. */
+  function selectTab(key: TabKey) {
+    if (key === activeTab) return
+    setTab(key)
     setError(null)
     setSuccess(null)
+  }
+
+  /**
+   * Tambah bahan baku; saldo awal (opsional) dicatat SEKALI dalam alur yang
+   * sama setelah bahan berhasil dibuat. Bila saldo awal gagal, bahan tetap
+   * ada dan pengguna diberi tahu supaya tidak mengulang pembuatan bahan.
+   */
+  async function createMaterial(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setSuccess(null)
+
+    if (!addForm.name.trim()) {
+      setError('Nama bahan wajib diisi.')
+      return
+    }
+    if (!addForm.unit.trim()) {
+      setError('Satuan bahan wajib diisi.')
+      return
+    }
+    if (obEnabled) {
+      const obQuantity = Number(addObForm.quantity)
+      if (!Number.isFinite(obQuantity) || obQuantity <= 0) {
+        setError('Jumlah saldo awal harus lebih besar dari nol.')
+        return
+      }
+      if (!addObForm.date) {
+        setError('Tanggal saldo awal wajib diisi.')
+        return
+      }
+      if (!addObForm.reason.trim()) {
+        setError('Alasan saldo awal wajib diisi.')
+        return
+      }
+    }
+
+    setSubmittingAdd(true)
     try {
-      await api.post('/materials', {
-        name: form.name,
-        unit: form.unit,
-        description: form.description || undefined,
+      const created = await api.post('/materials', {
+        name: addForm.name,
+        unit: addForm.unit,
+        description: addForm.description || undefined,
       })
-      setSuccess('Bahan baku berhasil ditambahkan')
-      setDrawerOpen(false)
-      await fetchMaterials()
+      const newMaterial: Material = created.data.material
+
+      let openingBalanceError: string | null = null
+      if (obEnabled) {
+        try {
+          await api.post(`/materials/${newMaterial.id}/opening-balances`, {
+            quantity: Number(addObForm.quantity),
+            date: addObForm.date,
+            reason: addObForm.reason.trim(),
+          })
+        } catch (err: any) {
+          openingBalanceError = err.response?.data?.message || 'Gagal mencatat saldo awal'
+        }
+      }
+
+      // Segarkan daftar dulu, baru tampilkan pesan.
+      const refreshed = await fetchMaterials()
+      if (refreshed) {
+        if (openingBalanceError) {
+          setError(
+            `Bahan baku "${newMaterial.name}" berhasil ditambahkan, tetapi saldo awal gagal dicatat: ${openingBalanceError}`
+          )
+        } else if (obEnabled) {
+          setSuccess(
+            `Bahan baku "${newMaterial.name}" berhasil ditambahkan beserta saldo awal ${Number(addObForm.quantity).toLocaleString('id-ID')} ${newMaterial.unit}`
+          )
+        } else {
+          setSuccess(`Bahan baku "${newMaterial.name}" berhasil ditambahkan`)
+        }
+      }
+
+      // Kosongkan formulir, termasuk centang saldo awal, agar tidak tercatat dua kali.
+      setAddForm(EMPTY_ADD)
+      setAddObForm(EMPTY_ADD_OB)
+      setObEnabled(false)
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal menambah bahan baku')
     } finally {
-      setSubmitting(false)
+      setSubmittingAdd(false)
     }
   }
 
   async function toggleActive(id: string, current: boolean) {
+    setError(null)
+    setSuccess(null)
     try {
       await api.patch(`/materials/${id}`, { isActive: !current })
-      await fetchMaterials()
+      const refreshed = await fetchMaterials()
+      if (refreshed) {
+        setSuccess(current ? 'Bahan baku dinonaktifkan' : 'Bahan baku diaktifkan kembali')
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal mengubah status')
     }
@@ -234,7 +323,7 @@ export function MaterialsPage() {
         quantity,
         reason,
       })
-      setAdjForm({ materialId: '', quantity: '', reason: '' })
+      setAdjForm(EMPTY_ADJ)
 
       // Muat ulang DULU (stok + riwayat), lalu tampilkan pesan sukses agar
       // pesan tidak langsung terhapus oleh pemuatan ulang.
@@ -256,19 +345,37 @@ export function MaterialsPage() {
 
   async function submitReceipt(e: React.FormEvent) {
     e.preventDefault()
-    setSubmittingReceipt(true)
     setError(null)
     setSuccess(null)
+
+    const targetId = receiptForm.materialId
+    const quantity = Number(receiptForm.quantity)
+    if (!targetId) {
+      setError('Pilih bahan baku yang diterima.')
+      return
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setError('Jumlah penerimaan harus lebih besar dari nol.')
+      return
+    }
+
+    setSubmittingReceipt(true)
     try {
-      await api.post(`/materials/${receiptForm.materialId}/receipts`, {
-        quantity: Number(receiptForm.quantity),
+      await api.post(`/materials/${targetId}/receipts`, {
+        quantity,
         receivedAt: receiptForm.receivedAt || undefined,
         note: receiptForm.note || undefined,
       })
-      setSuccess('Penerimaan bahan baku berhasil dicatat')
-      setReceiptForm({ materialId: '', quantity: '', receivedAt: '', note: '' })
-      await fetchMaterials()
-      if (receiptMaterialId) await loadReceipts(receiptMaterialId)
+      setReceiptForm(EMPTY_RECEIPT)
+
+      // Segarkan stok dan riwayat penerimaan, baru tampilkan pesan sukses.
+      const stockRefreshed = await fetchMaterials()
+      const historyTarget = receiptMaterialId || targetId
+      setReceiptMaterialId(historyTarget)
+      const historyRefreshed = await loadReceipts(historyTarget)
+      if (stockRefreshed && historyRefreshed) {
+        setSuccess('Penerimaan bahan baku berhasil dicatat')
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal mencatat penerimaan')
     } finally {
@@ -306,7 +413,7 @@ export function MaterialsPage() {
     setSubmittingOb(true)
     try {
       await api.post(`/materials/${materialId}/opening-balances`, { quantity, date, reason })
-      setObForm({ materialId: '', quantity: '', date: '', reason: '' })
+      setObForm(EMPTY_OB)
 
       // Saldo awal menambah stok DAN membuat pergerakan baru — segarkan
       // keduanya dulu, baru tampilkan pesan sukses.
@@ -333,21 +440,22 @@ export function MaterialsPage() {
   const movementMaterial = materials.find((m) => m.id === movementMaterialId)
   const movementRows = buildMovementRows(movements, movementMaterial?.stock)
   const movementUnit = movementMaterial?.unit || ''
+  const adjMaterial = materials.find((m) => m.id === adjForm.materialId)
 
   return (
-    <div className="container">
+    <div className="container materials-page">
       <div className="page-head">
         <h1 className="page-title">Bahan Baku</h1>
         <p className="page-subtitle">
           Master bahan baku, stok aktual, penerimaan, saldo awal, riwayat pergerakan, dan
-          penyesuaian — data dari backend.
+          penyesuaian — seluruh data berasal dari backend.
         </p>
       </div>
 
-      {error && !drawerOpen && <div className="alert error">{error}</div>}
+      {error && <div className="alert error">{error}</div>}
       {success && <div className="alert success">{success}</div>}
 
-      {/* Ringkasan */}
+      {/* Ringkasan stok */}
       <div className="summary-row">
         <div className="summary-item">
           <span className="card-label">Total Bahan</span>
@@ -363,402 +471,522 @@ export function MaterialsPage() {
         </div>
       </div>
 
-      {/* Daftar bahan baku + stok aktual (satu tabel) */}
-      <section className="card section-card">
-        <div className="toolbar">
-          <h2 className="card-title">Daftar Bahan Baku</h2>
-          <button className="button" onClick={openDrawer}>
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
-            Tambah Bahan
+      {/* Navigasi tab (responsif: dapat digulir mendatar pada layar sempit) */}
+      <div className="tab-nav" role="tablist" aria-label="Bagian halaman bahan baku">
+        {tabs.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            role="tab"
+            id={`tab-${item.key}`}
+            aria-selected={activeTab === item.key}
+            aria-controls={`panel-${item.key}`}
+            className="tab-btn"
+            onClick={() => selectTab(item.key)}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>{item.icon}</span>
+            {item.label}
           </button>
-        </div>
+        ))}
+      </div>
 
-        {loading ? (
-          <p className="text-muted">Memuat bahan baku...</p>
-        ) : materials.length === 0 ? (
-          <p className="text-muted">Belum ada bahan baku. Klik “Tambah Bahan” untuk menambah.</p>
-        ) : (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Nama Bahan</th>
-                  <th>Satuan</th>
-                  <th>Stok Aktual</th>
-                  <th>Status</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {materials.map((m) => (
-                  <tr key={m.id}>
-                    <td>
-                      <div className="cell-primary">{m.name}</div>
-                      {m.description && <div className="cell-secondary">{m.description}</div>}
-                    </td>
-                    <td>{m.unit}</td>
-                    <td className="num">
-                      <strong>{Number(m.stock ?? 0).toLocaleString('id-ID')}</strong>
-                    </td>
-                    <td>
-                      {m.isActive ? (
-                        <span className="badge success">Aktif</span>
-                      ) : (
-                        <span className="badge neutral">Nonaktif</span>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        className="button secondary"
-                        onClick={() => toggleActive(m.id, m.isActive)}
-                      >
-                        {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* Riwayat pergerakan stok (Admin & Operator) */}
-      <section className="card section-card">
-        <div className="section-head">
-          <h2 className="card-title">Riwayat Pergerakan Stok</h2>
-          <div className="field" style={{ minWidth: '240px' }}>
-            <label htmlFor="movement-material">Bahan baku</label>
-            <select
-              id="movement-material"
-              value={movementMaterialId}
-              onChange={(e) => {
-                const value = e.target.value
-                setMovementMaterialId(value)
-                loadMovements(value)
-              }}
-            >
-              <option value="">Pilih bahan baku</option>
-              {materials.map((m) => (
-                <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <p className="text-muted">
-          Riwayat hanya dapat dilihat — tidak dapat diedit atau dihapus. Kejadian terbaru
-          berada paling atas; saldo dihitung mundur dari stok terkini.
-        </p>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Tanggal</th>
-                <th>Jenis</th>
-                <th>Perubahan</th>
-                <th>Saldo</th>
-                <th>Alasan</th>
-                <th>Dicatat oleh</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!movementMaterialId ? (
-                <tr><td colSpan={6} className="text-muted">Pilih bahan baku untuk melihat riwayat pergerakan stok</td></tr>
-              ) : loadingMovements ? (
-                <tr><td colSpan={6}>Memuat riwayat...</td></tr>
-              ) : movementRows.length === 0 ? (
-                <tr><td colSpan={6} className="text-muted">Belum ada pergerakan stok</td></tr>
-              ) : (
-                movementRows.map(({ movement, balance }) => (
-                  <tr key={movement.id}>
-                    <td>{businessDate(movement.occurredAt)}</td>
-                    <td>{MOVEMENT_LABELS[movement.type] || movement.type}</td>
-                    <td className="num">
-                      <strong>{signed(movement.delta)}</strong>{' '}
-                      <span className="text-muted">{movementUnit}</span>
-                    </td>
-                    <td className="num">
-                      {balance !== undefined ? balance.toLocaleString('id-ID') : '-'}{' '}
-                      <span className="text-muted">{movementUnit}</span>
-                    </td>
-                    <td className="text-muted">{movement.reason || '-'}</td>
-                    <td>{movement.recordedBy?.username || '-'}</td>
-                  </tr>
-                ))
+      {/* ---------------------------------------------------------------- */}
+      {/* Tab: Daftar Bahan                                                */}
+      {/* ---------------------------------------------------------------- */}
+      {activeTab === 'list' && (
+        <div className="tab-panel" role="tabpanel" id="panel-list" aria-labelledby="tab-list">
+          <section className="card section-card">
+            <div className="toolbar">
+              <h2 className="card-title">Daftar Bahan Baku</h2>
+              {isAdmin && (
+                <button type="button" className="button" onClick={() => selectTab('add')}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
+                  Tambah Bahan
+                </button>
               )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </div>
 
-      {/* Penyesuaian stok — hanya Admin (backend juga menegakkan) */}
-      {isAdmin && (
-        <section className="card section-card">
-          <h2 className="card-title">Penyesuaian Stok</h2>
-          <p className="text-muted">
-            Jumlah bernilai tanda: positif menambah stok, negatif mengurangi. Alasan wajib
-            diisi dan tercatat permanen pada riwayat pergerakan.
-          </p>
-          <form onSubmit={submitAdjustment} className="form-row">
-            <div className="field">
-              <label htmlFor="adj-material">Bahan Baku</label>
-              <select
-                id="adj-material"
-                value={adjForm.materialId}
-                onChange={e => setAdjForm(f => ({ ...f, materialId: e.target.value }))}
-                required
-              >
-                <option value="">Pilih bahan baku</option>
-                {materials.map(m => (
-                  <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                ))}
-              </select>
+            {loading ? (
+              <p className="text-muted">Memuat bahan baku...</p>
+            ) : materials.length === 0 ? (
+              <p className="text-muted">
+                Belum ada bahan baku.
+                {isAdmin ? ' Gunakan tab “Tambah Bahan” untuk menambah.' : ' Hubungi Admin untuk menambah bahan.'}
+              </p>
+            ) : (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Nama Bahan</th>
+                      <th>Satuan</th>
+                      <th>Stok Aktual</th>
+                      <th>Status</th>
+                      {isAdmin && <th>Aksi</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {materials.map((m) => (
+                      <tr key={m.id}>
+                        <td>
+                          <div className="cell-primary">{m.name}</div>
+                          {m.description && <div className="cell-secondary">{m.description}</div>}
+                        </td>
+                        <td>{m.unit}</td>
+                        <td className="num">
+                          <strong>{Number(m.stock ?? 0).toLocaleString('id-ID')}</strong>
+                        </td>
+                        <td>
+                          {m.isActive ? (
+                            <span className="badge success">Aktif</span>
+                          ) : (
+                            <span className="badge neutral">Nonaktif</span>
+                          )}
+                        </td>
+                        {isAdmin && (
+                          <td>
+                            <button
+                              type="button"
+                              className="button secondary"
+                              onClick={() => toggleActive(m.id, m.isActive)}
+                            >
+                              {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* Riwayat pergerakan stok (Admin & Operator) */}
+          <section className="card section-card">
+            <div className="section-head">
+              <h2 className="card-title">Riwayat Pergerakan Stok</h2>
+              <div className="field" style={{ minWidth: '240px' }}>
+                <label htmlFor="movement-material">Bahan baku</label>
+                <select
+                  id="movement-material"
+                  value={movementMaterialId}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setMovementMaterialId(value)
+                    loadMovements(value)
+                  }}
+                >
+                  <option value="">Pilih bahan baku</option>
+                  {materials.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="field">
-              <label htmlFor="adj-quantity">Jumlah (bertanda)</label>
-              <input
-                id="adj-quantity"
-                type="number"
-                step="0.001"
-                value={adjForm.quantity}
-                onChange={e => setAdjForm(f => ({ ...f, quantity: e.target.value }))}
-                placeholder="cth. -2.5"
-                required
-              />
+            <p className="text-muted">
+              Riwayat hanya dapat dilihat — tidak dapat diedit atau dihapus. Kejadian terbaru
+              berada paling atas; saldo dihitung mundur dari stok terkini.
+            </p>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tanggal</th>
+                    <th>Jenis</th>
+                    <th>Perubahan</th>
+                    <th>Saldo</th>
+                    <th>Alasan</th>
+                    <th>Dicatat oleh</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!movementMaterialId ? (
+                    <tr><td colSpan={6} className="text-muted">Pilih bahan baku untuk melihat riwayat pergerakan stok</td></tr>
+                  ) : loadingMovements ? (
+                    <tr><td colSpan={6}>Memuat riwayat...</td></tr>
+                  ) : movementRows.length === 0 ? (
+                    <tr><td colSpan={6} className="text-muted">Belum ada pergerakan stok</td></tr>
+                  ) : (
+                    movementRows.map(({ movement, balance }) => (
+                      <tr key={movement.id}>
+                        <td>{businessDate(movement.occurredAt)}</td>
+                        <td>{MOVEMENT_LABELS[movement.type] || movement.type}</td>
+                        <td className="num">
+                          <strong>{signed(movement.delta)}</strong>{' '}
+                          <span className="text-muted">{movementUnit}</span>
+                        </td>
+                        <td className="num">
+                          {balance !== undefined ? balance.toLocaleString('id-ID') : '-'}{' '}
+                          <span className="text-muted">{movementUnit}</span>
+                        </td>
+                        <td className="text-muted">{movement.reason || '-'}</td>
+                        <td>{movement.recordedBy?.username || '-'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
-            <div className="field">
-              <label htmlFor="adj-reason">Alasan</label>
-              <input
-                id="adj-reason"
-                value={adjForm.reason}
-                onChange={e => setAdjForm(f => ({ ...f, reason: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="form-actions">
-              <button className="button" disabled={submittingAdj}>
-                {submittingAdj ? 'Menyimpan...' : 'Catat Penyesuaian'}
-              </button>
-            </div>
-          </form>
-        </section>
+          </section>
+        </div>
       )}
 
-      {/* Penerimaan bahan baku (Admin & Operator) */}
-      <section className="card section-card">
-        <h2 className="card-title">Catat Penerimaan Bahan Baku</h2>
-        <form onSubmit={submitReceipt} className="form-row">
-          <div className="field">
-            <label htmlFor="rs-material">Bahan Baku</label>
-            <select
-              id="rs-material"
-              value={receiptForm.materialId}
-              onChange={e => setReceiptForm(f => ({ ...f, materialId: e.target.value }))}
-              required
-            >
-              <option value="">Pilih bahan baku</option>
-              {activeMaterials.map(m => (
-                <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="rs-qty">Jumlah</label>
-            <input
-              id="rs-qty"
-              type="number"
-              step="0.001"
-              min="0"
-              value={receiptForm.quantity}
-              onChange={e => setReceiptForm(f => ({ ...f, quantity: e.target.value }))}
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="rs-date">Tanggal Penerimaan (opsional)</label>
-            <input
-              id="rs-date"
-              type="date"
-              value={receiptForm.receivedAt}
-              onChange={e => setReceiptForm(f => ({ ...f, receivedAt: e.target.value }))}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="rs-note">Catatan (opsional)</label>
-            <input
-              id="rs-note"
-              value={receiptForm.note}
-              onChange={e => setReceiptForm(f => ({ ...f, note: e.target.value }))}
-            />
-          </div>
-          <div className="form-actions">
-            <button className="button" disabled={submittingReceipt}>
-              {submittingReceipt ? 'Menyimpan...' : 'Catat Penerimaan'}
-            </button>
-          </div>
-        </form>
-      </section>
+      {/* ---------------------------------------------------------------- */}
+      {/* Tab: Tambah Bahan (+ saldo awal opsional) — hanya Admin          */}
+      {/* ---------------------------------------------------------------- */}
+      {activeTab === 'add' && isAdmin && (
+        <div className="tab-panel" role="tabpanel" id="panel-add" aria-labelledby="tab-add">
+          <section className="card section-card">
+            <h2 className="card-title">Tambah Bahan Baku</h2>
+            <p className="text-muted">
+              Isi data bahan baru. Saldo awal bersifat opsional — centang bagian saldo awal hanya
+              bila jumlah awal bahan ini benar-benar diketahui. Saldo awal dicatat satu kali
+              bersama bahan baru.
+            </p>
+            <form onSubmit={createMaterial} className="material-form">
+              <div className="form-grid">
+                <div className="field">
+                  <label htmlFor="m-name">Nama Bahan</label>
+                  <input
+                    id="m-name"
+                    value={addForm.name}
+                    onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="Contoh: Sapi Segar"
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="m-unit">Satuan Dasar</label>
+                  <input
+                    id="m-unit"
+                    value={addForm.unit}
+                    onChange={e => setAddForm(f => ({ ...f, unit: e.target.value }))}
+                    placeholder="Contoh: kg"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="m-desc">Deskripsi (opsional)</label>
+                <textarea
+                  id="m-desc"
+                  rows={2}
+                  value={addForm.description}
+                  onChange={e => setAddForm(f => ({ ...f, description: e.target.value }))}
+                />
+              </div>
 
-      {/* Saldo awal bahan baku — hanya Admin (README 5.2) */}
-      {isAdmin && (
-        <section className="card section-card">
-          <h2 className="card-title">Catat Saldo Awal Bahan Baku</h2>
-          <p className="text-muted">
-            Saldo awal dicatat terpisah dari penerimaan biasa dan tidak menghitung stok dua
-            kali. Tanggal, alasan, dan pengguna pencatat wajib tercatat.
-          </p>
-          <form onSubmit={submitOpeningBalance} className="form-row">
-            <div className="field">
-              <label htmlFor="ob-material">Bahan Baku</label>
-              <select
-                id="ob-material"
-                value={obForm.materialId}
-                onChange={e => setObForm(f => ({ ...f, materialId: e.target.value }))}
-                required
-              >
-                <option value="">Pilih bahan baku</option>
-                {activeMaterials.map(m => (
-                  <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="ob-qty">Jumlah</label>
-              <input
-                id="ob-qty"
-                type="number"
-                step="0.001"
-                min="0"
-                value={obForm.quantity}
-                onChange={e => setObForm(f => ({ ...f, quantity: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="ob-date">Tanggal Saldo Awal</label>
-              <input
-                id="ob-date"
-                type="date"
-                value={obForm.date}
-                onChange={e => setObForm(f => ({ ...f, date: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="ob-reason">Alasan</label>
-              <input
-                id="ob-reason"
-                value={obForm.reason}
-                onChange={e => setObForm(f => ({ ...f, reason: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="form-actions">
-              <button className="button" disabled={submittingOb}>
-                {submittingOb ? 'Menyimpan...' : 'Catat Saldo Awal'}
-              </button>
-            </div>
-          </form>
-        </section>
+              <div className="optional-block">
+                <div className="checkbox-row">
+                  <input
+                    id="ob-enable"
+                    type="checkbox"
+                    checked={obEnabled}
+                    onChange={e => {
+                      setObEnabled(e.target.checked)
+                      if (!e.target.checked) setAddObForm(EMPTY_ADD_OB)
+                    }}
+                  />
+                  <label htmlFor="ob-enable">Catat saldo awal sekaligus (opsional)</label>
+                </div>
+                {obEnabled ? (
+                  <div className="form-row" style={{ marginTop: '1rem' }}>
+                    <div className="field">
+                      <label htmlFor="ob-qty-new">Jumlah Saldo Awal</label>
+                      <input
+                        id="ob-qty-new"
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        value={addObForm.quantity}
+                        onChange={e => setAddObForm(f => ({ ...f, quantity: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="ob-date-new">Tanggal Saldo Awal</label>
+                      <input
+                        id="ob-date-new"
+                        type="date"
+                        value={addObForm.date}
+                        onChange={e => setAddObForm(f => ({ ...f, date: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="ob-reason-new">Alasan</label>
+                      <input
+                        id="ob-reason-new"
+                        value={addObForm.reason}
+                        onChange={e => setAddObForm(f => ({ ...f, reason: e.target.value }))}
+                        required
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-muted optional-hint">
+                    Tanpa saldo awal, bahan tetap dibuat dengan stok 0 dan dapat menerima
+                    penerimaan atau saldo awal susulan.
+                  </p>
+                )}
+              </div>
+
+              <div className="form-actions">
+                <button className="button" disabled={submittingAdd}>
+                  {submittingAdd
+                    ? 'Menyimpan...'
+                    : obEnabled ? 'Simpan Bahan + Saldo Awal' : 'Simpan Bahan'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="card section-card">
+            <h2 className="card-title">Catat Saldo Awal Bahan yang Sudah Ada</h2>
+            <p className="text-muted">
+              Untuk bahan yang sudah terdaftar tetapi saldo awalnya belum tercatat. Bahan baru
+              cukup dicatat lewat formulir di atas — jangan mencatat saldo awal dua kali untuk
+              bahan yang sama. Tanggal, alasan, dan pengguna pencatat tersimpan pada riwayat
+              pergerakan.
+            </p>
+            <form onSubmit={submitOpeningBalance} className="form-row">
+              <div className="field">
+                <label htmlFor="ob-material">Bahan Baku</label>
+                <select
+                  id="ob-material"
+                  value={obForm.materialId}
+                  onChange={e => setObForm(f => ({ ...f, materialId: e.target.value }))}
+                  required
+                >
+                  <option value="">Pilih bahan baku</option>
+                  {activeMaterials.map(m => (
+                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="ob-qty">Jumlah</label>
+                <input
+                  id="ob-qty"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={obForm.quantity}
+                  onChange={e => setObForm(f => ({ ...f, quantity: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="ob-date">Tanggal Saldo Awal</label>
+                <input
+                  id="ob-date"
+                  type="date"
+                  value={obForm.date}
+                  onChange={e => setObForm(f => ({ ...f, date: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="ob-reason">Alasan</label>
+                <input
+                  id="ob-reason"
+                  value={obForm.reason}
+                  onChange={e => setObForm(f => ({ ...f, reason: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="form-actions">
+                <button className="button" disabled={submittingOb}>
+                  {submittingOb ? 'Menyimpan...' : 'Catat Saldo Awal'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
       )}
 
-      {/* Riwayat penerimaan */}
-      <section className="card section-card">
-        <div className="section-head">
-          <h2 className="card-title">Riwayat Penerimaan</h2>
-          <div className="field" style={{ minWidth: '240px' }}>
-            <label htmlFor="receipt-material">Bahan baku</label>
-            <select
-              id="receipt-material"
-              value={receiptMaterialId}
-              onChange={(e) => { setReceiptMaterialId(e.target.value); loadReceipts(e.target.value) }}
-            >
-              <option value="">Pilih bahan baku</option>
-              {materials.map((m) => (
-                <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-              ))}
-            </select>
-          </div>
+      {/* ---------------------------------------------------------------- */}
+      {/* Tab: Penyesuaian Stok — hanya Admin (backend juga menegakkan)    */}
+      {/* ---------------------------------------------------------------- */}
+      {activeTab === 'adjust' && isAdmin && (
+        <div className="tab-panel" role="tabpanel" id="panel-adjust" aria-labelledby="tab-adjust">
+          <section className="card section-card">
+            <h2 className="card-title">Penyesuaian Stok</h2>
+            <p className="text-muted">
+              Jumlah bernilai tanda: positif menambah stok, negatif mengurangi. Alasan wajib
+              diisi dan tercatat permanen pada riwayat pergerakan stok.
+            </p>
+            <form onSubmit={submitAdjustment} className="form-row">
+              <div className="field">
+                <label htmlFor="adj-material">Bahan Baku</label>
+                <select
+                  id="adj-material"
+                  value={adjForm.materialId}
+                  onChange={e => setAdjForm(f => ({ ...f, materialId: e.target.value }))}
+                  required
+                >
+                  <option value="">Pilih bahan baku</option>
+                  {materials.map(m => (
+                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="adj-quantity">Jumlah (bertanda)</label>
+                <input
+                  id="adj-quantity"
+                  type="number"
+                  step="0.001"
+                  value={adjForm.quantity}
+                  onChange={e => setAdjForm(f => ({ ...f, quantity: e.target.value }))}
+                  placeholder="cth. -2.5"
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="adj-reason">Alasan</label>
+                <input
+                  id="adj-reason"
+                  value={adjForm.reason}
+                  onChange={e => setAdjForm(f => ({ ...f, reason: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="form-actions">
+                <button className="button" disabled={submittingAdj}>
+                  {submittingAdj ? 'Menyimpan...' : 'Catat Penyesuaian'}
+                </button>
+              </div>
+            </form>
+            {adjMaterial && (
+              <p className="text-muted optional-hint">
+                Stok {adjMaterial.name} saat ini: {Number(adjMaterial.stock ?? 0).toLocaleString('id-ID')} {adjMaterial.unit}
+                {' '}— hasil penyesuaian tidak boleh membuat stok menjadi negatif.
+              </p>
+            )}
+          </section>
         </div>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Bahan</th>
-                <th>Jumlah</th>
-                <th>Tanggal Terima</th>
-                <th>Dicatat oleh</th>
-                <th>Catatan</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!receiptMaterialId ? (
-                <tr><td colSpan={5} className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</td></tr>
-              ) : loadingReceipts ? (
-                <tr><td colSpan={5}>Memuat riwayat...</td></tr>
-              ) : receipts.length === 0 ? (
-                <tr><td colSpan={5} className="text-muted">Belum ada riwayat penerimaan</td></tr>
-              ) : (
-                receipts.slice(0, 20).map(r => (
-                  <tr key={r.id}>
-                    <td>{materials.find(m => m.id === r.materialId)?.name || r.materialId}</td>
-                    <td className="num">
-                      {Number(r.quantity).toLocaleString('id-ID')}{' '}
-                      <span className="text-muted">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
-                    </td>
-                    <td>{r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}</td>
-                    <td>{r.recordedBy?.username || '-'}</td>
-                    <td className="text-muted">{r.note || '-'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      )}
 
-      <Drawer open={drawerOpen} title="Tambah Bahan Baku" onClose={() => setDrawerOpen(false)}>
-        {error && <div className="alert error">{error}</div>}
-        <form onSubmit={createMaterial} className="drawer-form">
-          <div className="field">
-            <label htmlFor="m-name">Nama Bahan</label>
-            <input
-              id="m-name"
-              value={form.name}
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              placeholder="Contoh: Sapi Segar"
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="m-unit">Satuan Dasar</label>
-            <input
-              id="m-unit"
-              value={form.unit}
-              onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
-              placeholder="Contoh: kg"
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="m-desc">Deskripsi (opsional)</label>
-            <textarea
-              id="m-desc"
-              rows={2}
-              value={form.description}
-              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-            />
-          </div>
-          <div className="drawer-actions">
-            <button type="button" className="button secondary" onClick={() => setDrawerOpen(false)}>
-              Batal
-            </button>
-            <button className="button" disabled={submitting}>
-              {submitting ? 'Menyimpan...' : 'Simpan Bahan'}
-            </button>
-          </div>
-        </form>
-      </Drawer>
+      {/* ---------------------------------------------------------------- */}
+      {/* Tab: Penerimaan (Admin & Operator)                               */}
+      {/* ---------------------------------------------------------------- */}
+      {activeTab === 'receipt' && (
+        <div className="tab-panel" role="tabpanel" id="panel-receipt" aria-labelledby="tab-receipt">
+          <section className="card section-card">
+            <h2 className="card-title">Catat Penerimaan Bahan Baku</h2>
+            <p className="text-muted">
+              Penerimaan menambah stok bahan dan tercatat pada riwayat pergerakan stok.
+            </p>
+            <form onSubmit={submitReceipt} className="form-row">
+              <div className="field">
+                <label htmlFor="rs-material">Bahan Baku</label>
+                <select
+                  id="rs-material"
+                  value={receiptForm.materialId}
+                  onChange={e => setReceiptForm(f => ({ ...f, materialId: e.target.value }))}
+                  required
+                >
+                  <option value="">Pilih bahan baku</option>
+                  {activeMaterials.map(m => (
+                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="rs-qty">Jumlah</label>
+                <input
+                  id="rs-qty"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={receiptForm.quantity}
+                  onChange={e => setReceiptForm(f => ({ ...f, quantity: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="rs-date">Tanggal Penerimaan (opsional)</label>
+                <input
+                  id="rs-date"
+                  type="date"
+                  value={receiptForm.receivedAt}
+                  onChange={e => setReceiptForm(f => ({ ...f, receivedAt: e.target.value }))}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="rs-note">Catatan (opsional)</label>
+                <input
+                  id="rs-note"
+                  value={receiptForm.note}
+                  onChange={e => setReceiptForm(f => ({ ...f, note: e.target.value }))}
+                />
+              </div>
+              <div className="form-actions">
+                <button className="button" disabled={submittingReceipt}>
+                  {submittingReceipt ? 'Menyimpan...' : 'Catat Penerimaan'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          {/* Riwayat penerimaan (Admin & Operator) */}
+          <section className="card section-card">
+            <div className="section-head">
+              <h2 className="card-title">Riwayat Penerimaan</h2>
+              <div className="field" style={{ minWidth: '240px' }}>
+                <label htmlFor="receipt-material">Bahan baku</label>
+                <select
+                  id="receipt-material"
+                  value={receiptMaterialId}
+                  onChange={(e) => { setReceiptMaterialId(e.target.value); loadReceipts(e.target.value) }}
+                >
+                  <option value="">Pilih bahan baku</option>
+                  {materials.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Bahan</th>
+                    <th>Jumlah</th>
+                    <th>Tanggal Terima</th>
+                    <th>Dicatat oleh</th>
+                    <th>Catatan</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!receiptMaterialId ? (
+                    <tr><td colSpan={5} className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</td></tr>
+                  ) : loadingReceipts ? (
+                    <tr><td colSpan={5}>Memuat riwayat...</td></tr>
+                  ) : receipts.length === 0 ? (
+                    <tr><td colSpan={5} className="text-muted">Belum ada riwayat penerimaan</td></tr>
+                  ) : (
+                    receipts.slice(0, 20).map(r => (
+                      <tr key={r.id}>
+                        <td>{materials.find(m => m.id === r.materialId)?.name || r.materialId}</td>
+                        <td className="num">
+                          {Number(r.quantity).toLocaleString('id-ID')}{' '}
+                          <span className="text-muted">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
+                        </td>
+                        <td>{r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}</td>
+                        <td>{r.recordedBy?.username || '-'}</td>
+                        <td className="text-muted">{r.note || '-'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }
