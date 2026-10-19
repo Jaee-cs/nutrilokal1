@@ -7,6 +7,7 @@ import { UsersPage } from './pages/UsersPage'
 import { ProductsPage } from './pages/ProductsPage'
 import { MaterialsPage } from './pages/MaterialsPage'
 import { MaterialStockPage } from './pages/MaterialStockPage'
+import { ProductionPage } from './pages/ProductionPage'
 import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute'
 import './styles/App.css'
 
@@ -23,6 +24,7 @@ function App() {
               <Route path="products" element={<ProductsPage />} />
               <Route path="materials" element={<MaterialsPage />} />
               <Route path="material-stock" element={<MaterialStockPage />} />
+              <Route path="production" element={<ProductionPage />} />
             </Route>
             <Route element={<AdminRoute />}>
               <Route path="users" element={<UsersPage />} />
