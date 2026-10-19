@@ -10,6 +10,10 @@ export interface PublicProduct {
   id: string;
   name: string;
   description: string | null;
+  /** Komposisi bahan (info publik QR/katalog, README 5.6). */
+  composition: string | null;
+  /** Petunjuk penyimpanan (info publik QR/katalog, README 5.6). */
+  storageInstructions: string | null;
   unit: string;
   sellingPrice: number;
   isActive: boolean;
@@ -33,6 +37,8 @@ export function toPublicProduct(
     id: product.id,
     name: product.name,
     description: product.description,
+    composition: product.composition,
+    storageInstructions: product.storageInstructions,
     unit: product.unit,
     sellingPrice: Number(product.sellingPrice),
     isActive: product.isActive,

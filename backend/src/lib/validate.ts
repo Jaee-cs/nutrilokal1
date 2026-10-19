@@ -24,14 +24,26 @@ export function validateUnit(value: unknown): string | null {
 }
 
 export function validateDescription(value: unknown): string | null {
+  return validateOptionalText(value, 'Deskripsi');
+}
+
+/**
+ * Validasi umum kolom teks opsional yang dikelola Admin (deskripsi,
+ * komposisi, petunjuk penyimpanan). Null = kolom dikosongkan/d disembunyikan.
+ */
+export function validateOptionalText(
+  value: unknown,
+  label: string,
+  maxLength = 2000
+): string | null {
   if (value === null || value === undefined) {
     return null;
   }
   if (typeof value !== 'string') {
-    return 'Deskripsi harus berupa teks.';
+    return `${label} harus berupa teks.`;
   }
-  if (value.length > 2000) {
-    return 'Deskripsi maksimal 2000 karakter.';
+  if (value.length > maxLength) {
+    return `${label} maksimal ${maxLength} karakter.`;
   }
   return null;
 }

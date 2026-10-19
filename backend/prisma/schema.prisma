@@ -8,8 +8,9 @@
 // dan koreksi catatan produksi. Tugas B6 menambahkan stok awal produk
 // jadi per batch dan penyesuaian stok oleh Admin. Tugas B7 menambahkan
 // transaksi penjualan beserta alokasi batch dan pembatalan oleh Admin.
-// Model lainnya (QR, dll.) ditambahkan pada tugas roadmap berikutnya
-// sesuai README.
+// Tugas B8 menambahkan kolom info publik produk (komposisi & petunjuk
+// penyimpanan) serta status validasi/penerbitan/penarikan QR per batch.
+// Model lainnya ditambahkan pada tugas roadmap berikutnya sesuai README.
 
 generator client {
   provider = "prisma-client-js"
@@ -55,6 +56,9 @@ model User {
   stockAdjustments        StockAdjustment[]
   saleTransactions        SaleTransaction[] @relation("SaleRecordedBy")
   saleCancellations       SaleTransaction[] @relation("SaleCancelledBy")
+  qrValidations           QrPublication[]   @relation("QrValidatedBy")
+  qrPublications          QrPublication[]   @relation("QrPublishedBy")
+  qrWithdrawals           QrPublication[]   @relation("QrWithdrawnBy")
 
   @@map("users")
 }
@@ -251,6 +255,9 @@ model Batch {
   stockMovements BatchStockMovement[]
   stockAdjustments StockAdjustment[]
   saleAllocations SaleAllocation[]
+  /// Status QR traceability batch (README 5.6): satu baris per batch —
+  /// siklus validasi → penerbitan → (penarikan) oleh Admin.
+  qrPublication QrPublication?
   createdAt      DateTime @default(now())
 
   @@index([productId])
@@ -464,14 +471,55 @@ model SaleAllocation {
   @@map("sale_allocations")
 }
 
+// ---------------------------------------------------------------------------
+// Katalog publik dan QR traceability (README 5.6)
+// ---------------------------------------------------------------------------
+
+/// Status publikasi QR per batch (README 5.6). Setiap batch memiliki QR
+/// unik (kode batch + alias); isi informasi publiknya berasal dari master
+/// produk (nama, deskripsi, komposisi, petunjuk penyimpanan) dan fakta
+/// batch (kode, tanggal produksi, tanggal kedaluwarsa tervalidasi).
+/// Baris ini HANYA menyimpan siklus Admin: memvalidasi, menerbitkan,
+/// dan menarik. Jika ditarik, QR menampilkan pemberitahuan bahwa
+/// informasi publik tidak tersedia — tanpa data yang ditarik/internal.
+model QrPublication {
+  id       String @id @default(cuid())
+  batch    Batch  @relation(fields: [batchId], references: [id])
+  batchId  String @unique
+  /// Waktu Admin memvalidasi isi informasi publik; null = belum divalidasi.
+  validatedAt   DateTime?
+  validatedBy   User?  @relation("QrValidatedBy", fields: [validatedById], references: [id])
+  validatedById String?
+  /// Waktu informasi diterbitkan ke publik (QR aktif menampilkan data).
+  publishedAt   DateTime?
+  publishedBy   User?  @relation("QrPublishedBy", fields: [publishedById], references: [id])
+  publishedById String?
+  /// Waktu Admin menarik informasi publik (QR menampilkan pemberitahuan).
+  withdrawnAt   DateTime?
+  withdrawnBy   User?  @relation("QrWithdrawnBy", fields: [withdrawnById], references: [id])
+  withdrawnById String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([validatedById])
+  @@index([publishedById])
+  @@index([withdrawnById])
+  @@map("qr_publications")
+}
+
 /// Master produk (README 5.1). Setiap produk memiliki SATU satuan dasar;
 /// produksi, stok, dan penjualan memakai satuan yang sama —
 /// tidak ada konversi satuan otomatis.
 model Product {
   id          String   @id @default(cuid())
   name        String
-  /// Deskripsi produk untuk keperluan katalog (divalidasi & diterbitkan Admin pada tahap B8).
+  /// Deskripsi produk untuk keperluan katalog & QR (dikelola Admin).
   description String?
+  /// Komposisi bahan untuk QR traceability (README 5.6): teks yang
+  /// dimasukkan Admin dari resep nyata — tidak dikarang sistem.
+  composition String?
+  /// Petunjuk penyimpanan untuk QR traceability (README 5.6).
+  storageInstructions String?
   /// Satuan dasar produk (mis. "pcs", "botol", "kg").
   unit        String
   /// Harga jual per satuan dasar; ditetapkan di master dan dipakai

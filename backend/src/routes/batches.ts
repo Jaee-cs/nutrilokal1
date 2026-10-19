@@ -10,17 +10,26 @@
  *   batch (bukan angka tersimpan terpisah) agar tidak ada dua sumber stok.
  * - Mencatat/membersihkan tanggal kedaluwarsa batch: hanya Admin
  *   (README 5.5 dan 5.6); tanggal yang dicatat Admin dianggap tervalidasi.
+ * - Status QR traceability per batch (README 5.6): melihat (Admin dan
+ *   Operator), memvalidasi, menerbitkan, dan menarik: hanya Admin.
+ *   Setiap batch memiliki QR unik (kode batch + alias); isi publiknya
+ *   berasal dari master produk dan fakta batch — lihat route /api/public.
  * - Tidak ada endpoint edit/hapus batch atau riwayat pergerakan stok.
  * - Header `Idempotency-Key` (opsional) mencegah permintaan berulang.
  */
 import { Prisma } from '@prisma/client';
-import { Router } from 'express';
+import { Response, Router } from 'express';
 import {
   allocateBatchCode,
   allocateOpeningBatchCode,
   isBatchCodeConflict,
   MAX_BATCH_CODE_ATTEMPTS,
 } from '../lib/batch';
+import {
+  QR_PUBLICATION_INCLUDE,
+  QrPublicationWithActors,
+  toPublicQrManagement,
+} from '../lib/qr';
 import {
   BATCH_DETAIL_INCLUDE,
   BATCH_INCLUDE,
@@ -271,4 +280,109 @@ batchesRouter.post('/opening-stock', authenticate, requireAdmin, async (req, res
   }
 
   throw lastError;
+});
+
+// ---------------------------------------------------------------------------
+// QR traceability per batch (README 5.6)
+//
+// Setiap batch memiliki QR unik yang menunjuk ke endpoint publik
+// GET /api/public/qr/<kode> (tanpa login). Siklus Admin:
+// memvalidasi → menerbitkan → (memperbarui lewat master) → menarik.
+// Jika ditarik, QR menampilkan pemberitahuan bahwa informasi publik
+// tidak tersedia — tanpa data yang ditarik maupun data internal.
+// ---------------------------------------------------------------------------
+
+async function loadQrBatch(batchId: string) {
+  return prisma.batch.findUnique({
+    where: { id: batchId },
+    select: { id: true, code: true, qrPublication: { include: QR_PUBLICATION_INCLUDE } },
+  });
+}
+
+function sendQrManagement(
+  res: Response,
+  batch: { id: string; code: string },
+  publication: QrPublicationWithActors | null
+): void {
+  res.json({ qr: toPublicQrManagement(batch, publication) });
+}
+
+// Melihat status QR: Admin dan Operator (informasi operasional).
+batchesRouter.get('/:id/qr', authenticate, async (req, res) => {
+  const batch = await loadQrBatch(pathId(req));
+  if (!batch) {
+    res.status(404).json({ message: 'Batch tidak ditemukan.' });
+    return;
+  }
+  sendQrManagement(res, batch, batch.qrPublication);
+});
+
+// Memvalidasi isi informasi publik QR: hanya Admin.
+batchesRouter.post('/:id/qr/validate', authenticate, requireAdmin, async (req, res) => {
+  const batch = await loadQrBatch(pathId(req));
+  if (!batch) {
+    res.status(404).json({ message: 'Batch tidak ditemukan.' });
+    return;
+  }
+
+  const now = new Date();
+  const publication = await prisma.qrPublication.upsert({
+    where: { batchId: batch.id },
+    create: { batchId: batch.id, validatedAt: now, validatedById: req.user!.id },
+    // Validasi ulang memperbarui waktu & penanggung jawab validasi.
+    update: { validatedAt: now, validatedById: req.user!.id },
+    include: QR_PUBLICATION_INCLUDE,
+  });
+
+  sendQrManagement(res, batch, publication);
+});
+
+// Menerbitkan informasi publik QR: hanya Admin, wajib sudah divalidasi.
+batchesRouter.post('/:id/qr/publish', authenticate, requireAdmin, async (req, res) => {
+  const batch = await loadQrBatch(pathId(req));
+  if (!batch) {
+    res.status(404).json({ message: 'Batch tidak ditemukan.' });
+    return;
+  }
+
+  const now = new Date();
+  const result = await prisma.qrPublication.updateMany({
+    where: { batchId: batch.id, validatedAt: { not: null } },
+    data: {
+      publishedAt: now,
+      publishedById: req.user!.id,
+      // Penerbitan ulang setelah penarikan menghapus status tarikan.
+      withdrawnAt: null,
+      withdrawnById: null,
+    },
+  });
+
+  if (result.count === 0) {
+    res.status(409).json({ message: 'QR belum divalidasi. Validasi informasi terlebih dahulu.' });
+    return;
+  }
+
+  sendQrManagement(res, batch, (await loadQrBatch(batch.id))?.qrPublication ?? null);
+});
+
+// Menarik informasi publik QR: hanya Admin, wajib sedang diterbitkan.
+batchesRouter.post('/:id/qr/withdraw', authenticate, requireAdmin, async (req, res) => {
+  const batch = await loadQrBatch(pathId(req));
+  if (!batch) {
+    res.status(404).json({ message: 'Batch tidak ditemukan.' });
+    return;
+  }
+
+  const now = new Date();
+  const result = await prisma.qrPublication.updateMany({
+    where: { batchId: batch.id, publishedAt: { not: null }, withdrawnAt: null },
+    data: { withdrawnAt: now, withdrawnById: req.user!.id },
+  });
+
+  if (result.count === 0) {
+    res.status(409).json({ message: 'Informasi QR tidak sedang diterbitkan sehingga tidak dapat ditarik.' });
+    return;
+  }
+
+  sendQrManagement(res, batch, (await loadQrBatch(batch.id))?.qrPublication ?? null);
 });

@@ -19,6 +19,7 @@ import {
   normalizeDescription,
   validateDescription,
   validateName,
+  validateOptionalText,
   validateSellingPrice,
   validateUnit,
 } from '../lib/validate';
@@ -79,7 +80,7 @@ productsRouter.get('/:id', authenticate, async (req, res) => {
 // ---------- Mengubah (hanya Admin) ----------
 
 productsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
-  const { name, description, unit, sellingPrice } = req.body ?? {};
+  const { name, description, composition, storageInstructions, unit, sellingPrice } = req.body ?? {};
 
   const nameError = validateName(name);
   if (nameError) {
@@ -99,6 +100,18 @@ productsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
+  const compositionError = validateOptionalText(composition, 'Komposisi bahan');
+  if (compositionError) {
+    res.status(400).json({ message: compositionError });
+    return;
+  }
+
+  const storageError = validateOptionalText(storageInstructions, 'Petunjuk penyimpanan');
+  if (storageError) {
+    res.status(400).json({ message: storageError });
+    return;
+  }
+
   const priceError = validateSellingPrice(sellingPrice);
   if (priceError) {
     res.status(400).json({ message: priceError });
@@ -109,6 +122,8 @@ productsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
     data: {
       name: name.trim(),
       description: normalizeDescription(description),
+      composition: normalizeDescription(composition),
+      storageInstructions: normalizeDescription(storageInstructions),
       unit: unit.trim(),
       sellingPrice: sellingPrice.toFixed(2),
     },
@@ -144,6 +159,24 @@ productsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
       return;
     }
     data.description = normalizeDescription(body.description);
+  }
+
+  if (body.composition !== undefined) {
+    const compositionError = validateOptionalText(body.composition, 'Komposisi bahan');
+    if (compositionError) {
+      res.status(400).json({ message: compositionError });
+      return;
+    }
+    data.composition = normalizeDescription(body.composition);
+  }
+
+  if (body.storageInstructions !== undefined) {
+    const storageError = validateOptionalText(body.storageInstructions, 'Petunjuk penyimpanan');
+    if (storageError) {
+      res.status(400).json({ message: storageError });
+      return;
+    }
+    data.storageInstructions = normalizeDescription(body.storageInstructions);
   }
 
   if (body.unit !== undefined) {
