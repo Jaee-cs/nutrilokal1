@@ -34,12 +34,21 @@ export async function applyMaterialStockChange(
     return;
   }
 
+  // Cepat: tolak bila jelas tidak cukup (guard di bawah yang menjamin
+  // keamanan saat permintaan bersamaan).
   if (delta.isNegative() && (await getMaterialStock(db, materialId)) < Math.abs(Number(delta))) {
     throw new InsufficientStockError('Stok bahan baku tidak mencukupi.');
   }
 
-  // Perbarui baris stok yang ada; syarat quantity >= 0 mencegah stok negatif.
-  const updateWhere = { materialId, quantity: { gte: new Prisma.Decimal(0) } };
+  // Syarat memakai nilai stok SEBELUM increment:
+  // - delta negatif: quantity >= |delta| — dua permintaan pengurangan
+  //   bersamaan diserialisasi lewat kunci baris; pihak kedua mengevaluasi
+  //   ulang syarat setelah pihak pertama commit, sehingga hasil akhir tidak
+  //   pernah di bawah nol (sama dengan guard stok batch).
+  // - delta positif: tanpa syarat jumlah — penambahan selalu aman.
+  const updateWhere = delta.isNegative()
+    ? { materialId, quantity: { gte: delta.abs() } }
+    : { materialId };
   const updated = await db.materialStock.updateMany({
     where: updateWhere,
     data: { quantity: { increment: delta } },
@@ -49,19 +58,29 @@ export async function applyMaterialStockChange(
     return;
   }
 
-  // Belum ada baris stok untuk bahan ini — buat baru.
-  try {
-    await db.materialStock.create({ data: { materialId, quantity: delta } });
-    return;
-  } catch (error) {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
-      throw error;
-    }
-    // Baris dibuat bersamaan oleh transaksi lain; lanjutkan ke langkah ulang di bawah.
+  if (delta.isNegative()) {
+    // Syarat pengurangan tidak terpenuhi: stok tidak mencukupi.
+    throw new InsufficientStockError('Stok bahan baku tidak mencukupi.');
   }
 
+  // Baris stok belum ada. Buat dengan skipDuplicates (INSERT ... ON CONFLICT
+  // DO NOTHING) — aman untuk permintaan bersamaan: unique violation di dalam
+  // transaksi aktif akan meng-abort transaksi PostgreSQL sehingga semua
+  // perintah berikutnya gagal 25P02, dan retry di transaksi yang sama tidak
+  // mungkin dilakukan.
+  const created = await db.materialStock.createMany({
+    data: { materialId, quantity: delta },
+    skipDuplicates: true,
+  });
+
+  if (created.count === 1) {
+    return;
+  }
+
+  // Baris dibuat oleh transaksi lain bersamaan — terapkan delta sekarang
+  // (delta positif tanpa syarat; baris sudah pasti ada setelah ON CONFLICT).
   const retried = await db.materialStock.updateMany({
-    where: updateWhere,
+    where: { materialId },
     data: { quantity: { increment: delta } },
   });
 

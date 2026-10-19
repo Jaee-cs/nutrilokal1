@@ -17,6 +17,9 @@ ensureProductHistoryCheckRegistered();
 export function createApp(): express.Express {
   const app = express();
 
+  // Sembunyikan identitas framework dari header respons (info minim).
+  app.disable('x-powered-by');
+
   // Middleware: membaca body JSON dari request.
   app.use(express.json());
 
