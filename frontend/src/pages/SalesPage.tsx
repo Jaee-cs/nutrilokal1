@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
+// Kode tanggal dan penanda kedaluwarsa memakai aturan bersama di
+// utils/batch-expiry.ts (kalender WIB, sama dengan backend lib/date.ts).
+import { wibDateCode, isBatchExpired } from '../utils/batch-expiry'
 
 interface Product {
   id: string
@@ -63,20 +66,6 @@ interface SaleFormItem {
 const EMPTY_FORM: SaleFormItem[] = [
   { productId: '', allocations: [{ batchId: '', quantity: '' }] },
 ]
-
-// Kode tanggal 'YYYY-MM-DD' menurut kalender WIB — aturan yang sama dengan
-// backend (lib/date.ts), agar penanda kedaluwarsa di UI tidak berbeda.
-function wibDateCode(iso: string): string {
-  return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
-}
-
-// Batch ditandai kedaluwarsa bila tanggal tervalidasi dan sudah lewat
-// (kalender WIB). Penolakan transaksi tetap dilakukan backend — aturan
-// bisnis tidak dipindahkan ke frontend, hanya ditampilkan.
-function isExpired(b: Batch): boolean {
-  if (!b.expiryDate || !b.expiryValidated) return false
-  return wibDateCode(b.expiryDate) < wibDateCode(new Date().toISOString())
-}
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso)
@@ -192,7 +181,7 @@ export function SalesPage() {
   function batchOptionLabel(b: Batch) {
     const parts = [b.code, `stok ${b.stock.toLocaleString('id-ID')}`]
     if (b.expiryDate) {
-      parts.push(isExpired(b) ? `kedaluwarsa ${wibDateCode(b.expiryDate)} (tidak dapat dijual)` : `kedaluwarsa ${wibDateCode(b.expiryDate)}`)
+      parts.push(isBatchExpired(b) ? `kedaluwarsa ${wibDateCode(b.expiryDate)} (tidak dapat dijual)` : `kedaluwarsa ${wibDateCode(b.expiryDate)}`)
     }
     return parts.join(' — ')
   }
@@ -331,7 +320,7 @@ export function SalesPage() {
                             >
                               <option value="">Pilih batch (stok tersedia)</option>
                               {getBatchesForProduct(it.productId, otherIds).map(b => (
-                                <option key={b.id} value={b.id} disabled={isExpired(b)}>
+                                <option key={b.id} value={b.id} disabled={isBatchExpired(b)}>
                                   {batchOptionLabel(b)}
                                 </option>
                               ))}

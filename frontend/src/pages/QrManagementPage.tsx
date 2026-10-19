@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import api from '../lib/api'
+import { validatedExpiryLabel } from '../utils/batch-expiry'
 
 // Bentuk API GET /batches (toPublicBatch): stock, productionDate bisa null
 // (batch stok awal), expiryDate/expiryValidated untuk label.
@@ -58,19 +59,6 @@ function formatDate(iso: string | null) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
-/** Tanggal kalender WIB (sama dengan aturan backend lib/date.ts). */
-function wibDateLabel(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-/** Label kedaluwarsa hanya bila tersedia DAN sudah divalidasi; jika tidak, null. */
-function expiryLabelOf(b: Batch): string | null {
-  if (!b.expiryDate || !b.expiryValidated) return null
-  return wibDateLabel(b.expiryDate)
 }
 
 export function QrManagementPage() {
@@ -158,13 +146,13 @@ export function QrManagementPage() {
   }
 
   function labelFromBatch(b: Batch) {
-    openLabel(b.code, b.product.name, expiryLabelOf(b))
+    openLabel(b.code, b.product.name, validatedExpiryLabel(b))
   }
 
   function labelFromDetail() {
     if (!detail) return
     const b = batches.find(x => x.id === detail.batchId)
-    openLabel(detail.code, b?.product.name ?? detail.code, b ? expiryLabelOf(b) : null)
+    openLabel(detail.code, b?.product.name ?? detail.code, b ? validatedExpiryLabel(b) : null)
   }
 
   const statusInfo = detail ? STATUS_LABEL[detail.status] : null
