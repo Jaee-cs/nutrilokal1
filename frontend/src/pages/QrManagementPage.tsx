@@ -110,14 +110,16 @@ export function QrManagementPage() {
     return () => { active = false }
   }, [detail])
 
-  async function fetchDetail(id: string) {
+  async function fetchDetail(id: string): Promise<boolean> {
     try {
       setError(null)
       setSuccess(null)
       const res = await api.get(`/batches/${id}/qr`)
       setDetail(res.data.qr)
+      return true
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal memuat detail QR')
+      return false
     }
   }
 
@@ -128,9 +130,14 @@ export function QrManagementPage() {
     try {
       await api.post(`/batches/${id}/qr/${action}`, {})
       const actionLabel = action === 'validate' ? 'Validasi' : action === 'publish' ? 'Publikasi' : 'Penarikan'
-      setSuccess(`${actionLabel} QR berhasil`)
-      await fetchDetail(id)
+      // Muat ulang DULU (fetchDetail mengosongkan pesan), lalu tampilkan sukses
+      // agar pesan tidak langsung terhapus. Bila muat ulang gagal, pesan error
+      // dari fetchDetail dipertahankan (tidak ditimpa sukses).
+      const refreshed = await fetchDetail(id)
       await fetchBatches()
+      if (refreshed) {
+        setSuccess(`${actionLabel} QR berhasil`)
+      }
     } catch (err: any) {
       const actionLabel = action === 'validate' ? 'memvalidasi' : action === 'publish' ? 'menerbitkan' : 'menarik'
       setError(err.response?.data?.message || `Gagal ${actionLabel} QR`)
