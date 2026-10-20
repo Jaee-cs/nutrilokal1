@@ -21,12 +21,14 @@ export function UsersPage() {
   const [creating, setCreating] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
 
-  async function fetchUsers() {
+  async function fetchUsers(): Promise<boolean> {
     try {
       const res = await api.get('/users')
       setUsers(res.data.data || res.data)
+      return true
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal memuat pengguna')
+      return false
     } finally {
       setLoading(false)
     }
@@ -42,10 +44,19 @@ export function UsersPage() {
     setError(null)
     setSuccess(null)
     try {
-      await api.post('/users', { username: form.username, password: form.password, name: form.name || undefined, role: 'OPERATOR' })
-      setSuccess('Operator berhasil dibuat')
+      // Backend SELALU membuat akun baru dengan role OPERATOR (README: Admin hanya
+      // dibuat lewat bootstrap). Field `role` tidak dikirim karena backend menolak
+      // keberadaannya (400) sebagai pengaman eskalasi peran menjadi Admin.
+      await api.post('/users', {
+        username: form.username.trim(),
+        password: form.password,
+        name: form.name.trim() || undefined,
+      })
+      // Kosongkan formulir lebih dulu, lalu segarkan daftar, baru tampilkan pesan
+      // sukses — pesan tidak hilang akibat pemuatan ulang.
       setForm({ username: '', password: '', name: '' })
-      await fetchUsers()
+      const refreshed = await fetchUsers()
+      if (refreshed) setSuccess('Operator berhasil dibuat')
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal membuat pengguna')
     } finally {
