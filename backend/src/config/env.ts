@@ -29,8 +29,23 @@ if (!jwtSecret || jwtSecret.length < 32) {
   );
 }
 
+/**
+ * Daftar origin frontend yang diizinkan memanggil API lintas domain (CORS).
+ *
+ * Di produksi frontend dan backend dapat berada di domain berbeda
+ * (mis. frontend statis di Render, backend web service di Render). Isi
+ * FRONTEND_ORIGIN dengan satu atau beberapa origin dipisah koma, contoh:
+ *   FRONTEND_ORIGIN="https://nutrilokal.onrender.com,http://localhost:5173"
+ * Bila kosong, CORS dinonaktifkan (perilaku pengembangan same-origin).
+ */
+const frontendOrigins = (process.env.FRONTEND_ORIGIN ?? '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter((value) => value.length > 0);
+
 export const env = {
   PORT: port,
   DATABASE_URL: databaseUrl,
   JWT_SECRET: jwtSecret,
+  FRONTEND_ORIGINS: frontendOrigins,
 } as const;

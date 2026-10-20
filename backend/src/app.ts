@@ -7,6 +7,7 @@ import express from 'express';
 import { PHOTO_URL_PREFIX, uploadsRoot } from './config/uploads';
 import { ensureMaterialHistoryCheckRegistered } from './lib/material-history';
 import { ensureProductHistoryCheckRegistered } from './lib/product-history';
+import { corsMiddleware } from './middleware/cors';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
 import { apiRouter } from './routes';
 
@@ -20,6 +21,10 @@ export function createApp(): express.Express {
 
   // Sembunyikan identitas framework dari header respons (info minim).
   app.disable('x-powered-by');
+
+  // CORS: izinkan origin frontend yang dikonfigurasi (FRONTEND_ORIGIN)
+  // memanggil API lintas domain, termasuk menjawab preflight OPTIONS.
+  app.use(corsMiddleware);
 
   // Middleware: membaca body JSON dari request.
   app.use(express.json());

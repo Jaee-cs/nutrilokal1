@@ -1,0 +1,65 @@
+# Blueprint deploy NutriLokal untuk Render.
+#
+# Arsitektur:
+#   - PostgreSQL  : NEON (eksternal) — set DATABASE_URL manual di dashboard.
+#   - Backend     : Render Web Service (folder backend/).
+#   - Frontend    : Render Static Site (folder frontend/).
+#
+# Petunjuk lengkap ada di DEPLOY_RENDER_NEON.md.
+#
+# CATATAN PENTING:
+# - Nilai `sync: false` berarti diisi manual di dashboard Render (jangan
+#   ditulis di file ini) agar rahasia tidak masuk ke repositori.
+# - Blok `disk:` di bawah memerlukan instance BERBAYAR. Bila memakai paket
+#   gratis, hapus blok `disk:` dan hapus env `UPLOADS_DIR` — foto akan
+#   tersimpan sementara dan hilang saat redeploy (lihat DEPLOY_RENDER_NEON.md).
+# - Render free service "tidur" setelah idle; request pertama bisa lambat.
+
+services:
+  # ---------------------------------------------------------------------------
+  # Backend API (Express + Prisma)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: nutrilokal-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci && npx prisma generate && npm run build
+    # Migrasi dijalankan sebelum server start (idempoten, aman diulang).
+    startCommand: npx prisma migrate deploy && node dist/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+      # Direktori unggahan foto. WAJIB diarahkan ke mount Render Disk di bawah
+      # agar foto tidak hilang saat redeploy (filesystem Render ephemeral).
+      - key: UPLOADS_DIR
+        value: /var/data/uploads
+    disk:
+      name: nutrilokal-uploads
+      mountPath: /var/data
+      sizeGB: 1
+
+  # ---------------------------------------------------------------------------
+  # Frontend (Vite static build + SPA fallback)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: nutrilokal-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+    routes:
+      # SPA fallback: semua rute klien (/ , /catalog, /qr/:code, /login, ...)
+      # diarahkan ke index.html agar tidak 404 saat dibuka langsung.
+      - type: rewrite
+        source: /*
+        destination: /index.html
