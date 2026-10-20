@@ -2,21 +2,28 @@
  * Foto produk (informasi publik katalog & QR, README 5.6).
  *
  * Prinsip penyimpanan:
- * - Foto disimpan sebagai FILE di penyimpanan lokal backend, BUKAN base64 di
- *   database atau di respons API. Database hanya menyimpan path relatifnya.
- * - Nama file SELALU dibuat server (tidak pernah memakai nama kiriman klien),
- *   sehingga tidak ada celah path traversal; hasil akhir tetap diverifikasi
- *   agar berada di dalam direktori unggahan.
+ * - Foto disimpan sebagai FILE di penyimpanan (Cloudinary bila kredensial
+ *   tersedia, atau penyimpanan lokal backend sebagai fallback), BUKAN base64
+ *   di database atau di respons API. Database hanya menyimpan URL publik dan
+ *   public ID (Cloudinary).
+ * - Nama file SELALU dibuat server/penyimpanan (tidak pernah memakai nama
+ *   kiriman klien), sehingga tidak ada celah path traversal.
  * - Hanya tipe gambar yang diizinkan (whitelist MIME) DAN isi berkasnya
  *   benar-benar diperiksa lewat magic bytes — tipe yang diklaim klien saja
  *   tidak dipercaya.
  * - Ukuran dibatasi (lihat MAX_PHOTO_BYTES).
- * - Tidak ada layanan eksternal/berbayar yang dipakai.
+ * - Unggahan dilakukan di backend; API secret Cloudinary tidak pernah
+ *   dikirim ke frontend.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PHOTO_URL_PREFIX, photoFilePath, productPhotoDir } from '../config/uploads';
+import {
+  destroyCloudinaryPhoto,
+  isCloudinaryEnabled,
+  uploadProductPhotoToCloudinary,
+} from './cloudinary';
 
 /** Nama file yang dibuat server: hex hash + uuid + ekstensi dari MIME. */
 const SAFE_FILE_NAME = /^[a-f0-9]{16}-[0-9a-f-]{36}\.(jpg|png|webp)$/;
@@ -114,6 +121,53 @@ export async function saveProductPhoto(productId: string, buffer: Buffer, mime: 
   await mkdir(directory, { recursive: true });
   await writeFile(resolved, buffer);
   return `${PHOTO_URL_PREFIX}/products/${productId}/${fileName}`;
+}
+
+/**
+ * Hasil penyimpanan foto: URL publik dan public ID penyimpanan eksternal
+ * (kosong bila disimpan lokal).
+ */
+export interface StoredPhoto {
+  photoUrl: string;
+  photoPublicId: string | null;
+}
+
+/**
+ * Menyimpan foto produk ke Cloudinary bila dikonfigurasi, atau ke penyimpanan
+ * lokal sebagai fallback. Mengembalikan URL publik dan (bila Cloudinary)
+ * public ID untuk penghapusan berikutnya.
+ */
+export async function storeProductPhoto(
+  productId: string,
+  buffer: Buffer,
+  mime: string
+): Promise<StoredPhoto> {
+  if (isCloudinaryEnabled()) {
+    const uploaded = await uploadProductPhotoToCloudinary(productId, buffer);
+    return { photoUrl: uploaded.secureUrl, photoPublicId: uploaded.publicId };
+  }
+  const photoUrl = await saveProductPhoto(productId, buffer, mime);
+  return { photoUrl, photoPublicId: null };
+}
+
+/**
+ * Menghapus foto lama dengan aman.
+ *
+ * - Bila ada public ID Cloudinary, foto dihapus dari Cloudinary.
+ * - Selain itu (foto lokal lama, atau path relatif), berkas lokal dihapus.
+ *
+ * Kesalahan diabaikan (tidak melempar) agar penghapusan data tetap berhasil;
+ * penghapus ditangani setelah perubahan database sukses.
+ */
+export async function deleteProductPhoto(
+  photoUrl: string | null | undefined,
+  photoPublicId: string | null | undefined
+): Promise<void> {
+  if (photoPublicId) {
+    await destroyCloudinaryPhoto(photoPublicId);
+    return;
+  }
+  await removeProductPhoto(photoUrl);
 }
 
 /**

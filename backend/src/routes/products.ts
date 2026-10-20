@@ -26,8 +26,8 @@ import {
   ALLOWED_PHOTO_MIME_LIST,
   MAX_PHOTO_BYTES,
   PHOTO_SIZE_MESSAGE,
-  removeProductPhoto,
-  saveProductPhoto,
+  deleteProductPhoto,
+  storeProductPhoto,
   validatePhotoBuffer,
 } from '../lib/product-photo';
 import {
@@ -43,10 +43,12 @@ import { authenticate, requireAdmin } from '../middleware/auth';
 export const productsRouter = Router();
 
 // ---------------------------------------------------------------------------
-// Foto produk (unggahan berkas ke penyimpanan lokal backend, README 5.6)
+// Foto produk (unggahan berkas ke penyimpanan Cloudinary / lokal, README 5.6)
 //
 // - Berkas dikirim sebagai body biner mentah dengan Content-Type gambar
-//   (tanpa multipart dan tanpa base64), lalu disimpan sebagai file.
+//   (tanpa multipart dan tanpa base64), lalu diteruskan backend ke Cloudinary
+//   (bila dikonfigurasi) atau disimpan sebagai file lokal (fallback).
+// - API secret Cloudinary tidak pernah dikirim ke frontend.
 // - Hanya Admin (ditegakkan requireAdmin); Operator tidak dapat mengunggah
 //   maupun menghapus foto lewat API.
 // - Tipe diperiksa dari isi berkas (magic bytes) dan ukurannya dibatasi.
@@ -116,15 +118,26 @@ productsRouter.post(
       return;
     }
 
-    const photoUrl = await saveProductPhoto(target.id, req.body as Buffer, validation.mime!);
+    // 1) Unggah foto BARU lebih dulu. Foto lama belum disentuh.
+    const stored = await storeProductPhoto(target.id, req.body as Buffer, validation.mime!);
 
-    // Ganti foto: simpan path baru di database lalu bersihkan berkas lama.
-    const updated = await prisma.product.update({
-      where: { id: target.id },
-      data: { photoUrl },
-    });
-    if (target.photoUrl && target.photoUrl !== photoUrl) {
-      await removeProductPhoto(target.photoUrl);
+    // 2) Simpan URL & public ID baru ke database. Bila gagal, foto yang baru
+    //    diunggah dibersihkan agar tidak meninggalkan berkas tanpa pemilik;
+    //    foto lama tetap utuh (belum dihapus) sehingga data tetap konsisten.
+    let updated;
+    try {
+      updated = await prisma.product.update({
+        where: { id: target.id },
+        data: { photoUrl: stored.photoUrl, photoPublicId: stored.photoPublicId },
+      });
+    } catch (error) {
+      await deleteProductPhoto(stored.photoUrl, stored.photoPublicId).catch(() => undefined);
+      throw error;
+    }
+
+    // 3) Baru setelah database sukses, hapus foto LAMA (bila ada dan berbeda).
+    if (target.photoUrl && target.photoUrl !== stored.photoUrl) {
+      await deleteProductPhoto(target.photoUrl, target.photoPublicId);
     }
 
     res.json({
@@ -144,9 +157,10 @@ productsRouter.delete('/:id/photo', authenticate, requireAdmin, async (req, res)
 
   const updated = await prisma.product.update({
     where: { id: target.id },
-    data: { photoUrl: null },
+    data: { photoUrl: null, photoPublicId: null },
   });
-  await removeProductPhoto(target.photoUrl);
+  // Hapus berkas hanya setelah kolom database dikosongkan.
+  await deleteProductPhoto(target.photoUrl, target.photoPublicId);
 
   res.json({ message: 'Foto produk dihapus.', product: toPublicProduct(updated) });
 });
@@ -392,6 +406,6 @@ productsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
   // 3) Produk tanpa riwayat dan tanpa stok: dihapus permanen (README 5.1).
   //    Berkas fotonya ikut dibersihkan agar tidak menumpuk tanpa pemilik.
   await prisma.product.delete({ where: { id: target.id } });
-  await removeProductPhoto(target.photoUrl);
+  await deleteProductPhoto(target.photoUrl, target.photoPublicId);
   res.json({ message: `Produk "${target.name}" berhasil dihapus.`, archived: false });
 });

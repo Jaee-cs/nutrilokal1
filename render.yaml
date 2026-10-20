@@ -10,9 +10,8 @@
 # CATATAN PENTING:
 # - Nilai `sync: false` berarti diisi manual di dashboard Render (jangan
 #   ditulis di file ini) agar rahasia tidak masuk ke repositori.
-# - Blok `disk:` di bawah memerlukan instance BERBAYAR. Bila memakai paket
-#   gratis, hapus blok `disk:` dan hapus env `UPLOADS_DIR` — foto akan
-#   tersimpan sementara dan hilang saat redeploy (lihat DEPLOY_RENDER_NEON.md).
+# - Foto produk disimpan di CLOUDINARY (bukan Render Disk), sehingga tetap
+#   persisten pada paket gratis dan tidak bergantung pada volume Render.
 # - Render free service "tidur" setelah idle; request pertama bisa lambat.
 
 services:
@@ -36,14 +35,14 @@ services:
         sync: false
       - key: FRONTEND_ORIGIN
         sync: false
-      # Direktori unggahan foto. WAJIB diarahkan ke mount Render Disk di bawah
-      # agar foto tidak hilang saat redeploy (filesystem Render ephemeral).
-      - key: UPLOADS_DIR
-        value: /var/data/uploads
-    disk:
-      name: nutrilokal-uploads
-      mountPath: /var/data
-      sizeGB: 1
+      # Penyimpanan foto di Cloudinary (persisten tanpa Render Disk).
+      # Isi ketiganya; bila kosong aplikasi jatuh ke penyimpanan lokal.
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
 
   # ---------------------------------------------------------------------------
   # Frontend (Vite static build + SPA fallback)

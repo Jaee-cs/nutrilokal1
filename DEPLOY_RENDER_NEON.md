@@ -72,7 +72,7 @@ git push origin <nama-branch-anda>
    | **Runtime** | Node |
    | **Build Command** | `npm ci && npx prisma generate && npm run build` |
    | **Start Command** | `npx prisma migrate deploy && node dist/server.js` |
-   | **Instance Type** | Free (atau Starter berbayar bila ingin Disk, lihat §4) |
+   | **Instance Type** | Free (Cloudinary dipakai untuk foto, lihat §4) |
 
    > Bila memakai **Blueprint** (`render.yaml`), Render dapat mengisi otomatis.
    > Pilih **New + → Blueprint** lalu arahkan ke repositori; konfigurasi terisi.
@@ -86,6 +86,9 @@ git push origin <nama-branch-anda>
    | `JWT_SECRET` | hasil `openssl rand -hex 32` (buat nilai acak baru) |
    | `FRONTEND_ORIGIN` | sementara isi `http://localhost:5173` — **akan diperbarui di §3.5** |
    | `NODE_VERSION` | `20` |
+   | `CLOUDINARY_CLOUD_NAME` | opsional; isi bila memakai Cloudinary (§4) |
+   | `CLOUDINARY_API_KEY` | opsional; isi bila memakai Cloudinary (§4) |
+   | `CLOUDINARY_API_SECRET` | opsional; isi bila memakai Cloudinary (§4) |
 
    Buat `JWT_SECRET` acak di komputer Anda:
    ```bash
@@ -147,27 +150,49 @@ memblokir request API (login akan gagal).
 
 ---
 
-## 4. Penyimpanan foto produk (opsional, butuh paket berbayar)
+## 4. Penyimpanan foto produk di Cloudinary (disarankan)
 
-Render **free service** memakai filesystem sementara: foto yang diunggah akan
-**hilang** setiap redeploy/restart. Untuk demo fungsionalitas ini tetap terlihat
-bekerja, tetapi tidak tahan lama.
+Foto produk disimpan di **Cloudinary**, bukan di filesystem Render. Dengan
+begitu foto tetap **permanen** meskipun memakai Render Free (yang filesystem-nya
+sementara dan hilang saat redeploy), dan tidak bergantung pada Render Disk
+berbayar. Unggahan tetap dilakukan **lewat backend** — API secret Cloudinary
+tidak pernah dikirim ke frontend.
 
-Agar foto **permanen**, pakai **Persistent Disk** (memerlukan instance
-**berbayar**, mis. Starter):
+### 4.1. Buat akun & ambil kredensial Cloudinary
 
-1. Backend Render → **Disk** → **Add Disk**.
-   - **Name**: `nutrilokal-uploads`
-   - **Mount Path**: `/var/data`
-   - **Size**: 1 GB
-2. Backend → **Environment** → tambah:
-   | Key | Value |
-   |---|---|
-   | `UPLOADS_DIR` | `/var/data/uploads` |
-3. Simpan → Render redeploy. Foto kini tersimpan di disk persisten.
+1. Daftar/masuk ke <https://cloudinary.com> (ada paket gratis).
+2. Buka **Dashboard** → bagian **Product Environment Credentials** (atau
+   **Settings → API Keys**).
+3. Catat tiga nilai:
+   - **Cloud name**
+   - **API Key**
+   - **API Secret** (jangan dibagikan / jangan di-commit)
 
-> Bila memakai `render.yaml` lewat Blueprint, blok `disk:` sudah disertakan.
-> Bila memakai paket gratis, **hapus** blok `disk:` dan env `UPLOADS_DIR`.
+### 4.2. Pasang di backend Render
+
+Backend Render → **Environment** → tambah tiga variabel:
+
+| Key | Value |
+|---|---|
+| `CLOUDINARY_CLOUD_NAME` | Cloud name dari Cloudinary |
+| `CLOUDINARY_API_KEY` | API Key dari Cloudinary |
+| `CLOUDINARY_API_SECRET` | API Secret dari Cloudinary |
+
+Simpan (Render redeploy otomatis). Setelah itu, semua foto produk **baru**
+otomatis tersimpan di Cloudinary.
+
+> **Opsional**: bila salah satu/ketiganya kosong, aplikasi otomatis memakai
+> penyimpanan lokal backend (cocok untuk pengembangan lokal atau VPS yang punya
+> disk persisten). Jadi Cloudinary tidak wajib — hanya disarankan.
+>
+> Foto lama yang sudah tersimpan lokal tetap tampil seperti biasa; yang
+> berpindah ke Cloudinary hanyalah unggahan baru. Tidak ada data yang dihapus.
+
+### 4.3. (Alternatif VPS) penyimpanan lokal persisten
+
+Bila nanti pindah ke VPS tanpa Cloudinary, arahkan `UPLOADS_DIR` ke direktori
+persisten (mis. `/var/lib/nutrilokal/uploads`) dan **ikutkan direktori itu dalam
+jadwal pencadangan** bersama database, karena isinya tidak ada di database.
 
 ---
 
@@ -199,7 +224,7 @@ Buka URL frontend (`https://nutrilokal-frontend.onrender.com`) dan periksa:
 - [ ] Tombol **Lihat Katalog** membuka `/catalog` **tanpa login**.
 - [ ] Tombol **Login** membuka halaman login; login Admin berhasil → dashboard.
 - [ ] Menu Produk/Bahan/Produksi/Penjualan/Laporan dapat dibuka.
-- [ ] Unggah foto produk lalu muat ulang: foto tetap tampil (bila Disk aktif).
+- [ ] Unggah foto produk lalu muat ulang: foto tetap tampil (Cloudinary, §4).
 - [ ] Buka halaman QR publik `/qr/<kode>` **tanpa login**.
 - [ ] DevTools (F12) → Console: tidak ada error CORS.
 
@@ -212,7 +237,9 @@ dengan URL frontend (tanpa garis miring di akhir).
 
 - **Free service tidur** setelah ~15 menit tanpa aktivitas; request pertama bisa
   lambat (belum "bangun"). Sarankan tester membuka sekali dulu sebelum menilai.
-- **Foto hilang saat redeploy** kecuali Persistent Disk aktif (§4).
+- **Foto produk** tersimpan di Cloudinary (§4) sehingga tahan redeploy. Bila
+  `CLOUDINARY_*` tidak diisi, foto memakai disk sementara Render dan bisa hilang
+  saat redeploy.
 - **Database bisa direset**: bila ingin mulai bersih saat pengujian, buat branch
   baru di Neon atau hapus project Neon lalu buat ulang.
 - Ini **lingkungan testing**, bukan produksi: jangan masukkan data pribadi
@@ -228,7 +255,10 @@ dengan URL frontend (tanpa garis miring di akhir).
 | `DATABASE_URL` | dari Neon, wajib `?sslmode=require` |
 | `JWT_SECRET` | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL frontend Render, boleh dipisah koma untuk lebih dari satu |
-| `UPLOADS_DIR` | `/var/data/uploads` (bila Disk aktif) |
+| `CLOUDINARY_CLOUD_NAME` | Cloud name Cloudinary (§4); kosong = penyimpanan lokal |
+| `CLOUDINARY_API_KEY` | API Key Cloudinary (§4) |
+| `CLOUDINARY_API_SECRET` | API Secret Cloudinary (§4) — rahasia |
+| `UPLOADS_DIR` | opsional; hanya bila memakai penyimpanan lokal persisten |
 | `NODE_VERSION` | `20` |
 
 **Frontend (Render Static Site):**

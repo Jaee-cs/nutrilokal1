@@ -43,9 +43,33 @@ const frontendOrigins = (process.env.FRONTEND_ORIGIN ?? '')
   .map((value) => value.trim())
   .filter((value) => value.length > 0);
 
+/**
+ * Konfigurasi Cloudinary (penyimpanan foto produk).
+ *
+ * Cloudinary dipakai bila KETIGA nilai terisi. Bila salah satu kosong,
+ * aplikasi otomatis memakai penyimpanan lokal seperti sebelumnya — sehingga
+ * pengembangan lokal dan VPS tanpa Cloudinary tetap berjalan.
+ *
+ * Kredensial hanya dibaca dari environment dan tidak pernah ditulis di source
+ * code. Di backend, API secret tidak pernah dikirim ke frontend.
+ */
+const cloudinaryCloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim() ?? '';
+const cloudinaryApiKey = process.env.CLOUDINARY_API_KEY?.trim() ?? '';
+const cloudinaryApiSecret = process.env.CLOUDINARY_API_SECRET?.trim() ?? '';
+
+const cloudinaryConfigured = Boolean(
+  cloudinaryCloudName && cloudinaryApiKey && cloudinaryApiSecret
+);
+
 export const env = {
   PORT: port,
   DATABASE_URL: databaseUrl,
   JWT_SECRET: jwtSecret,
   FRONTEND_ORIGINS: frontendOrigins,
+  CLOUDINARY: {
+    configured: cloudinaryConfigured,
+    cloudName: cloudinaryCloudName,
+    apiKey: cloudinaryApiKey,
+    apiSecret: cloudinaryApiSecret,
+  },
 } as const;

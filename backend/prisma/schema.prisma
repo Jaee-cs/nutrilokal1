@@ -520,11 +520,16 @@ model Product {
   composition String?
   /// Petunjuk penyimpanan untuk QR traceability (README 5.6).
   storageInstructions String?
-  /// Path publik foto produk (informasi publik katalog & QR, README 5.6).
-  /// File fisiknya disimpan di penyimpanan lokal backend; kolom ini hanya
-  /// menyimpan path relatif (/api/uploads/products/...) sehingga tidak ada
-  /// base64 gambar di database maupun di respons API. Kosong = tanpa foto.
+  /// URL publik foto produk (informasi publik katalog & QR, README 5.6).
+  /// Dapat berupa URL absolut penyimpanan eksternal (Cloudinary, mis.
+  /// https://res.cloudinary.com/...) atau path relatif penyimpanan lokal
+  /// (/api/uploads/products/...) untuk foto lama. Tidak ada base64 gambar di
+  /// database maupun di respons API. Kosong = tanpa foto.
   photoUrl    String?
+  /// Public ID foto di penyimpanan eksternal (Cloudinary). Dipakai untuk
+  /// menghapus foto lama dengan aman saat diganti/dihapus. Kosong untuk foto
+  /// lama yang masih tersimpan lokal.
+  photoPublicId String?
   /// Satuan dasar produk (mis. "pcs", "botol", "kg").
   unit        String
   /// Harga jual per satuan dasar; ditetapkan di master dan dipakai
