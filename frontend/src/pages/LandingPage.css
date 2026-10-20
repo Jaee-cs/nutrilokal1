@@ -1,0 +1,197 @@
+/* ==========================================================================
+   Landing page publik — minimalis, terang, aksen hijau NutriLokal
+   ========================================================================== */
+
+.landing {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(900px 420px at 85% 0%, rgba(163, 211, 175, 0.28), transparent 60%),
+    var(--canvas);
+  color: var(--on-surface);
+}
+
+/* Navigasi atas ----------------------------------------------------------- */
+.landing-nav {
+  border-bottom: 1px solid var(--outline-variant);
+  background: rgba(249, 250, 245, 0.85);
+  backdrop-filter: blur(6px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.landing-nav-inner {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0.875rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.landing-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.landing-brand-icon {
+  font-size: 28px;
+  color: var(--primary);
+}
+
+.landing-brand-name {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--primary);
+}
+
+.landing-nav-login {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* Isi utama --------------------------------------------------------------- */
+.landing-main {
+  flex: 1;
+  max-width: 72rem;
+  width: 100%;
+  margin: 0 auto;
+  padding: 3.5rem 1.25rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3rem;
+  align-items: center;
+}
+
+.landing-hero { max-width: 40rem; }
+
+.landing-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-secondary-container);
+  background: var(--secondary-container);
+  border-radius: var(--radius-full);
+  padding: 0.375rem 0.875rem;
+  margin-bottom: 1.5rem;
+}
+
+.landing-title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 5vw, 3rem);
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--primary);
+}
+
+.landing-lead {
+  margin-top: 1.25rem;
+  font-size: 16px;
+  line-height: 26px;
+  color: var(--on-surface-variant);
+  max-width: 34rem;
+}
+
+.landing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.landing-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 3rem;
+  padding: 0 1.5rem;
+  font-size: 15px;
+}
+
+.landing-points {
+  list-style: none;
+  margin-top: 2.5rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.landing-points li {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 14px;
+  color: var(--on-surface-variant);
+}
+
+.landing-point-icon {
+  font-size: 20px;
+  color: var(--success);
+}
+
+/* Kartu dekoratif kanan --------------------------------------------------- */
+.landing-aside { display: none; }
+
+.landing-card {
+  background: linear-gradient(160deg, var(--primary-container) 0%, var(--primary) 100%);
+  color: var(--on-primary);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem 2rem;
+  box-shadow: var(--shadow-2);
+  text-align: center;
+}
+
+.landing-card-icon {
+  font-size: 56px;
+  color: var(--on-primary-container);
+}
+
+.landing-card-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  margin-top: 1rem;
+}
+
+.landing-card-text {
+  margin-top: 0.75rem;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--on-primary-container);
+}
+
+/* Footer ------------------------------------------------------------------ */
+.landing-foot {
+  border-top: 1px solid var(--outline-variant);
+  padding: 1.25rem;
+  text-align: center;
+  font-size: 12px;
+  color: var(--on-surface-variant);
+}
+
+/* Desktop ----------------------------------------------------------------- */
+@media (min-width: 900px) {
+  .landing-main {
+    grid-template-columns: 1.3fr 1fr;
+    padding: 5rem 2rem;
+  }
+
+  .landing-aside { display: block; }
+}
+
+/* Mobile ------------------------------------------------------------------ */
+@media (max-width: 480px) {
+  .landing-main { padding: 2.5rem 1.25rem; }
+  .landing-cta { width: 100%; justify-content: center; }
+  .landing-nav-inner { padding: 0.75rem 1rem; }
+  .landing-nav-login span:not(.material-symbols-outlined) { display: none; }
+}
