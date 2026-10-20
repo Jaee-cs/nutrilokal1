@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
 import { Drawer } from '../components/Drawer'
+import { useAuth } from '../hooks/useAuth'
 
 interface Product {
   id: string
@@ -25,6 +26,9 @@ const EMPTY_FORM = {
 }
 
 export function ProductsPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'ADMIN'
+
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -34,12 +38,19 @@ export function ProductsPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
 
-  async function fetchProducts() {
+  // Dialog konfirmasi hapus (khusus Admin).
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  async function fetchProducts(): Promise<boolean> {
     try {
       const res = await api.get('/products')
       setProducts(res.data.data || res.data)
+      return true
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal memuat produk')
+      return false
     } finally {
       setLoading(false)
     }
@@ -85,6 +96,35 @@ export function ProductsPage() {
       await fetchProducts()
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal mengubah status')
+    }
+  }
+
+  function openDelete(product: Product) {
+    setError(null)
+    setSuccess(null)
+    setDeleteError(null)
+    setDeleteTarget(product)
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      // Backend yang menentukan hasil: hapus permanen (tanpa riwayat),
+      // arsipkan (punya riwayat), atau tolak (stok masih ada).
+      const res = await api.delete(`/products/${deleteTarget.id}`)
+      setDeleteTarget(null)
+      const refreshed = await fetchProducts()
+      if (refreshed) {
+        setSuccess(res.data?.message || 'Produk berhasil dihapus')
+      }
+    } catch (err: any) {
+      // Ditampilkan di dalam dialog agar pesan penolakan tetap terbaca.
+      setDeleteError(err.response?.data?.message || 'Gagal menghapus produk')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -176,6 +216,15 @@ export function ProductsPage() {
                 >
                   {p.isActive ? 'Nonaktifkan' : 'Aktifkan'}
                 </button>
+                {isAdmin && (
+                  <button
+                    className="button danger-outline"
+                    onClick={() => openDelete(p)}
+                    aria-label={`Hapus ${p.name}`}
+                  >
+                    Hapus
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -257,6 +306,58 @@ export function ProductsPage() {
           </div>
         </form>
       </Drawer>
+
+      {/* Dialog konfirmasi hapus produk (Admin) */}
+      {deleteTarget && (
+        <div className="modal-root">
+          <div
+            className="modal-overlay"
+            onClick={() => {
+              if (!deleting) setDeleteTarget(null)
+            }}
+          />
+          <div
+            className="modal-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Konfirmasi hapus produk"
+          >
+            <h3 className="modal-title">Hapus Produk</h3>
+            <p className="mb-2">
+              <strong>{deleteTarget.name}</strong>
+            </p>
+            <p className="text-muted mb-2">
+              Produk dengan riwayat tidak dihapus permanen — akan diarsipkan agar
+              riwayat produksi, batch, penjualan, dan QR tetap utuh. Produk yang
+              diarsipkan tidak lagi tersedia untuk produksi atau penjualan baru.
+            </p>
+            <p className="text-muted mb-2">
+              Stok saat ini: {Number(deleteTarget.stock ?? 0).toLocaleString('id-ID')}{' '}
+              {deleteTarget.unit} · Batch:{' '}
+              {Number(deleteTarget.batchCount ?? 0).toLocaleString('id-ID')}
+            </p>
+            {deleteError && <div className="alert error">{deleteError}</div>}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button secondary"
+                disabled={deleting}
+                onClick={() => setDeleteTarget(null)}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                className="button danger-outline"
+                disabled={deleting}
+                onClick={confirmDelete}
+              >
+                {deleting ? 'Menghapus...' : 'Hapus'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

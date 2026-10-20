@@ -249,6 +249,7 @@ afterAll(async () => {
 
   // Hapus berdasarkan relasi (tanpa ON DELETE CASCADE di skema).
   await prisma.batchStockMovement.deleteMany({ where: { batchId: { in: batchIds } } });
+  await prisma.stockAdjustment.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.saleAllocation.deleteMany({ where: { item: { transactionId: { in: saleIds } } } });
   await prisma.saleItem.deleteMany({ where: { transactionId: { in: saleIds } } });
   await prisma.saleTransaction.deleteMany({ where: { id: { in: saleIds } } });
@@ -991,10 +992,47 @@ describe('hak akses, batasan endpoint, dan riwayat', () => {
     expect(movementDel.status).toBe(404);
   });
 
-  it('produk dengan riwayat penjualan tidak dapat dihapus (README 5.1)', async () => {
+  it('produk dengan riwayat penjualan: ditolak selama stok ada, lalu diarsipkan (README 5.1)', async () => {
+    // Selama masih ada stok, penghapusan ditolak — stok tidak dikurangi atau
+    // dibuang untuk memaksa penghapusan berhasil.
+    const withStock = await request(app).delete(`/api/products/${prodA}`).set(auth(adminToken));
+    expect(withStock.status).toBe(409);
+    expect(withStock.body.message).toMatch(/stok/i);
+
+    // Sisa stok diselesaikan lewat penyesuaian resmi (riwayat tidak dihapus).
+    const prodABatches = await prisma.batch.findMany({
+      where: { productId: prodA },
+      select: { id: true, stockQuantity: true },
+    });
+    expect(prodABatches.length).toBeGreaterThan(0);
+    for (const item of prodABatches) {
+      const remaining = Number(item.stockQuantity);
+      if (remaining > 0) {
+        const settle = await request(app)
+          .post('/api/stock-adjustments')
+          .set(auth(adminToken))
+          .send({
+            targetType: 'BATCH',
+            targetId: item.id,
+            quantity: -remaining,
+            reason: 'Stok diselesaikan untuk uji penghapusan',
+          });
+        expect(settle.status).toBe(201);
+      }
+    }
+
+    // Stok nol + ada riwayat penjualan: diarsipkan, bukan dihapus permanen.
     const res = await request(app).delete(`/api/products/${prodA}`).set(auth(adminToken));
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    expect(res.body.archived).toBe(true);
     expect(res.body.message).toContain('riwayat');
+
+    // Produk tetap bisa dibaca (arsip) dan riwayat penjualan/batch utuh.
+    const detail = await request(app).get(`/api/products/${prodA}`).set(auth(adminToken));
+    expect(detail.status).toBe(200);
+    expect(detail.body.product.isActive).toBe(false);
+    expect(await prisma.saleItem.count({ where: { productId: prodA } })).toBeGreaterThan(0);
+    expect(await prisma.batch.count({ where: { productId: prodA } })).toBe(prodABatches.length);
   });
 });
 

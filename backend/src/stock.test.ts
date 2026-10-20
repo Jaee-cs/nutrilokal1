@@ -1068,7 +1068,11 @@ describe('Integritas dan riwayat', () => {
     const opening = await openingStock({ productId: product.id, quantity: 4 });
     expect(opening.status).toBe(201);
 
-    expect((await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken))).status).toBe(409);
+    // Stok batch awal (4) masih ada — penghapusan ditolak, stok tidak
+    // dikurangi; satuan terkunci karena riwayat batch.
+    const delProduct = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
+    expect(delProduct.status).toBe(409);
+    expect(delProduct.body.message).toMatch(/stok/i);
     expect(
       (await request(app).patch(`/api/products/${product.id}`).set(auth(adminToken)).send({ unit: 'box' })).status
     ).toBe(409);

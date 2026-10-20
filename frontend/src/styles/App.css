@@ -409,11 +409,14 @@ table tbody tr:hover { background: var(--surface-low); }
 
 .product-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: auto;
 }
 
-.product-actions .button { flex: 1; }
+/* Tombol status = aksi utama (lebih lebar), Hapus = sekunder (lebih sempit). */
+.product-actions .button { flex: 2 1 0; }
+.product-actions .button.danger-outline { flex: 1 1 0; }
 
 /* Form dalam drawer --------------------------------------------------------- */
 .drawer-form {
@@ -608,6 +611,19 @@ table tbody tr:hover { background: var(--surface-low); }
 
 .button.danger:hover { background: #93000a; }
 .button.danger:disabled { opacity: 0.55; }
+
+/* Hapus produk: destruktif tetapi tetap sekunder agar tidak mencolok. */
+.button.danger-outline {
+  background: transparent;
+  border: 1px solid var(--outline-variant);
+  color: var(--error);
+  box-shadow: none;
+}
+.button.danger-outline:hover {
+  background: var(--error-container);
+  border-color: var(--error);
+}
+.button.danger-outline:disabled { opacity: 0.55; }
 
 /* Modal ---------------------------------------------------------------------- */
 .modal-root {

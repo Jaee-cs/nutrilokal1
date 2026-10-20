@@ -54,6 +54,30 @@ afterEach(() => {
 });
 
 afterAll(async () => {
+  // Batch uji (stok awal) dibersihkan lebih dulu agar penghapusan produk
+  // tidak melanggar kunci asing. Jaring pengaman bila sebuah uji gagal
+  // di tengah jalan sebelum blok pembersihannya sendiri sempat berjalan.
+  const testProductIds = (
+    await prisma.product.findMany({
+      where: { name: { startsWith: runId } },
+      select: { id: true },
+    })
+  ).map((product) => product.id);
+
+  if (testProductIds.length > 0) {
+    const batches = await prisma.batch.findMany({
+      where: { productId: { in: testProductIds } },
+      select: { id: true },
+    });
+    const batchIds = batches.map((batch) => batch.id);
+    if (batchIds.length > 0) {
+      await prisma.batchStockMovement.deleteMany({ where: { batchId: { in: batchIds } } });
+      await prisma.batchOpeningBalance.deleteMany({ where: { batchId: { in: batchIds } } });
+      await prisma.qrPublication.deleteMany({ where: { batchId: { in: batchIds } } });
+      await prisma.batch.deleteMany({ where: { id: { in: batchIds } } });
+    }
+  }
+
   await prisma.product.deleteMany({ where: { name: { startsWith: runId } } });
   await prisma.material.deleteMany({ where: { name: { startsWith: runId } } });
   await prisma.user.deleteMany({ where: { username: { startsWith: runId } } });
@@ -150,6 +174,7 @@ describe('Master produk — CRUD', () => {
 
     const deleted = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
     expect(deleted.status).toBe(200);
+    expect(deleted.body.archived).toBe(false);
 
     const detail = await request(app).get(`/api/products/${product.id}`).set(auth(adminToken));
     expect(detail.status).toBe(404);
@@ -193,18 +218,61 @@ describe('Master produk — validasi input', () => {
   });
 });
 
-describe('Master produk — riwayat operasional dan penonaktifan', () => {
-  it('Produk dengan riwayat operasional tidak dapat dihapus (409) dan datanya tetap utuh', async () => {
+describe('Master produk — riwayat operasional dan penghapusan', () => {
+  it('Produk dengan riwayat diarsipkan (bukan dihapus permanen) dan datanya tetap utuh', async () => {
     const product = await createProduct('riwayat');
     fakeHistoryFor([product.id]);
 
     const deleted = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
-    expect(deleted.status).toBe(409);
-    expect(deleted.body.message).toMatch(/riwayat operasional/i);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.archived).toBe(true);
+    expect(deleted.body.message).toMatch(/diarsipkan/i);
 
+    // Hapus logis: baris produk tetap ada (riwayat tidak dihapus) dan
+    // berstatus nonaktif sehingga tidak dipakai untuk transaksi baru.
     const detail = await request(app).get(`/api/products/${product.id}`).set(auth(adminToken));
     expect(detail.status).toBe(200);
     expect(detail.body.product.name).toBe(product.name);
+    expect(detail.body.product.isActive).toBe(false);
+
+    // Penghapusan berulang idempoten — tetap terarsip, tidak error.
+    const again = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
+    expect(again.status).toBe(200);
+    expect(again.body.archived).toBe(true);
+  });
+
+  it('Produk dengan stok tersisa ditolak dihapus (409) dan stok tidak dikurangi', async () => {
+    const product = await createProduct('berstok');
+
+    const created = await request(app)
+      .post('/api/batches/opening-stock')
+      .set(auth(adminToken))
+      .send({ productId: product.id, quantity: 5, productionDate: '2026-10-19', note: 'Stok awal uji' });
+    expect(created.status).toBe(201);
+    const batchId: string | undefined = created.body?.batch?.id;
+    expect(batchId).toBeTruthy();
+
+    try {
+      const deleted = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
+      expect(deleted.status).toBe(409);
+      expect(deleted.body.message).toMatch(/stok/i);
+      expect(deleted.body.message).toMatch(/selesai/i);
+
+      // Stok TIDAK dikurangi/dibuang untuk memaksa penghapusan berhasil,
+      // dan produk tetap utuh (masih aktif).
+      const detail = await request(app).get(`/api/products/${product.id}`).set(auth(adminToken));
+      expect(detail.status).toBe(200);
+      expect(detail.body.product.stock).toBe(5);
+      expect(detail.body.product.isActive).toBe(true);
+      expect(detail.body.product.batchCount).toBe(1);
+    } finally {
+      if (batchId) {
+        // Bersihkan batch uji beserta catatan pembentuknya.
+        await prisma.batchStockMovement.deleteMany({ where: { batchId } });
+        await prisma.batchOpeningBalance.deleteMany({ where: { batchId } });
+        await prisma.batch.delete({ where: { id: batchId } });
+      }
+    }
   });
 
   it('Satuan dasar tidak dapat diubah setelah ada riwayat operasional (409)', async () => {

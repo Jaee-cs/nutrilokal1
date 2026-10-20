@@ -151,6 +151,7 @@ afterAll(async () => {
   await prisma.qrPublication.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batchAlias.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batchStockMovement.deleteMany({ where: { batchId: { in: batchIds } } });
+  await prisma.stockAdjustment.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batchOpeningBalance.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batch.deleteMany({ where: { id: { in: batchIds } } });
   await prisma.product.deleteMany({ where: { name: { startsWith: runId } } });
@@ -408,9 +409,47 @@ describe('QR traceability per batch', () => {
     expect(res.body.status).toBe('PUBLISHED');
     expect(res.body.product.name).toBe(`${runId}-produk-lengkap`);
 
-    // Produk dengan riwayat publikasi QR tidak boleh dihapus.
+    // Selama masih ada stok, penghapusan ditolak (README 5.1) — sistem tidak
+    // mengurangi stok atau membuang batch untuk memaksa penghapusan berhasil.
+    const delWithStock = await request(app)
+      .delete(`/api/products/${prodFull}`)
+      .set(auth(adminToken));
+    expect(delWithStock.status).toBe(409);
+    expect(delWithStock.body.message).toMatch(/stok/i);
+
+    // Stok diselesaikan sampai nol lewat penyesuaian resmi (tanpa hapus batch).
+    const fullBatches = await prisma.batch.findMany({
+      where: { productId: prodFull },
+      select: { id: true, stockQuantity: true },
+    });
+    expect(fullBatches.length).toBeGreaterThan(0);
+    for (const item of fullBatches) {
+      const remaining = Number(item.stockQuantity);
+      if (remaining > 0) {
+        const settle = await request(app)
+          .post('/api/stock-adjustments')
+          .set(auth(adminToken))
+          .send({
+            targetType: 'BATCH',
+            targetId: item.id,
+            quantity: -remaining,
+            reason: 'Stok diselesaikan untuk uji penghapusan',
+          });
+        expect(settle.status).toBe(201);
+      }
+    }
+
+    // Produk dengan riwayat publikasi QR TIDAK dihapus permanen — diarsipkan,
+    // dan QR terbit tetap menampilkan informasi yang sudah diterbitkan.
     const del = await request(app).delete(`/api/products/${prodFull}`).set(auth(adminToken));
-    expect(del.status).toBe(409);
+    expect(del.status).toBe(200);
+    expect(del.body.archived).toBe(true);
+
+    const stillThere = await request(app).get(`/api/products/${prodFull}`).set(auth(adminToken));
+    expect(stillThere.status).toBe(200);
+    expect(stillThere.body.product.isActive).toBe(false);
+    expect(await prisma.qrPublication.count({ where: { batchId: batchFull } })).toBe(1);
+    expect((await getPublicQr(await getBatchCode(batchFull))).body.status).toBe('PUBLISHED');
 
     // Setelah Admin menarik, QR tidak menampilkan apa pun lagi.
     await postQr(batchFull, 'withdraw');

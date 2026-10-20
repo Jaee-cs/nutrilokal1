@@ -4,8 +4,15 @@
  * - Melihat daftar/detail: Admin dan Operator (informasi operasional).
  * - Membuat, mengubah, menonaktifkan/mengaktifkan, menghapus: hanya Admin.
  * - Setiap produk memiliki satu satuan dasar; tidak ada konversi satuan otomatis.
- * - Produk yang sudah memiliki riwayat operasional tidak boleh dihapus;
- *   Admin hanya dapat menonaktifkannya. Penonaktifan tidak menghapus riwayat.
+ * - Penghapusan (DELETE) mengikuti README 5.1 dengan urutan pemeriksaan:
+ *     1. stok total (jumlah stok seluruh batch) wajib nol — stok tidak pernah
+ *        dikurangi, dibuang, atau dipaksa agar penghapusan berhasil;
+ *     2. produk yang masih punya riwayat operasional TIDAK dihapus permanen —
+ *        diarsipkan (isActive = false) agar riwayat produksi, batch, penjualan,
+ *        dan QR tetap utuh;
+ *     3. produk tanpa riwayat dihapus permanen.
+ * - Penonaktifan/arsip tidak menghapus riwayat, dan produk arsip tetap muncul
+ *   di daftar master agar informasi historisnya masih bisa ditampilkan.
  * - Produk nonaktif tidak tersedia untuk produksi/penjualan baru dan tidak
  *   muncul di katalog aktif (pemeriksaan pemakaian dilakukan modul B5/B7/B8).
  */
@@ -230,15 +237,42 @@ productsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
-  if (await hasOperationalHistory('product', target.id)) {
+  // 1) Stok total = jumlah stok seluruh batch (README 5.4). Selama masih ada
+  //    stok, penghapusan ditolak — sistem tidak mengurangi/membuang stok untuk
+  //    memaksa penghapusan berhasil.
+  const totals = await prisma.batch.aggregate({
+    where: { productId: target.id },
+    _sum: { stockQuantity: true },
+  });
+  const stock = Number(totals._sum.stockQuantity ?? 0);
+  if (stock > 0) {
     res.status(409).json({
       message:
-        'Produk memiliki riwayat operasional dan tidak boleh dihapus. ' +
-        'Nonaktifkan produk sebagai gantinya.',
+        `Masih ada stok ${target.name} sebanyak ${stock.toLocaleString('id-ID')} ` +
+        `${target.unit}. Selesaikan stok terlebih dahulu sebelum menghapus produk.`,
     });
     return;
   }
 
+  // 2) Produk dengan riwayat operasional: diarsipkan (hapus logis) — baris,
+  //    riwayat, dan QR tetap tersimpan; produk tidak lagi tersedia untuk
+  //    produksi/penjualan baru.
+  if (await hasOperationalHistory('product', target.id)) {
+    const archived = target.isActive
+      ? await prisma.product.update({ where: { id: target.id }, data: { isActive: false } })
+      : target;
+
+    res.json({
+      message:
+        `Produk "${target.name}" diarsipkan karena sudah memiliki riwayat. ` +
+        'Riwayat produksi, batch, penjualan, dan QR tetap utuh.',
+      archived: true,
+      product: toPublicProduct(archived),
+    });
+    return;
+  }
+
+  // 3) Produk tanpa riwayat dan tanpa stok: dihapus permanen (README 5.1).
   await prisma.product.delete({ where: { id: target.id } });
-  res.json({ message: `Produk "${target.name}" berhasil dihapus.` });
+  res.json({ message: `Produk "${target.name}" berhasil dihapus.`, archived: false });
 });
