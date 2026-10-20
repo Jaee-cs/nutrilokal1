@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 const RECORDED_BY_SELECT = { select: { id: true, username: true, name: true } } as const;
 
 export const BATCH_INCLUDE = {
-  product: { select: { id: true, name: true, unit: true } },
+  product: { select: { id: true, name: true, unit: true, photoUrl: true } },
   aliases: { orderBy: { createdAt: 'asc' as const } },
   // Kehadiran catatan produksi menandai riwayat batch (README 5.3).
   production: { select: { id: true } },
@@ -30,7 +30,7 @@ export interface PublicBatch {
   code: string;
   /** Kode lama hasil koreksi tanggal produksi — tetap mengarah ke batch ini. */
   aliases: string[];
-  product: { id: string; name: string; unit: string };
+  product: { id: string; name: string; unit: string; photoUrl: string | null };
   /** KOSONG untuk batch stok awal yang tanggal produksinya tidak diketahui. */
   productionDate: Date | null;
   stock: number;

@@ -14,6 +14,8 @@ export interface PublicProduct {
   composition: string | null;
   /** Petunjuk penyimpanan (info publik QR/katalog, README 5.6). */
   storageInstructions: string | null;
+  /** Path publik foto produk (info publik QR/katalog, README 5.6). */
+  photoUrl: string | null;
   unit: string;
   sellingPrice: number;
   isActive: boolean;
@@ -39,6 +41,7 @@ export function toPublicProduct(
     description: product.description,
     composition: product.composition,
     storageInstructions: product.storageInstructions,
+    photoUrl: product.photoUrl,
     unit: product.unit,
     sellingPrice: Number(product.sellingPrice),
     isActive: product.isActive,

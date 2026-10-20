@@ -12,3 +12,7 @@ dist/
 
 # Log
 *.log
+
+# Unggahan berkas (foto produk) — data runtime, bukan source code.
+# Tidak di-commit; isinya WAJIB ikut dicadangkan bersama database.
+backend/uploads/

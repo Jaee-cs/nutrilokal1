@@ -3,6 +3,7 @@ import api from '../lib/api'
 import { Drawer } from '../components/Drawer'
 import { useAuth } from '../hooks/useAuth'
 import { wibDateCode, wibDateLabel, isBatchExpired } from '../utils/batch-expiry'
+import { productPhotoUrl } from '../utils/product-photo'
 
 interface Product {
   id: string
@@ -46,7 +47,7 @@ interface BatchSummary {
   id: string
   code: string
   aliases: string[]
-  product: { id: string; name: string; unit: string }
+  product: { id: string; name: string; unit: string; photoUrl?: string | null }
   productionDate: string | null
   stock: number
   hasLimitedHistory: boolean
@@ -509,6 +510,15 @@ export function ProductionPage() {
           <p className="text-muted">Detail batch tidak tersedia.</p>
         ) : (
           <>
+            {/* Foto produk dari master (hanya bila Admin sudah mengunggahnya). */}
+            {productPhotoUrl(detail.product.photoUrl) && (
+              <div className="product-photo detail-photo">
+                <img
+                  src={productPhotoUrl(detail.product.photoUrl)!}
+                  alt={`Foto ${detail.product.name}`}
+                />
+              </div>
+            )}
             <div className="detail-grid">
               <div className="detail-item">
                 <span className="card-label">Kode Batch</span>

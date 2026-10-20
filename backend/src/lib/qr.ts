@@ -107,6 +107,8 @@ export interface PublicQrPublished {
     composition?: string;
     /** Disembunyikan bila belum diisi Admin. */
     storageInstructions?: string;
+    /** Path foto produk; disembunyikan bila Admin belum mengunggah foto. */
+    photoUrl?: string;
   };
   batch: {
     code: string;
@@ -130,6 +132,7 @@ interface QrBatchFacts {
     description: string | null;
     composition: string | null;
     storageInstructions: string | null;
+    photoUrl: string | null;
   };
 }
 
@@ -159,6 +162,10 @@ export function buildPublicQrResponse(
   }
   if (batch.product.storageInstructions) {
     product.storageInstructions = batch.product.storageInstructions;
+  }
+  // Foto produk: hanya bila Admin sudah mengunggahnya.
+  if (batch.product.photoUrl) {
+    product.photoUrl = batch.product.photoUrl;
   }
 
   const publicBatch: PublicQrPublished['batch'] = { code: batch.code };

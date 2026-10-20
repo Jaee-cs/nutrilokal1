@@ -3,9 +3,12 @@
  * Berjalan terhadap database PostgreSQL lokal (docker compose).
  */
 import request from 'supertest';
+import { access, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app';
 import { hashPassword } from './lib/password';
+import { removeProductPhoto, resolveStoredPhotoPath } from './lib/product-photo';
 import { registerOperationalHistoryChecker } from './lib/master-history';
 import { prisma } from './lib/prisma';
 
@@ -333,6 +336,244 @@ describe('Master produk — riwayat operasional dan penghapusan', () => {
       .send({ unit: 'box' });
     expect(patched.status).toBe(200);
     expect(patched.body.product.unit).toBe('box');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Foto produk (unggahan berkas lokal, README 5.6)
+// ---------------------------------------------------------------------------
+
+/** Foto PNG 1x1 piksel yang valid (untuk menguji unggahan sungguhan). */
+const PNG_1PX = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AARAAI/wH+0pM4AAAAAElFTkSuQmCC',
+  'base64'
+);
+
+/** Foto JPEG minimal dengan magic bytes benar. */
+const JPEG_MIN = Buffer.concat([
+  Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+  Buffer.alloc(64, 0x20),
+  Buffer.from([0xff, 0xd9]),
+]);
+
+describe('Foto produk — unggah, ganti, hapus, dan validasi berkas', () => {
+  // Berkas aplikasi di luar direktori unggahan (untuk membuktikan tidak
+  // ada berkas lain yang tersentuh percobaan path traversal).
+  const packageJsonPath = join(__dirname, '..', 'package.json');
+
+  const uploadPhoto = (productId: string, body: Buffer, contentType: string, token = adminToken) =>
+    request(app)
+      .post(`/api/products/${productId}/photo`)
+      .set(auth(token))
+      .set('Content-Type', contentType)
+      .send(body);
+
+  const photoFileExists = (photoUrl: string): Promise<boolean> =>
+    access(resolveStoredPhotoPath(photoUrl) ?? '').then(
+      () => true,
+      () => false
+    );
+
+  afterAll(async () => {
+    // Berkas uji tidak boleh tertinggal di direktori unggahan.
+    const leftovers = await prisma.product.findMany({
+      where: { name: { startsWith: runId } },
+      select: { photoUrl: true },
+    });
+    for (const leftover of leftovers) {
+      await removeProductPhoto(leftover.photoUrl);
+    }
+  });
+
+  it('produk baru tanpa foto tetap boleh dibuat dan photoUrl bernilai null', async () => {
+    const product = await createProduct('tanpa-foto');
+    expect(product.photoUrl).toBeNull();
+  });
+
+  it('Admin mengunggah foto PNG: berkas tersimpan dan dapat diakses publik', async () => {
+    const product = await createProduct('foto-png');
+
+    const res = await uploadPhoto(product.id, PNG_1PX, 'image/png');
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/foto/i);
+    expect(res.body.product.photoUrl).toMatch(/^\/api\/uploads\/products\//);
+    // Tidak ada base64/isi gambar di respons API.
+    expect(JSON.stringify(res.body)).not.toContain(PNG_1PX.toString('base64').slice(0, 24));
+
+    // Berkas fisik benar-benar ada dan isinya identik dengan yang dikirim.
+    const storedPath = resolveStoredPhotoPath(res.body.product.photoUrl)!;
+    expect(storedPath).toBeTruthy();
+    expect(await readFile(storedPath)).toEqual(PNG_1PX);
+
+    // URL foto dapat diakses TANPA login (halaman publik katalog & QR).
+    const served = await request(app).get(res.body.product.photoUrl);
+    expect(served.status).toBe(200);
+    expect(served.headers['content-type']).toMatch(/image\/png/);
+  });
+
+  it('foto lama diganti dan berkas lama dihapus dari disk', async () => {
+    const product = await createProduct('ganti-foto');
+
+    const first = await uploadPhoto(product.id, PNG_1PX, 'image/png');
+    expect(first.status).toBe(200);
+    const firstPath = resolveStoredPhotoPath(first.body.product.photoUrl)!;
+
+    const second = await uploadPhoto(product.id, JPEG_MIN, 'image/jpeg');
+    expect(second.status).toBe(200);
+    expect(second.body.product.photoUrl).not.toBe(first.body.product.photoUrl);
+    expect(second.body.product.photoUrl).toMatch(/\.jpg$/);
+
+    expect(await photoFileExists(first.body.product.photoUrl)).toBe(false);
+    expect(await readFile(resolveStoredPhotoPath(second.body.product.photoUrl)!)).toEqual(JPEG_MIN);
+    expect(firstPath).not.toBe(resolveStoredPhotoPath(second.body.product.photoUrl)!);
+  });
+
+  it('foto dapat dihapus dan berkasnya ikut dihapus', async () => {
+    const product = await createProduct('hapus-foto');
+
+    const uploaded = await uploadPhoto(product.id, PNG_1PX, 'image/png');
+    expect(uploaded.status).toBe(200);
+    const photoUrl = uploaded.body.product.photoUrl as string;
+
+    const deleted = await request(app)
+      .delete(`/api/products/${product.id}/photo`)
+      .set(auth(adminToken));
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.product.photoUrl).toBeNull();
+    expect(await photoFileExists(photoUrl)).toBe(false);
+
+    // Menghapus foto saat produk memang belum punya foto tetap aman.
+    const again = await request(app)
+      .delete(`/api/products/${product.id}/photo`)
+      .set(auth(adminToken));
+    expect(again.status).toBe(200);
+    expect(again.body.product.photoUrl).toBeNull();
+  });
+
+  it('tipe berkas tidak didukung ditolak (400) dan tidak ada berkas tersimpan', async () => {
+    const product = await createProduct('tipe-salah');
+
+    const textFile = await uploadPhoto(product.id, Buffer.from('bukan gambar'), 'text/plain');
+    expect(textFile.status).toBe(400);
+    expect(textFile.body.message).toMatch(/JPG, PNG, atau WEBP/i);
+
+    // Content-Type gambar palsu: isi berkasnya tetap diperiksa (magic bytes).
+    const fakeImage = await uploadPhoto(product.id, Buffer.from('<svg>palsu</svg>'), 'image/png');
+    expect(fakeImage.status).toBe(400);
+    expect(fakeImage.body.message).toMatch(/JPG, PNG, atau WEBP/i);
+
+    const detail = await request(app).get(`/api/products/${product.id}`).set(auth(adminToken));
+    expect(detail.body.product.photoUrl).toBeNull();
+  });
+
+  it('berkas kosong ditolak (400) dengan pesan yang jelas', async () => {
+    const product = await createProduct('foto-kosong');
+
+    const empty = await uploadPhoto(product.id, Buffer.alloc(0), 'image/png');
+    expect(empty.status).toBe(400);
+    expect(empty.body.message).toMatch(/kosong|pilih gambar/i);
+  });
+
+  it('foto melebihi 5 MB ditolak (413) dan produk tetap tanpa foto', async () => {
+    const product = await createProduct('foto-besar');
+
+    const oversize = await uploadPhoto(
+      product.id,
+      Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(6 * 1024 * 1024, 0x20)]),
+      'image/jpeg'
+    );
+    expect(oversize.status).toBe(413);
+    expect(oversize.body.message).toMatch(/maksimal 5 MB/i);
+
+    const detail = await request(app).get(`/api/products/${product.id}`).set(auth(adminToken));
+    expect(detail.body.product.photoUrl).toBeNull();
+  });
+
+  it('unggahan tanpa berkas gambar (body JSON) ditolak (400)', async () => {
+    const product = await createProduct('foto-json');
+
+    const res = await request(app)
+      .post(`/api/products/${product.id}/photo`)
+      .set(auth(adminToken))
+      .send({ photo: 'data:image/png;base64,AAAA' });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/JPG, PNG, atau WEBP|body berkas/i);
+  });
+
+  it('Operator tidak dapat mengunggah maupun menghapus foto (403)', async () => {
+    const product = await createProduct('foto-operator');
+
+    const upload = await uploadPhoto(product.id, PNG_1PX, 'image/png', operatorToken);
+    expect(upload.status).toBe(403);
+
+    const remove = await request(app)
+      .delete(`/api/products/${product.id}/photo`)
+      .set(auth(operatorToken));
+    expect(remove.status).toBe(403);
+
+    // Tanpa token ditolak 401.
+    const anonymous = await request(app)
+      .post(`/api/products/${product.id}/photo`)
+      .set('Content-Type', 'image/png')
+      .send(PNG_1PX);
+    expect(anonymous.status).toBe(401);
+
+    const detail = await request(app).get(`/api/products/${product.id}`).set(auth(adminToken));
+    expect(detail.body.product.photoUrl).toBeNull();
+  });
+
+  it('produk tidak dikenal: unggah/hapus foto 404', async () => {
+    expect((await uploadPhoto('id-tidak-ada', PNG_1PX, 'image/png')).status).toBe(404);
+    expect(
+      (await request(app).delete('/api/products/id-tidak-ada/photo').set(auth(adminToken))).status
+    ).toBe(404);
+  });
+
+  it('path traversal ditolak: berkas di luar direktori unggahan tidak dapat diakses/dihapus', async () => {
+    // Percobaan membaca berkas di luar direktori unggahan lewat URL publik.
+    for (const attempt of [
+      '/api/uploads/../package.json',
+      '/api/uploads/%2e%2e%2fpackage.json',
+      '/api/uploads/..%2f..%2f.env',
+    ]) {
+      const res = await request(app).get(attempt);
+      expect([400, 403, 404]).toContain(res.status);
+      expect(JSON.stringify(res.body ?? {})).not.toContain('jwt');
+    }
+
+    // Path tersimpan yang aneh (dari database) tidak dipakai untuk menghapus
+    // berkas di luar direktori unggahan.
+    expect(resolveStoredPhotoPath('/api/uploads/products/x/../../.env')).toBeNull();
+    expect(resolveStoredPhotoPath('/api/uploads/products/x/y/evil.png')).toBeNull();
+    expect(resolveStoredPhotoPath('/etc/passwd')).toBeNull();
+    await removeProductPhoto('/api/uploads/products/../package.json');
+
+    const product = await createProduct('traversal');
+    await prisma.product.update({
+      where: { id: product.id },
+      data: { photoUrl: '../../package.json' },
+    });
+    const deleted = await request(app)
+      .delete(`/api/products/${product.id}/photo`)
+      .set(auth(adminToken));
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.product.photoUrl).toBeNull();
+    // Berkas aplikasi tetap ada — tidak ada yang terhapus di luar unggahan.
+    expect(await readFile(packageJsonPath, 'utf8')).toContain('nutrilokal-backend');
+  });
+
+  it('menghapus produk permanen ikut membersihkan berkas fotonya', async () => {
+    const product = await createProduct('hapus-produk-foto');
+
+    const uploaded = await uploadPhoto(product.id, PNG_1PX, 'image/png');
+    expect(uploaded.status).toBe(200);
+    const photoUrl = uploaded.body.product.photoUrl as string;
+    expect(await photoFileExists(photoUrl)).toBe(true);
+
+    const deleted = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.archived).toBe(false);
+    expect(await photoFileExists(photoUrl)).toBe(false);
   });
 });
 

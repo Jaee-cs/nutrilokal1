@@ -21,6 +21,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app';
 import { hashPassword } from './lib/password';
+import { removeProductPhoto } from './lib/product-photo';
 import { prisma } from './lib/prisma';
 import { userHasActivityHistory } from './lib/account-history';
 
@@ -35,9 +36,16 @@ let adminId = '';
 // Fixture yang dibuat beforeAll.
 let prodFull = ''; // produk dengan seluruh info publik terisi
 let prodPlain = ''; // produk tanpa info publik opsional
+let prodFullPhoto = ''; // path foto produk prodFull (diunggah beforeAll)
 let batchFull = ''; // batch dengan tanggal produksi diketahui
 let batchPlain = ''; // batch stok awal tanpa tanggal produksi (NL-OPEN)
 const oldCode = `${runId}-kode-lama`; // alias kode lama batchFull
+
+/** Foto PNG 1x1 piksel yang valid (berkas sungguhan, bukan base64). */
+const PNG_1PX = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AARAAI/wH+0pM4AAAAAElFTkSuQmCC',
+  'base64'
+);
 
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
@@ -117,12 +125,9 @@ beforeAll(async () => {
     })
   ).id;
   prodPlain = (await createProduct('polos')).id;
-
-  // Batch dengan tanggal produksi diketahui (dicatat via stok awal).
   batchFull = (await createBatch(prodFull, { productionDate: wibDateCode(-7) })).id;
   // Batch stok awal tanpa tanggal produksi — riwayat terbatas (README 5.3).
   batchPlain = (await createBatch(prodPlain)).id;
-
   // Kode lama (alias) terdaftar langsung di database — mesin alias
   // sendiri sudah diuji pada B5.
   await prisma.batchAlias.create({ data: { batchId: batchFull, code: oldCode } });
@@ -133,6 +138,17 @@ beforeAll(async () => {
     .set(auth(adminToken))
     .send({ expiryDate: wibDateCode(30) });
   expect(expiryRes.status).toBe(200);
+
+  // Foto produk diunggah Admin untuk produk dengan info publik lengkap
+  // (berkas biner, bukan base64) — path publiknya dipakai katalog & QR.
+  const photoRes = await request(app)
+    .post(`/api/products/${prodFull}/photo`)
+    .set(auth(adminToken))
+    .set('Content-Type', 'image/png')
+    .send(PNG_1PX);
+  expect(photoRes.status).toBe(200);
+  prodFullPhoto = photoRes.body.product.photoUrl as string;
+  expect(prodFullPhoto).toMatch(/^\/api\/uploads\/products\//);
 });
 
 afterAll(async () => {
@@ -154,6 +170,14 @@ afterAll(async () => {
   await prisma.stockAdjustment.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batchOpeningBalance.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batch.deleteMany({ where: { id: { in: batchIds } } });
+  // Berkas foto uji dibersihkan dari disk sebelum baris produk dihapus.
+  const photographed = await prisma.product.findMany({
+    where: { name: { startsWith: runId } },
+    select: { photoUrl: true },
+  });
+  for (const item of photographed) {
+    await removeProductPhoto(item.photoUrl);
+  }
   await prisma.product.deleteMany({ where: { name: { startsWith: runId } } });
   await prisma.user.deleteMany({ where: { username: { startsWith: runId } } });
 });
@@ -173,9 +197,16 @@ describe('katalog publik', () => {
 
     const full = mine.find((p) => p.name === `${runId}-produk-lengkap`)!;
     // Hanya kolom yang memang untuk publik; tidak ada data internal.
-    expect(Object.keys(full).sort()).toEqual(['description', 'name', 'sellingPrice', 'unit']);
+    expect(Object.keys(full).sort()).toEqual(['description', 'name', 'photoUrl', 'sellingPrice', 'unit']);
     expect(full.description).toBe('Snack sehat khas KWT Gogor.');
     expect(full.sellingPrice).toBe(20000);
+    // Foto publik berasal dari master produk (bukan salinan/base64).
+    expect(full.photoUrl).toBe(prodFullPhoto);
+
+    // Foto dapat dimuat tanpa login (katalog publik terbuka).
+    const photo = await request(app).get(prodFullPhoto);
+    expect(photo.status).toBe(200);
+    expect(photo.headers['content-type']).toMatch(/image\/png/);
 
     const plain = mine.find((p) => p.name === `${runId}-produk-polos`)!;
     // Kolom yang belum diisi Admin disembunyikan — bukan null.
@@ -266,11 +297,14 @@ describe('QR traceability per batch', () => {
       'composition',
       'description',
       'name',
+      'photoUrl',
       'storageInstructions',
       'unit',
     ]);
     expect(res.body.product.name).toBe(`${runId}-produk-lengkap`);
     expect(res.body.product.composition).toBe('Biji beras merah, gula aren, kelapa parut.');
+    // Foto produk ikut tampil (path relatif, bukan base64/URL absolut).
+    expect(res.body.product.photoUrl).toBe(prodFullPhoto);
 
     expect(Object.keys(res.body.batch).sort()).toEqual([
       'code',
@@ -318,7 +352,8 @@ describe('QR traceability per batch', () => {
     const plainRes = await getPublicQr(await getBatchCode(batchPlain));
     expect(plainRes.body.status).toBe('PUBLISHED');
     expect(Object.keys(plainRes.body.batch).sort()).toEqual(['code']);
-    expect(Object.keys(plainRes.body.product)).toEqual(['name', 'unit']); // tanpa deskripsi/komposisi/petunjuk
+    // Tanpa deskripsi/komposisi/petunjuk/foto (produk polos belum diisi Admin).
+    expect(Object.keys(plainRes.body.product)).toEqual(['name', 'unit']);
 
     // Tanggal kedaluwarsa yang BELUM divalidasi disembunyikan (disimulasikan
     // lewat database — jalur API selalu memvalidasi saat pencatatan, B7).
@@ -353,6 +388,60 @@ describe('QR traceability per batch', () => {
     expect(res.body.status).toBe('PUBLISHED');
     expect(res.body.product.description).toBe('Deskripsi terbaru hasil pemeriksaan Admin.');
     expect(res.body.product.composition).toBe('Resep baru: beras merah dan gula aren organik.');
+    // Foto tetap seperti semula — mengubah teks tidak merusak identitas foto.
+    expect(res.body.product.photoUrl).toBe(prodFullPhoto);
+  });
+
+  it('foto produk dapat diganti dan dihapus tanpa mengubah identitas batch/QR', async () => {
+    const codeBefore = await getBatchCode(batchFull);
+    const batchBefore = await request(app).get(`/api/batches/${batchFull}`).set(auth(adminToken));
+    const stockBefore = batchBefore.body.batch.stock;
+    const publicationBefore = await prisma.qrPublication.findUnique({ where: { batchId: batchFull } });
+
+    // Ganti foto: path baru dan foto baru tampil di katalog & QR.
+    const replaced = await request(app)
+      .post(`/api/products/${prodFull}/photo`)
+      .set(auth(adminToken))
+      .set('Content-Type', 'image/jpeg')
+      .send(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(32, 0x20), Buffer.from([0xff, 0xd9])]));
+    expect(replaced.status).toBe(200);
+    const newPhoto = replaced.body.product.photoUrl as string;
+    expect(newPhoto).not.toBe(prodFullPhoto);
+    expect((await getPublicQr(codeBefore)).body.product.photoUrl).toBe(newPhoto);
+
+    // Hapus foto: kolom foto disembunyikan kembali, informasi lain tetap.
+    const removed = await request(app)
+      .delete(`/api/products/${prodFull}/photo`)
+      .set(auth(adminToken));
+    expect(removed.status).toBe(200);
+    const withoutPhoto = await getPublicQr(codeBefore);
+    expect(withoutPhoto.body.status).toBe('PUBLISHED');
+    expect(withoutPhoto.body.product).not.toHaveProperty('photoUrl');
+    expect(Object.keys(withoutPhoto.body.product).sort()).toEqual([
+      'composition',
+      'description',
+      'name',
+      'storageInstructions',
+      'unit',
+    ]);
+    expect(withoutPhoto.body.batch.code).toBe(codeBefore);
+
+    // Batch, stok, dan riwayat publikasi tidak berubah sama sekali.
+    const batchAfter = await request(app).get(`/api/batches/${batchFull}`).set(auth(adminToken));
+    expect(batchAfter.body.batch.code).toBe(codeBefore);
+    expect(batchAfter.body.batch.stock).toBe(stockBefore);
+    expect(await prisma.qrPublication.findUnique({ where: { batchId: batchFull } })).toEqual(
+      publicationBefore
+    );
+
+    // Kembalikan foto untuk pengujian berikutnya.
+    const restored = await request(app)
+      .post(`/api/products/${prodFull}/photo`)
+      .set(auth(adminToken))
+      .set('Content-Type', 'image/png')
+      .send(PNG_1PX);
+    expect(restored.status).toBe(200);
+    prodFullPhoto = restored.body.product.photoUrl as string;
   });
 
   it('QR yang ditarik hanya menampilkan pemberitahuan — tanpa informasi sebelumnya', async () => {

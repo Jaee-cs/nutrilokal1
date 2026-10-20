@@ -344,7 +344,62 @@ table tbody tr:hover { background: var(--surface-low); }
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  position: relative;
 }
+
+/* Ikon edit di sudut kanan atas kartu produk (hanya Admin). */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-full);
+  background: var(--surface-lowest);
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.icon-button:hover { background: var(--surface-container); color: var(--primary); }
+.icon-button .material-symbols-outlined { font-size: 18px; }
+
+.product-edit {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 1;
+}
+
+/* Badge status diberi jarak agar tidak tertutup ikon edit. */
+.product-edit ~ .product-card-head { padding-right: 2.5rem; }
+
+.product-photo {
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-low);
+}
+
+.product-photo img {
+  display: block;
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+}
+
+.modal-photo { margin-bottom: 1rem; }
+.modal-photo img { height: 120px; }
+
+.qr-trace-photo { margin-bottom: 1.25rem; max-width: 22rem; }
+.qr-trace-photo img { height: 200px; }
+
+.qr-detail-photo { margin-bottom: 1.25rem; max-width: 22rem; }
+.qr-detail-photo img { height: 180px; }
+
+.detail-photo { margin-bottom: 1.25rem; max-width: 22rem; }
+.detail-photo img { height: 180px; }
 
 .product-card-head {
   display: flex;
@@ -424,6 +479,59 @@ table tbody tr:hover { background: var(--surface-low); }
   flex-direction: column;
   gap: 1rem;
 }
+
+/* Kolom foto produk (tambah/edit) ------------------------------------------ */
+.photo-field-body {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.photo-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  border: 1px dashed var(--outline-variant);
+  border-radius: var(--radius);
+  background: var(--surface-low);
+  overflow: hidden;
+  color: var(--on-surface-variant);
+}
+
+.photo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-placeholder-icon { font-size: 32px; }
+
+.photo-field-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 12rem;
+  flex: 1;
+}
+
+.photo-field-actions input[type='file'] {
+  width: 100%;
+  font-size: 13px;
+  color: var(--on-surface-variant);
+}
+
+.photo-field-actions .badge {
+  white-space: normal;
+  text-align: left;
+  border-radius: var(--radius);
+}
+
+.photo-hint { font-size: 12px; }
 
 .drawer-actions {
   display: flex;
@@ -781,6 +889,14 @@ table tbody tr:hover { background: var(--surface-low); }
 .label-qr {
   width: 140px;
   height: 140px;
+  flex-shrink: 0;
+}
+
+.label-photo {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
 

@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../lib/api'
+import { productPhotoUrl } from '../utils/product-photo'
 
 interface PublicProduct {
   name: string
   unit: string
   sellingPrice: number
   description?: string
+  photoUrl?: string
 }
 
 export function CatalogPage() {
@@ -49,26 +51,35 @@ export function CatalogPage() {
         </div>
       ) : (
         <div className="product-grid">
-          {products.map((p, idx) => (
-            <div key={idx} className="card product-card">
-              <div className="product-card-head">
-                <div className="product-info">
-                  <h3 className="product-name">{p.name}</h3>
-                  <p className="product-unit">Per {p.unit}</p>
+          {products.map((p, idx) => {
+            const photo = productPhotoUrl(p.photoUrl)
+            return (
+              <div key={idx} className="card product-card">
+                <div className="product-card-head">
+                  <div className="product-info">
+                    <h3 className="product-name">{p.name}</h3>
+                    <p className="product-unit">Per {p.unit}</p>
+                  </div>
+                  <span className="badge success">Aktif</span>
                 </div>
-                <span className="badge success">Aktif</span>
-              </div>
 
-              <div className="product-price">
-                <span className="card-label">Harga Jual</span>
-                <span className="price-value">
-                  Rp {Number(p.sellingPrice).toLocaleString('id-ID')}
-                </span>
-              </div>
+                {photo && (
+                  <div className="product-photo">
+                    <img src={photo} alt={`Foto ${p.name}`} loading="lazy" />
+                  </div>
+                )}
 
-              {p.description && <p className="product-desc">{p.description}</p>}
-            </div>
-          ))}
+                <div className="product-price">
+                  <span className="card-label">Harga Jual</span>
+                  <span className="price-value">
+                    Rp {Number(p.sellingPrice).toLocaleString('id-ID')}
+                  </span>
+                </div>
+
+                {p.description && <p className="product-desc">{p.description}</p>}
+              </div>
+            )
+          })}
         </div>
       )}
 

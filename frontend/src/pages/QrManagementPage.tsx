@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import api from '../lib/api'
 import { validatedExpiryLabel } from '../utils/batch-expiry'
+import { productPhotoUrl } from '../utils/product-photo'
 
 // Bentuk API GET /batches (toPublicBatch): stock, productionDate bisa null
 // (batch stok awal), expiryDate/expiryValidated untuk label.
 interface Batch {
   id: string
   code: string
-  product: { name: string }
+  product: { name: string; photoUrl?: string | null }
   productionDate: string | null
   stock: number
   expiryDate: string | null
@@ -34,6 +35,8 @@ interface LabelState {
   productName: string
   /** Tanggal kedaluwarsa HANYA bila sudah divalidasi (README 5.6). */
   expiryLabel: string | null
+  /** Foto produk bila Admin sudah mengunggahnya (opsional). */
+  photoUrl: string | null
   dataUrl: string
 }
 
@@ -135,27 +138,41 @@ export function QrManagementPage() {
   }
 
   // Buka pratinjau label: QR digambar dari URL pelacakan publik batch ini.
-  async function openLabel(code: string, productName: string, expiryLabel: string | null) {
+  async function openLabel(
+    code: string,
+    productName: string,
+    expiryLabel: string | null,
+    photoUrl: string | null
+  ) {
     setError(null)
     try {
       const dataUrl = await QRCode.toDataURL(publicTraceUrl(code), QR_OPTIONS)
-      setLabel({ code, productName, expiryLabel, dataUrl })
+      setLabel({ code, productName, expiryLabel, photoUrl, dataUrl })
     } catch {
       setError('Gagal membuat gambar QR untuk label')
     }
   }
 
   function labelFromBatch(b: Batch) {
-    openLabel(b.code, b.product.name, validatedExpiryLabel(b))
+    openLabel(b.code, b.product.name, validatedExpiryLabel(b), productPhotoUrl(b.product.photoUrl))
   }
 
   function labelFromDetail() {
     if (!detail) return
     const b = batches.find(x => x.id === detail.batchId)
-    openLabel(detail.code, b?.product.name ?? detail.code, b ? validatedExpiryLabel(b) : null)
+    openLabel(
+      detail.code,
+      b?.product.name ?? detail.code,
+      b ? validatedExpiryLabel(b) : null,
+      productPhotoUrl(b?.product.photoUrl)
+    )
   }
 
   const statusInfo = detail ? STATUS_LABEL[detail.status] : null
+  // Foto produk untuk batch yang sedang dibuka (dari daftar batch).
+  const detailPhotoUrl = detail
+    ? batches.find((b) => b.id === detail.batchId)?.product.photoUrl ?? null
+    : null
 
   return (
     <div className="container">
@@ -216,11 +233,18 @@ export function QrManagementPage() {
       </section>
 
       {detail && statusInfo && (
-        <section className="card section-card">
+        <section className="card section-card qr-detail">
           <div className="section-head">
             <h2 className="card-title">Detail QR — {detail.code}</h2>
             <span className={`badge ${statusInfo.cls}`}>{statusInfo.label}</span>
           </div>
+
+          {/* Foto produk dari master (hanya bila Admin sudah mengunggahnya). */}
+          {productPhotoUrl(detailPhotoUrl) && (
+            <div className="product-photo qr-detail-photo">
+              <img src={productPhotoUrl(detailPhotoUrl)!} alt="Foto produk batch ini" />
+            </div>
+          )}
 
           <div className="qr-actions">
             <button
@@ -321,6 +345,9 @@ export function QrManagementPage() {
             <div className="label-sheet">
               <div className="label-brand">NutriLokal</div>
               <div className="label-body">
+                {label.photoUrl && (
+                  <img className="label-photo" src={label.photoUrl} alt={`Foto ${label.productName}`} />
+                )}
                 <img className="label-qr" src={label.dataUrl} alt={`Kode QR batch ${label.code}`} />
                 <div className="label-info">
                   <div className="label-product">{label.productName}</div>

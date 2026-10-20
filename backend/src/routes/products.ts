@@ -17,11 +17,19 @@
  *   muncul di katalog aktif (pemeriksaan pemakaian dilakukan modul B5/B7/B8).
  */
 import { Prisma } from '@prisma/client';
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { pathId } from '../lib/http';
 import { hasOperationalHistory } from '../lib/master-history';
 import { prisma } from '../lib/prisma';
 import { toPublicProduct } from '../lib/product';
+import {
+  ALLOWED_PHOTO_MIME_LIST,
+  MAX_PHOTO_BYTES,
+  PHOTO_SIZE_MESSAGE,
+  removeProductPhoto,
+  saveProductPhoto,
+  validatePhotoBuffer,
+} from '../lib/product-photo';
 import {
   normalizeDescription,
   validateDescription,
@@ -33,6 +41,115 @@ import {
 import { authenticate, requireAdmin } from '../middleware/auth';
 
 export const productsRouter = Router();
+
+// ---------------------------------------------------------------------------
+// Foto produk (unggahan berkas ke penyimpanan lokal backend, README 5.6)
+//
+// - Berkas dikirim sebagai body biner mentah dengan Content-Type gambar
+//   (tanpa multipart dan tanpa base64), lalu disimpan sebagai file.
+// - Hanya Admin (ditegakkan requireAdmin); Operator tidak dapat mengunggah
+//   maupun menghapus foto lewat API.
+// - Tipe diperiksa dari isi berkas (magic bytes) dan ukurannya dibatasi.
+// ---------------------------------------------------------------------------
+
+const PHOTO_MAX_MB = MAX_PHOTO_BYTES / (1024 * 1024);
+
+const photoBodyParser = express.raw({
+  type: ALLOWED_PHOTO_MIME_LIST,
+  limit: MAX_PHOTO_BYTES,
+});
+
+function isPayloadTooLarge(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const { type, status, statusCode } = error as {
+    type?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+  };
+  return type === 'entity.too.large' || status === 413 || statusCode === 413;
+}
+
+/** Parser foto yang mengubah kegagalan body-parser menjadi pesan Indonesia. */
+function parsePhoto(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+): void {
+  photoBodyParser(req, res, (error: unknown) => {
+    if (error) {
+      if (isPayloadTooLarge(error)) {
+        res.status(413).json({ message: PHOTO_SIZE_MESSAGE });
+        return;
+      }
+      next(error);
+      return;
+    }
+    if (!Buffer.isBuffer(req.body)) {
+      // Content-Type bukan gambar yang diizinkan → body tidak dibaca.
+      res.status(400).json({
+        message: 'Kirim foto sebagai body berkas gambar (JPG, PNG, atau WEBP), bukan JSON atau teks.',
+      });
+      return;
+    }
+    next();
+  });
+}
+
+/** Mengubah foto produk: unggah (body biner) — menggantikan foto lama bila ada. */
+productsRouter.post(
+  '/:id/photo',
+  authenticate,
+  requireAdmin,
+  parsePhoto,
+  async (req, res) => {
+    const target = await prisma.product.findUnique({ where: { id: pathId(req) } });
+    if (!target) {
+      res.status(404).json({ message: 'Produk tidak ditemukan.' });
+      return;
+    }
+
+    const validation = validatePhotoBuffer(req.body as Buffer);
+    if (!validation.ok) {
+      res.status(400).json({ message: validation.message });
+      return;
+    }
+
+    const photoUrl = await saveProductPhoto(target.id, req.body as Buffer, validation.mime!);
+
+    // Ganti foto: simpan path baru di database lalu bersihkan berkas lama.
+    const updated = await prisma.product.update({
+      where: { id: target.id },
+      data: { photoUrl },
+    });
+    if (target.photoUrl && target.photoUrl !== photoUrl) {
+      await removeProductPhoto(target.photoUrl);
+    }
+
+    res.json({
+      message: 'Foto produk berhasil disimpan.',
+      product: toPublicProduct(updated),
+    });
+  }
+);
+
+/** Menghapus foto produk (opsional; produk boleh tetap tanpa foto). */
+productsRouter.delete('/:id/photo', authenticate, requireAdmin, async (req, res) => {
+  const target = await prisma.product.findUnique({ where: { id: pathId(req) } });
+  if (!target) {
+    res.status(404).json({ message: 'Produk tidak ditemukan.' });
+    return;
+  }
+
+  const updated = await prisma.product.update({
+    where: { id: target.id },
+    data: { photoUrl: null },
+  });
+  await removeProductPhoto(target.photoUrl);
+
+  res.json({ message: 'Foto produk dihapus.', product: toPublicProduct(updated) });
+});
 
 // ---------- Melihat (Admin & Operator) ----------
 
@@ -273,6 +390,8 @@ productsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
   }
 
   // 3) Produk tanpa riwayat dan tanpa stok: dihapus permanen (README 5.1).
+  //    Berkas fotonya ikut dibersihkan agar tidak menumpuk tanpa pemilik.
   await prisma.product.delete({ where: { id: target.id } });
+  await removeProductPhoto(target.photoUrl);
   res.json({ message: `Produk "${target.name}" berhasil dihapus.`, archived: false });
 });

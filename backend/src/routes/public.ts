@@ -34,13 +34,23 @@ publicRouter.get('/catalog', async (req, res) => {
   res.json({
     products: products.map((product) => {
       // Hanya kolom yang memang untuk publik; kolom kosong disembunyikan.
-      const entry: { name: string; unit: string; sellingPrice: number; description?: string } = {
+      const entry: {
+        name: string;
+        unit: string;
+        sellingPrice: number;
+        description?: string;
+        photoUrl?: string;
+      } = {
         name: product.name,
         unit: product.unit,
         sellingPrice: Number(product.sellingPrice),
       };
       if (product.description) {
         entry.description = product.description;
+      }
+      // Foto hanya bila memang sudah diunggah Admin — tanpa data internal.
+      if (product.photoUrl) {
+        entry.photoUrl = product.photoUrl;
       }
       return entry;
     }),
@@ -59,6 +69,7 @@ const QR_BATCH_INCLUDE = {
       description: true,
       composition: true,
       storageInstructions: true,
+      photoUrl: true,
     },
   },
   qrPublication: { select: { publishedAt: true, withdrawnAt: true } },

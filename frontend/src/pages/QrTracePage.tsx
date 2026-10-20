@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import api from '../lib/api'
+import { productPhotoUrl } from '../utils/product-photo'
 
 // Respons backend: GET /api/public/qr/:code
 // { status: 'PUBLISHED', product: {...}, batch: {...} } | { status: 'UNAVAILABLE', message }
@@ -12,6 +13,7 @@ interface QrPublished {
     description?: string
     composition?: string
     storageInstructions?: string
+    photoUrl?: string
   }
   batch: {
     code: string
@@ -103,6 +105,16 @@ export function QrTracePage() {
             </div>
             <span className="badge success">Tersedia Publik</span>
           </div>
+
+          {/* Foto produk dari master (hanya bila Admin sudah mengunggahnya). */}
+          {productPhotoUrl(published.product.photoUrl) && (
+            <div className="product-photo qr-trace-photo">
+              <img
+                src={productPhotoUrl(published.product.photoUrl)!}
+                alt={`Foto ${published.product.name}`}
+              />
+            </div>
+          )}
 
           <div className="qr-meta">
             <div className="qr-meta-item">
