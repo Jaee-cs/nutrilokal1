@@ -92,6 +92,8 @@ export function MaterialsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Material | null>(null)
 
   // Tambah bahan baku (+ saldo awal opsional dalam satu alur, Admin)
   const [addForm, setAddForm] = useState(EMPTY_ADD)
@@ -288,6 +290,52 @@ export function MaterialsPage() {
       }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Gagal mengubah status')
+    }
+  }
+
+  function openDeleteDialog(m: Material) {
+    setError(null)
+    setSuccess(null)
+    setDeleteTarget(m)
+  }
+
+  function closeDeleteDialog() {
+    if (deletingId) return
+    setDeleteTarget(null)
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setError(null)
+    setSuccess(null)
+    setDeletingId(deleteTarget.id)
+    try {
+      const res = await api.delete(`/materials/${deleteTarget.id}`)
+      const message = res.data?.message || `Bahan baku "${deleteTarget.name}" berhasil dihapus.`
+      setMaterials(prev => prev.filter(m => m.id !== deleteTarget.id))
+      setDeleteTarget(null)
+      setSuccess(message)
+      if (movementMaterialId === deleteTarget.id) {
+        setMovementMaterialId('')
+        setMovements([])
+      }
+      if (receiptMaterialId === deleteTarget.id) {
+        setReceiptMaterialId('')
+        setReceipts([])
+      }
+      if (adjForm.materialId === deleteTarget.id) {
+        setAdjForm(EMPTY_ADJ)
+      }
+      if (receiptForm.materialId === deleteTarget.id) {
+        setReceiptForm(EMPTY_RECEIPT)
+      }
+      if (obForm.materialId === deleteTarget.id) {
+        setObForm(EMPTY_OB)
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Gagal menghapus bahan baku')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -547,13 +595,24 @@ export function MaterialsPage() {
                           </td>
                           {isAdmin && (
                             <td>
-                              <button
-                                type="button"
-                                className="button secondary"
-                                onClick={() => toggleActive(m.id, m.isActive)}
-                              >
-                                {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                              </button>
+                              <div className="row-actions">
+                                <button
+                                  type="button"
+                                  className="button secondary"
+                                  onClick={() => toggleActive(m.id, m.isActive)}
+                                >
+                                  {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="button danger-outline"
+                                  onClick={() => openDeleteDialog(m)}
+                                  title="Hapus bahan baku"
+                                >
+                                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
+                                  Hapus
+                                </button>
+                              </div>
                             </td>
                           )}
                         </tr>
@@ -589,6 +648,14 @@ export function MaterialsPage() {
                             onClick={() => toggleActive(m.id, m.isActive)}
                           >
                             {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                          </button>
+                          <button
+                            type="button"
+                            className="button danger-outline material-item-delete"
+                            onClick={() => openDeleteDialog(m)}
+                            aria-label={`Hapus bahan baku ${m.name}`}
+                          >
+                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
                           </button>
                         </div>
                       )}
@@ -1086,6 +1153,58 @@ export function MaterialsPage() {
               )}
             </div>
           </section>
+        </div>
+      )}
+
+      {/* Dialog konfirmasi hapus bahan baku (hanya Admin) */}
+      {isAdmin && deleteTarget && (
+        <div className="modal-root">
+          <div className="modal-overlay" onClick={closeDeleteDialog} />
+          <div
+            className="modal-panel confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-delete-title"
+          >
+            <div className="modal-head-row">
+              <div>
+                <h3 className="modal-title" id="confirm-delete-title">Hapus Bahan Baku</h3>
+                <p className="modal-subtitle">Tindakan ini tidak dapat dibatalkan.</p>
+              </div>
+              <button className="icon-btn" onClick={closeDeleteDialog} aria-label="Tutup" disabled={!!deletingId}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="confirm-body">
+              <p>
+                Bahan baku <strong>{deleteTarget.name}</strong> ({deleteTarget.unit}) akan dihapus
+                secara permanen dari daftar bahan baku.
+              </p>
+              <p className="text-muted">
+                Bahan yang sudah memiliki riwayat penerimaan, saldo awal, pemakaian produksi, atau
+                penyesuaian stok tidak dapat dihapus — gunakan fitur Nonaktifkan sebagai gantinya.
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={closeDeleteDialog}
+                disabled={!!deletingId}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                className="button danger"
+                onClick={confirmDelete}
+                disabled={!!deletingId}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
+                {deletingId ? 'Menghapus...' : 'Hapus'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

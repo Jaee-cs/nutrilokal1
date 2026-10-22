@@ -191,149 +191,205 @@ export function QrManagementPage() {
           <h2 className="card-title">Daftar Batch</h2>
           <span className="text-muted">{batches.length} batch</span>
         </div>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Kode Batch</th>
-                <th>Produk</th>
-                <th>Tgl Produksi</th>
-                <th>Stok</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={5}>Memuat...</td></tr>
-              ) : batches.length === 0 ? (
-                <tr><td colSpan={5} className="text-muted">Belum ada batch</td></tr>
-              ) : (
-                batches.slice(0, 30).map(b => (
-                  <tr key={b.id} className={detail?.batchId === b.id ? 'row-active' : ''}>
-                    <td><span className="badge neutral">{b.code}</span></td>
-                    <td className="cell-primary">{b.product.name}</td>
-                    <td>{b.productionDate ?? '-'}</td>
-                    <td className="num">{b.stock.toLocaleString('id-ID')}</td>
-                    <td>
-                      <div className="row-actions">
-                        <button className="button secondary" onClick={() => fetchDetail(b.id)}>
-                          Detail QR
-                        </button>
-                        <button className="button secondary" onClick={() => labelFromBatch(b)}>
-                          Label
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="desktop-table">
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Kode Batch</th>
+                  <th>Produk</th>
+                  <th>Tgl Produksi</th>
+                  <th>Stok</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={5}>Memuat...</td></tr>
+                ) : batches.length === 0 ? (
+                  <tr><td colSpan={5} className="text-muted">Belum ada batch</td></tr>
+                ) : (
+                  batches.slice(0, 30).map(b => (
+                    <tr key={b.id} className={detail?.batchId === b.id ? 'row-active' : ''}>
+                      <td><span className="badge neutral">{b.code}</span></td>
+                      <td className="cell-primary">{b.product.name}</td>
+                      <td>{b.productionDate ?? '-'}</td>
+                      <td className="num">{b.stock.toLocaleString('id-ID')}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button className="button secondary" onClick={() => fetchDetail(b.id)}>
+                            Detail QR
+                          </button>
+                          <button className="button secondary" onClick={() => labelFromBatch(b)}>
+                            Label
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Mobile: kartu batch */}
+        <div className="mobile-list qr-batch-mobile-list">
+          {loading ? (
+            <p className="text-muted">Memuat...</p>
+          ) : batches.length === 0 ? (
+            <p className="text-muted">Belum ada batch</p>
+          ) : (
+            batches.slice(0, 30).map(b => (
+              <article className={`qr-batch-card ${detail?.batchId === b.id ? 'active' : ''}`} key={b.id}>
+                <div className="qr-batch-card-head">
+                  <div>
+                    <div className="qr-batch-label">Kode Batch</div>
+                    <div className="qr-batch-code">{b.code}</div>
+                  </div>
+                </div>
+                <div className="qr-batch-card-body">
+                  <div className="qr-batch-row">
+                    <span className="qr-batch-key">Produk</span>
+                    <span className="qr-batch-val">{b.product.name}</span>
+                  </div>
+                  <div className="qr-batch-row">
+                    <span className="qr-batch-key">Tanggal Produksi</span>
+                    <span className="qr-batch-val">{b.productionDate ?? '-'}</span>
+                  </div>
+                  <div className="qr-batch-row">
+                    <span className="qr-batch-key">Stok</span>
+                    <span className="qr-batch-val num">{b.stock.toLocaleString('id-ID')}</span>
+                  </div>
+                </div>
+                <div className="qr-batch-card-actions">
+                  <button className="button secondary" onClick={() => fetchDetail(b.id)}>
+                    Detail QR
+                  </button>
+                  <button className="button secondary" onClick={() => labelFromBatch(b)}>
+                    Label
+                  </button>
+                </div>
+              </article>
+            ))
+          )}
         </div>
       </section>
 
       {detail && statusInfo && (
-        <section className="card section-card qr-detail">
-          <div className="section-head">
-            <h2 className="card-title">Detail QR — {detail.code}</h2>
-            <span className={`badge ${statusInfo.cls}`}>{statusInfo.label}</span>
-          </div>
-
-          {/* Foto produk dari master (hanya bila Admin sudah mengunggahnya). */}
-          {productPhotoUrl(detailPhotoUrl) && (
-            <div className="product-photo qr-detail-photo">
-              <img src={productPhotoUrl(detailPhotoUrl)!} alt="Foto produk batch ini" />
-            </div>
-          )}
-
-          <div className="qr-actions">
-            <button
-              className="button secondary"
-              disabled={acting}
-              onClick={() => act(detail.batchId, 'validate')}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>verified</span>
-              {detail.status === 'DRAFT' || detail.status === 'NOT_CONFIGURED' ? 'Validasi' : 'Validasi Ulang'}
-            </button>
-            <button
-              className="button"
-              disabled={acting || detail.status === 'PUBLISHED'}
-              onClick={() => act(detail.batchId, 'publish')}
-              title={detail.status !== 'VALIDATED' && detail.status !== 'PUBLISHED' ? 'Wajib divalidasi terlebih dahulu' : undefined}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>publish</span>
-              Terbitkan
-            </button>
-            <button
-              className="button secondary"
-              disabled={acting || detail.status !== 'PUBLISHED'}
-              onClick={() => act(detail.batchId, 'withdraw')}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>undo</span>
-              Tarik Publikasi
-            </button>
-          </div>
-
-          {/* Gambar QR + URL tujuan sebenarnya (halaman publik, bukan API). */}
-          <div className="qr-preview">
-            <div className="qr-preview-image">
-              {qrDataUrl ? (
-                <img
-                  src={qrDataUrl}
-                  alt={`Kode QR batch ${detail.code}`}
-                  width={180}
-                  height={180}
-                />
-              ) : (
-                <div className="qr-placeholder text-muted">Membuat QR…</div>
-              )}
-            </div>
-            <div className="qr-preview-info">
-              <div className="qr-meta-item">
-                <span className="card-label">URL Pelacakan (Publik)</span>
-                <span className="qr-meta-value mono">{publicTraceUrl(detail.code)}</span>
-              </div>
-              <div className="qr-meta-item">
-                <span className="card-label">Endpoint API</span>
-                <span className="qr-meta-value mono">{detail.publicPath}</span>
-              </div>
+        <div className="modal-root">
+          <div className="modal-overlay" onClick={() => setDetail(null)} />
+          <div className="modal-panel qr-detail-modal" role="dialog" aria-modal="true" aria-label={`Detail QR — ${detail.code}`}>
+            <div className="modal-head-row">
               <div>
-                <button className="button secondary" onClick={labelFromDetail}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>print</span>
-                  Pratinjau Label
+                <h3 className="modal-title">Detail QR — {detail.code}</h3>
+                <p className="modal-subtitle">Informasi publikasi & status QR per batch</p>
+              </div>
+              <button className="icon-btn" onClick={() => setDetail(null)} aria-label="Tutup">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="modal-body-scroll">
+              {/* Foto produk dari master (hanya bila Admin sudah mengunggahnya). */}
+              {productPhotoUrl(detailPhotoUrl) && (
+                <div className="product-photo qr-detail-photo">
+                  <img src={productPhotoUrl(detailPhotoUrl)!} alt="Foto produk batch ini" />
+                </div>
+              )}
+
+              <div className="qr-actions">
+                <button
+                  className="button secondary"
+                  disabled={acting}
+                  onClick={() => act(detail.batchId, 'validate')}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>verified</span>
+                  {detail.status === 'DRAFT' || detail.status === 'NOT_CONFIGURED' ? 'Validasi' : 'Validasi Ulang'}
+                </button>
+                <button
+                  className="button"
+                  disabled={acting || detail.status === 'PUBLISHED'}
+                  onClick={() => act(detail.batchId, 'publish')}
+                  title={detail.status !== 'VALIDATED' && detail.status !== 'PUBLISHED' ? 'Wajib divalidasi terlebih dahulu' : undefined}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>publish</span>
+                  Terbitkan
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={acting || detail.status !== 'PUBLISHED'}
+                  onClick={() => act(detail.batchId, 'withdraw')}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>undo</span>
+                  Tarik Publikasi
                 </button>
               </div>
-            </div>
-          </div>
 
-          <div className="qr-meta">
-            <div className="qr-meta-item">
-              <span className="card-label">Status</span>
-              <span className="qr-meta-value">{statusInfo.label}</span>
+              {/* Gambar QR + URL tujuan sebenarnya (halaman publik, bukan API). */}
+              <div className="qr-preview">
+                <div className="qr-preview-image">
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt={`Kode QR batch ${detail.code}`}
+                      width={180}
+                      height={180}
+                    />
+                  ) : (
+                    <div className="qr-placeholder text-muted">Membuat QR…</div>
+                  )}
+                </div>
+                <div className="qr-preview-info">
+                  <div className="qr-meta-item">
+                    <span className="card-label">URL Pelacakan (Publik)</span>
+                    <span className="qr-meta-value mono">{publicTraceUrl(detail.code)}</span>
+                  </div>
+                  <div className="qr-meta-item">
+                    <span className="card-label">Endpoint API</span>
+                    <span className="qr-meta-value mono">{detail.publicPath}</span>
+                  </div>
+                  <div>
+                    <button className="button secondary" onClick={labelFromDetail}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 18 }}>print</span>
+                      Pratinjau Label
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="qr-meta">
+                <div className="qr-meta-item">
+                  <span className="card-label">Status</span>
+                  <span className="qr-meta-value">{statusInfo.label}</span>
+                </div>
+                <div className="qr-meta-item">
+                  <span className="card-label">Divalidasi</span>
+                  <span className="qr-meta-value">
+                    {formatDate(detail.validatedAt)}
+                    {detail.validatedBy && <span className="cell-secondary">oleh {detail.validatedBy.username}</span>}
+                  </span>
+                </div>
+                <div className="qr-meta-item">
+                  <span className="card-label">Diterbitkan</span>
+                  <span className="qr-meta-value">
+                    {formatDate(detail.publishedAt)}
+                    {detail.publishedBy && <span className="cell-secondary">oleh {detail.publishedBy.username}</span>}
+                  </span>
+                </div>
+                <div className="qr-meta-item">
+                  <span className="card-label">Ditarik</span>
+                  <span className="qr-meta-value">
+                    {formatDate(detail.withdrawnAt)}
+                    {detail.withdrawnBy && <span className="cell-secondary">oleh {detail.withdrawnBy.username}</span>}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="qr-meta-item">
-              <span className="card-label">Divalidasi</span>
-              <span className="qr-meta-value">
-                {formatDate(detail.validatedAt)}
-                {detail.validatedBy && <span className="cell-secondary">oleh {detail.validatedBy.username}</span>}
-              </span>
-            </div>
-            <div className="qr-meta-item">
-              <span className="card-label">Diterbitkan</span>
-              <span className="qr-meta-value">
-                {formatDate(detail.publishedAt)}
-                {detail.publishedBy && <span className="cell-secondary">oleh {detail.publishedBy.username}</span>}
-              </span>
-            </div>
-            <div className="qr-meta-item">
-              <span className="card-label">Ditarik</span>
-              <span className="qr-meta-value">
-                {formatDate(detail.withdrawnAt)}
-                {detail.withdrawnBy && <span className="cell-secondary">oleh {detail.withdrawnBy.username}</span>}
-              </span>
+            <div className="modal-actions">
+              <button className="button secondary" onClick={() => setDetail(null)}>Tutup</button>
             </div>
           </div>
-        </section>
+        </div>
       )}
 
       {/* Pratinjau label cetak */}
@@ -344,17 +400,21 @@ export function QrManagementPage() {
             <h3 className="modal-title">Pratinjau Label</h3>
             <div className="label-sheet">
               <div className="label-brand">NutriLokal</div>
-              <div className="label-body">
-                {label.photoUrl && (
-                  <img className="label-photo" src={label.photoUrl} alt={`Foto ${label.productName}`} />
-                )}
-                <img className="label-qr" src={label.dataUrl} alt={`Kode QR batch ${label.code}`} />
-                <div className="label-info">
-                  <div className="label-product">{label.productName}</div>
-                  <div className="label-code">{label.code}</div>
-                  <div className="label-expiry">
-                    {label.expiryLabel ? `Kedaluwarsa: ${label.expiryLabel}` : 'Kedaluwarsa: —'}
-                  </div>
+              <div className="label-top-row">
+                <div className="label-visuals">
+                  {label.photoUrl && (
+                    <img className="label-photo" src={label.photoUrl} alt={`Foto ${label.productName}`} />
+                  )}
+                </div>
+                <div className="label-qr-col">
+                  <img className="label-qr" src={label.dataUrl} alt={`Kode QR batch ${label.code}`} />
+                </div>
+              </div>
+              <div className="label-info">
+                <div className="label-product">{label.productName}</div>
+                <div className="label-code">{label.code}</div>
+                <div className="label-expiry">
+                  {label.expiryLabel ? `Kedaluwarsa: ${label.expiryLabel}` : 'Kedaluwarsa: —'}
                 </div>
               </div>
               <div className="label-foot">Pindai QR untuk informasi pelacakan batch.</div>

@@ -67,6 +67,20 @@ afterAll(async () => {
     })
   ).map((product) => product.id);
 
+  const testMaterialIds = (
+    await prisma.material.findMany({
+      where: { name: { startsWith: runId } },
+      select: { id: true },
+    })
+  ).map((material) => material.id);
+
+  if (testMaterialIds.length > 0) {
+    await prisma.productionMaterialUsage.deleteMany({ where: { materialId: { in: testMaterialIds } } });
+  }
+
+  // Produksi uji dihapus sebelum batch uji (Production.batchId -> Batch.id).
+  await prisma.production.deleteMany({ where: { productId: { in: testProductIds } } });
+
   if (testProductIds.length > 0) {
     const batches = await prisma.batch.findMany({
       where: { productId: { in: testProductIds } },
@@ -79,6 +93,17 @@ afterAll(async () => {
       await prisma.qrPublication.deleteMany({ where: { batchId: { in: batchIds } } });
       await prisma.batch.deleteMany({ where: { id: { in: batchIds } } });
     }
+  }
+
+  // Jejak stok bahan uji dibersihkan lebih dulu (terhubung ke penerimaan,
+  // saldo awal, pemakaian produksi, dan penyesuaian) agar bahan uji bisa
+  // dihapus tanpa melanggar kunci asing.
+  if (testMaterialIds.length > 0) {
+    await prisma.materialStockMovement.deleteMany({ where: { materialId: { in: testMaterialIds } } });
+    await prisma.materialReceipt.deleteMany({ where: { materialId: { in: testMaterialIds } } });
+    await prisma.materialOpeningBalance.deleteMany({ where: { materialId: { in: testMaterialIds } } });
+    await prisma.stockAdjustment.deleteMany({ where: { materialId: { in: testMaterialIds } } });
+    await prisma.materialStock.deleteMany({ where: { materialId: { in: testMaterialIds } } });
   }
 
   await prisma.product.deleteMany({ where: { name: { startsWith: runId } } });
@@ -662,5 +687,77 @@ describe('Master bahan baku — CRUD, hak akses, dan validasi', () => {
 
     const missing = await request(app).patch('/api/materials/id-tidak-ada').set(auth(adminToken)).send({ name: 'x' });
     expect(missing.status).toBe(404);
+  });
+});
+
+describe('Hapus bahan baku — validasi relasi nyata', () => {
+  it('Bahan dengan penerimaan nyata ditolak (409) dan riwayat tetap utuh', async () => {
+    const material = await createMaterial('ada-penerimaan');
+
+    const receipt = await request(app)
+      .post(`/api/materials/${material.id}/receipts`)
+      .set(auth(adminToken))
+      .send({ quantity: 5, receivedAt: '2026-10-20', note: 'Penerimaan uji hapus' });
+    expect(receipt.status).toBe(201);
+
+    const deleted = await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken));
+    expect(deleted.status).toBe(409);
+    expect(deleted.body.message).toMatch(/riwayat operasional/i);
+    expect(deleted.body.message).toMatch(/nonaktifkan/i);
+
+    // Bahan dan riwayatnya tidak rusak.
+    const detail = await request(app).get(`/api/materials/${material.id}`).set(auth(adminToken));
+    expect(detail.status).toBe(200);
+    expect(detail.body.material.name).toBe(material.name);
+  });
+
+  it('Bahan dengan pemakaian produksi ditolak (409) dan tidak ada cascade delete', async () => {
+    const material = await createMaterial('ada-produksi');
+    const product = await createProduct('bahan-produksi');
+
+    // Catat pemakaian aktual bahan pada produksi. Relasi pemakaian produksi
+    // dibuat langsung agar bahan ini TIDAK punya penerimaan/saldo awal, jadi
+    // penolakan penghapusan benar-benar berasal dari relasi pemakaian produksi.
+    const admin = await prisma.user.findUnique({
+      where: { username: `${runId}-admin` },
+      select: { id: true },
+    });
+    const production = await prisma.production.create({
+      data: {
+        productId: product.id,
+        productionDate: new Date('2026-10-20T00:00:00.000Z'),
+        yieldQuantity: 10,
+        recordedById: admin!.id,
+      },
+      select: { id: true },
+    });
+    await prisma.productionMaterialUsage.create({
+      data: { productionId: production.id, materialId: material.id, quantity: 2 },
+    });
+
+    const deleted = await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken));
+    expect(deleted.status).toBe(409);
+    expect(deleted.body.message).toMatch(/riwayat operasional/i);
+
+    // Riwayat pemakaian produksi masih ada (tidak ikut terhapus).
+    const usage = await prisma.productionMaterialUsage.findFirst({
+      where: { materialId: material.id },
+    });
+    expect(usage).toBeTruthy();
+  });
+
+  it('Operator tidak dapat menghapus bahan baku (403)', async () => {
+    const material = await createMaterial('operator-hapus');
+
+    const deleted = await request(app).delete(`/api/materials/${material.id}`).set(auth(operatorToken));
+    expect(deleted.status).toBe(403);
+
+    // Tanpa token ditolak 401.
+    const anonymous = await request(app).delete(`/api/materials/${material.id}`);
+    expect(anonymous.status).toBe(401);
+
+    // Bahan tetap ada.
+    const detail = await request(app).get(`/api/materials/${material.id}`).set(auth(adminToken));
+    expect(detail.status).toBe(200);
   });
 });

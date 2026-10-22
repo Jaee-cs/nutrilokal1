@@ -21,6 +21,9 @@ import { materialOpeningBalancesRouter, materialReceiptsRouter } from './materia
 
 export const materialsRouter = Router();
 
+/** Penanda internal: bahan memiliki histori sehingga penghapusan ditolak. */
+class MaterialHasHistoryError extends Error {}
+
 // ---------- Melihat (Admin & Operator) ----------
 
 materialsRouter.get('/', authenticate, async (_req, res) => {
@@ -150,8 +153,25 @@ materialsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
   res.json({ material: toPublicMaterial(material, await getMaterialStock(prisma, material.id)) });
 });
 
+/**
+ * Menghapus bahan baku secara permanen (hanya Admin).
+ *
+ * Aturan (README 5.1):
+ * - Bahan yang belum pernah dipakai (tanpa penerimaan, saldo awal, pemakaian
+ *   produksi, penyesuaian stok, maupun jejak pergerakan stok) boleh dihapus
+ *   permanen.
+ * - Bahan yang sudah memiliki histori-operational TIDAK boleh dihapus: balas
+ *   409 dengan alasan yang jelas dan arahkan Admin memakai fitur Nonaktifkan.
+ * - Tidak ada cascade delete: histori produksi maupun pergerakan stok tidak
+ *   pernah ikut terhapus.
+ *
+ * Penghapusan dijalankan dalam satu transaksi: pemeriksaan relasi diulang
+ * sebagai validasi akhir tepat sebelum baris dihapus, sehingga bahan yang
+ * baru saja dipakai tidak bisa terhapus karena balapan data.
+ */
 materialsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
-  const target = await prisma.material.findUnique({ where: { id: pathId(req) } });
+  const materialId = pathId(req);
+  const target = await prisma.material.findUnique({ where: { id: materialId } });
 
   if (!target) {
     res.status(404).json({ message: 'Bahan baku tidak ditemukan.' });
@@ -167,7 +187,38 @@ materialsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
-  await prisma.material.delete({ where: { id: target.id } });
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Validasi akhir: pastikan tidak ada relasi yang muncul sejak pemeriksaan
+      // awal. Relasi ini checked di dalam transaksi agar konsisten.
+      const [movements, receipts, openingBalances, productionUsages, adjustments] = await Promise.all([
+        tx.materialStockMovement.count({ where: { materialId: target.id } }),
+        tx.materialReceipt.count({ where: { materialId: target.id } }),
+        tx.materialOpeningBalance.count({ where: { materialId: target.id } }),
+        tx.productionMaterialUsage.count({ where: { materialId: target.id } }),
+        tx.stockAdjustment.count({ where: { materialId: target.id } }),
+      ]);
+
+      if (movements > 0 || receipts > 0 || openingBalances > 0 || productionUsages > 0 || adjustments > 0) {
+        throw new MaterialHasHistoryError();
+      }
+
+      // Baris stok ikut dihapus (hanya mungkin ada bila belum ada pergerakan).
+      await tx.materialStock.deleteMany({ where: { materialId: target.id } });
+      await tx.material.delete({ where: { id: target.id } });
+    });
+  } catch (err) {
+    if (err instanceof MaterialHasHistoryError) {
+      res.status(409).json({
+        message:
+          'Bahan baku memiliki riwayat operasional dan tidak boleh dihapus. ' +
+          'Nonaktifkan bahan baku sebagai gantinya.',
+      });
+      return;
+    }
+    throw err;
+  }
+
   res.json({ message: `Bahan baku "${target.name}" berhasil dihapus.` });
 });
 

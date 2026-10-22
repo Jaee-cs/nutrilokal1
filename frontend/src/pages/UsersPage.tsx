@@ -160,71 +160,131 @@ export function UsersPage() {
           <h2 className="card-title">Daftar Pengguna</h2>
           <span className="text-muted">{users.length} akun</span>
         </div>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Username</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Wajib ganti password</th>
-                <th>Terakhir login</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={6}>Memuat...</td></tr>
-              ) : users.length === 0 ? (
-                <tr><td colSpan={6} className="text-muted">Belum ada pengguna</td></tr>
-              ) : (
-                users.map(u => (
-                  <tr key={u.id}>
-                    <td>
-                      <div className="cell-primary">{u.username}</div>
-                      {u.name && <div className="cell-secondary">{u.name}</div>}
-                    </td>
-                    <td>
-                      {u.role === 'ADMIN' ? (
-                        <span className="badge neutral">Admin</span>
-                      ) : (
-                        <span className="badge success">Operator</span>
-                      )}
-                    </td>
-                    <td>
-                      {u.isActive ? (
-                        <span className="badge success">Aktif</span>
-                      ) : (
-                        <span className="badge neutral">Nonaktif</span>
-                      )}
-                    </td>
-                    <td>{u.mustChangePassword ? <span className="badge warning">Ya</span> : 'Tidak'}</td>
-                    <td className="text-muted">
-                      {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('id-ID') : '-'}
-                    </td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          className="button secondary"
-                          onClick={() => toggleActive(u.id, u.isActive)}
-                          disabled={u.role === 'ADMIN'}
-                        >
-                          {u.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                        </button>
-                        <button
-                          className="button secondary"
-                          onClick={() => resetPassword(u.id)}
-                          disabled={u.role === 'ADMIN'}
-                        >
-                          Reset Password
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="desktop-table">
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Wajib ganti password</th>
+                  <th>Terakhir login</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={6}>Memuat...</td></tr>
+                ) : users.length === 0 ? (
+                  <tr><td colSpan={6} className="text-muted">Belum ada pengguna</td></tr>
+                ) : (
+                  users.map(u => (
+                    <tr key={u.id}>
+                      <td>
+                        <div className="cell-primary">{u.username}</div>
+                        {u.name && <div className="cell-secondary">{u.name}</div>}
+                      </td>
+                      <td>
+                        {u.role === 'ADMIN' ? (
+                          <span className="badge neutral">Admin</span>
+                        ) : (
+                          <span className="badge success">Operator</span>
+                        )}
+                      </td>
+                      <td>
+                        {u.isActive ? (
+                          <span className="badge success">Aktif</span>
+                        ) : (
+                          <span className="badge neutral">Nonaktif</span>
+                        )}
+                      </td>
+                      <td>{u.mustChangePassword ? <span className="badge warning">Ya</span> : 'Tidak'}</td>
+                      <td className="text-muted">
+                        {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('id-ID') : '-'}
+                      </td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            className="button secondary"
+                            onClick={() => toggleActive(u.id, u.isActive)}
+                            disabled={u.role === 'ADMIN'}
+                          >
+                            {u.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                          </button>
+                          <button
+                            className="button secondary"
+                            onClick={() => resetPassword(u.id)}
+                            disabled={u.role === 'ADMIN'}
+                          >
+                            Reset Password
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Mobile: kartu pengguna */}
+        <div className="mobile-list users-mobile-list">
+          {loading ? (
+            <p className="text-muted">Memuat...</p>
+          ) : users.length === 0 ? (
+            <p className="text-muted">Belum ada pengguna</p>
+          ) : (
+            users.map(u => (
+              <article className="user-card" key={u.id}>
+                <div className="user-card-head">
+                  <div className="user-card-identity">
+                    <div className="user-card-username">{u.username}</div>
+                    {u.name && <div className="user-card-name">{u.name}</div>}
+                  </div>
+                  <div className="user-card-badges">
+                    {u.role === 'ADMIN' ? (
+                      <span className="badge neutral">Admin</span>
+                    ) : (
+                      <span className="badge success">Operator</span>
+                    )}
+                    {u.isActive ? (
+                      <span className="badge success">Aktif</span>
+                    ) : (
+                      <span className="badge neutral">Nonaktif</span>
+                    )}
+                  </div>
+                </div>
+                <div className="user-card-meta">
+                  <div className="user-card-row">
+                    <span className="user-card-label">Wajib ganti password</span>
+                    <span className="user-card-value">{u.mustChangePassword ? 'Ya' : 'Tidak'}</span>
+                  </div>
+                  <div className="user-card-row">
+                    <span className="user-card-label">Terakhir login</span>
+                    <span className="user-card-value">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('id-ID') : '-'}</span>
+                  </div>
+                </div>
+                <div className="user-card-actions">
+                  <button
+                    className="button secondary"
+                    onClick={() => toggleActive(u.id, u.isActive)}
+                    disabled={u.role === 'ADMIN'}
+                  >
+                    {u.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                  </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => resetPassword(u.id)}
+                    disabled={u.role === 'ADMIN'}
+                  >
+                    Reset Password
+                  </button>
+                </div>
+              </article>
+            ))
+          )}
         </div>
       </section>
     </div>

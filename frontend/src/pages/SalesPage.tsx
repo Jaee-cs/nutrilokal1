@@ -280,27 +280,20 @@ export function SalesPage() {
             {formItems.map((it, idx) => (
               <div key={idx} className="sale-item-row">
                 <div className="sale-item-main">
-                  <div className="sale-item-fields">
-                    <div className="field">
-                      <label htmlFor={`si-prod-${idx}`}>Produk</label>
-                      <select
-                        id={`si-prod-${idx}`}
-                        value={it.productId}
-                        onChange={e => setProduct(idx, e.target.value)}
-                        required
-                      >
-                        <option value="">Pilih produk</option>
-                        {products.filter(p => p.isActive).map(p => (
-                          <option key={p.id} value={p.id}>{p.name} ({p.unit}) - Rp {Number(p.sellingPrice).toLocaleString('id-ID')}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="field sale-item-subtotal">
-                      <label>Subtotal</label>
-                      <div className="subtotal-value">
-                        Rp {itemSubtotal(it).toLocaleString('id-ID')}
-                      </div>
-                    </div>
+                  {/* Produk: dropdown selebar penuh item. */}
+                  <div className="field sale-item-product">
+                    <label htmlFor={`si-prod-${idx}`}>Produk</label>
+                    <select
+                      id={`si-prod-${idx}`}
+                      value={it.productId}
+                      onChange={e => setProduct(idx, e.target.value)}
+                      required
+                    >
+                      <option value="">Pilih produk</option>
+                      {products.filter(p => p.isActive).map(p => (
+                        <option key={p.id} value={p.id}>{p.name} ({p.unit}) - Rp {Number(p.sellingPrice).toLocaleString('id-ID')}</option>
+                      ))}
+                    </select>
                   </div>
 
                   <div className="sale-item-allocs">
@@ -318,7 +311,7 @@ export function SalesPage() {
                               required
                               disabled={!it.productId}
                             >
-                              <option value="">Pilih batch (stok tersedia)</option>
+                              <option value="">Pilih batch</option>
                               {getBatchesForProduct(it.productId, otherIds).map(b => (
                                 <option key={b.id} value={b.id} disabled={isBatchExpired(b)}>
                                   {batchOptionLabel(b)}
@@ -362,10 +355,24 @@ export function SalesPage() {
                       Tambah Batch
                     </button>
                   </div>
+
+                  {/* Subtotal: di bawah seluruh alokasi batch item ini. */}
+                  <div className="sale-item-subtotal">
+                    <span className="sale-item-subtotal-label">Subtotal</span>
+                    <span className="subtotal-value">
+                      Rp {itemSubtotal(it).toLocaleString('id-ID')}
+                    </span>
+                  </div>
                 </div>
                 {formItems.length > 1 && (
-                  <button type="button" className="icon-btn danger" onClick={() => removeFormItem(idx)} title="Hapus item">
-                    <span className="material-symbols-outlined">delete</span>
+                  <button
+                    type="button"
+                    className="icon-btn danger sale-item-remove"
+                    onClick={() => removeFormItem(idx)}
+                    title="Hapus item"
+                    aria-label="Hapus item"
+                  >
+                    <span className="material-symbols-outlined">close</span>
                   </button>
                 )}
               </div>
@@ -394,64 +401,120 @@ export function SalesPage() {
           <h2 className="card-title">Riwayat Penjualan</h2>
           <span className="text-muted">{sales.length} transaksi</span>
         </div>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>ID Transaksi</th>
-                <th>Tanggal</th>
-                <th>Item</th>
-                <th>Total</th>
-                <th>Status</th>
-                <th>Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={6}>Memuat...</td></tr>
-              ) : sales.length === 0 ? (
-                <tr><td colSpan={6} className="text-muted">Belum ada transaksi</td></tr>
-              ) : (
-                sales.slice(0, 20).map(s => (
-                  <tr key={s.id}>
-                    <td className="cell-primary">{s.id}</td>
-                    <td>
-                      {formatDateTime(s.recordedAt)}
-                      <div className="cell-secondary">oleh {s.recordedBy.username}</div>
-                    </td>
-                    <td>
-                      {s.items.map((item, i) => (
-                        <div key={i}>
-                          <div className="cell-primary">
-                            {item.product.name} × {item.quantity.toLocaleString('id-ID')} {item.product.unit}
+        <div className="desktop-table">
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID Transaksi</th>
+                  <th>Tanggal</th>
+                  <th>Item</th>
+                  <th>Total</th>
+                  <th>Status</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={6}>Memuat...</td></tr>
+                ) : sales.length === 0 ? (
+                  <tr><td colSpan={6} className="text-muted">Belum ada transaksi</td></tr>
+                ) : (
+                  sales.slice(0, 20).map(s => (
+                    <tr key={s.id}>
+                      <td className="cell-primary">{s.id}</td>
+                      <td>
+                        {formatDateTime(s.recordedAt)}
+                        <div className="cell-secondary">oleh {s.recordedBy.username}</div>
+                      </td>
+                      <td>
+                        {s.items.map((item, i) => (
+                          <div key={i}>
+                            <div className="cell-primary">
+                              {item.product.name} × {item.quantity.toLocaleString('id-ID')} {item.product.unit}
+                            </div>
+                            <div className="cell-secondary">
+                              Batch: {item.allocations.map(a => `${a.batchCode} (${a.quantity.toLocaleString('id-ID')})`).join(', ')}
+                            </div>
                           </div>
-                          <div className="cell-secondary">
-                            Batch: {item.allocations.map(a => `${a.batchCode} (${a.quantity.toLocaleString('id-ID')})`).join(', ')}
-                          </div>
-                        </div>
-                      ))}
-                    </td>
-                    <td className="num"><strong>Rp {Number(s.total).toLocaleString('id-ID')}</strong></td>
-                    <td>
-                      {s.status === 'CANCELLED' ? (
-                        <>
-                          <span className="badge error">Dibatalkan</span>
-                          {s.cancelReason && <div className="cell-secondary">Alasan: {s.cancelReason}</div>}
-                        </>
-                      ) : (
-                        <span className="badge success">Selesai</span>
-                      )}
-                    </td>
-                    <td>
-                      {user?.role === 'ADMIN' && s.status !== 'CANCELLED' && (
-                        <button className="button secondary" onClick={() => setCancelTarget(s)}>Batalkan</button>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                        ))}
+                      </td>
+                      <td className="num"><strong>Rp {Number(s.total).toLocaleString('id-ID')}</strong></td>
+                      <td>
+                        {s.status === 'CANCELLED' ? (
+                          <>
+                            <span className="badge error">Dibatalkan</span>
+                            {s.cancelReason && <div className="cell-secondary">Alasan: {s.cancelReason}</div>}
+                          </>
+                        ) : (
+                          <span className="badge success">Selesai</span>
+                        )}
+                      </td>
+                      <td>
+                        {user?.role === 'ADMIN' && s.status !== 'CANCELLED' && (
+                          <button className="button secondary" onClick={() => setCancelTarget(s)}>Batalkan</button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Mobile: daftar kartu transaksi */}
+        <div className="mobile-list">
+          {loading ? (
+            <p className="text-muted">Memuat...</p>
+          ) : sales.length === 0 ? (
+            <p className="text-muted">Belum ada transaksi</p>
+          ) : (
+            sales.slice(0, 20).map(s => (
+              <article className="sale-history-item" key={s.id}>
+                <div className="sale-history-head">
+                  <div className="sale-history-id">{s.id}</div>
+                  <div className="sale-history-status">
+                    {s.status === 'CANCELLED' ? (
+                      <span className="badge error">Dibatalkan</span>
+                    ) : (
+                      <span className="badge success">Selesai</span>
+                    )}
+                  </div>
+                </div>
+                <div className="sale-history-meta">
+                  <span>{formatDateTime(s.recordedAt)}</span>
+                  <span>oleh {s.recordedBy.username}</span>
+                </div>
+                <div className="sale-history-items">
+                  {s.items.map((item, i) => (
+                    <div className="sale-history-line" key={i}>
+                      <div className="sale-history-product">
+                        {item.product.name} × {item.quantity.toLocaleString('id-ID')} {item.product.unit}
+                      </div>
+                      <div className="sale-history-batches">
+                        Batch: {item.allocations.map(a => `${a.batchCode} (${a.quantity.toLocaleString('id-ID')})`).join(', ')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="sale-history-foot">
+                  <div className="sale-history-total">
+                    <span className="sale-history-total-label">Total</span>
+                    <span className="sale-history-total-value">Rp {Number(s.total).toLocaleString('id-ID')}</span>
+                  </div>
+                  {s.status === 'CANCELLED' && s.cancelReason && (
+                    <div className="sale-history-reason">Alasan: {s.cancelReason}</div>
+                  )}
+                  {user?.role === 'ADMIN' && s.status !== 'CANCELLED' && (
+                    <button className="button secondary sale-history-cancel" onClick={() => setCancelTarget(s)}>
+                      Batalkan Transaksi
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))
+          )}
         </div>
       </section>
 
