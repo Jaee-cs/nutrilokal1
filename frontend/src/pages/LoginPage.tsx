@@ -55,38 +55,42 @@ export function LoginPage() {
 
       {/* Form kanan */}
       <main className="login-main">
-        <div className="login-card">
-          <h2 className="login-title">Masuk</h2>
-          <p className="login-subtitle">Gunakan akun Admin atau Operator untuk melanjutkan.</p>
+        <div className="login-main-inner">
+          {/* Logo NutriLokal di atas kotak form (di tengah, di luar kartu) */}
+          <img src="/logo.png" alt="NutriLokal" className="login-logo" />
+          <div className="login-card">
+            <h2 className="login-title">Masuk</h2>
+            <p className="login-subtitle">Gunakan akun Admin atau Operator untuk melanjutkan.</p>
 
-          {e && <div className="alert error">{e}</div>}
+            {e && <div className="alert error">{e}</div>}
 
-          <form onSubmit={submit} className="login-form">
-            <div className="field">
-              <label htmlFor="login-username">Username</label>
-              <input
-                id="login-username"
-                value={u}
-                onChange={ev => setU(ev.target.value)}
-                placeholder="Masukkan username"
-                autoComplete="username"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="login-password">Kata sandi</label>
-              <input
-                id="login-password"
-                type="password"
-                value={p}
-                onChange={ev => setP(ev.target.value)}
-                placeholder="Masukkan kata sandi"
-                autoComplete="current-password"
-              />
-            </div>
-            <button className="button login-submit" disabled={l}>
-              {l ? 'Memproses...' : 'Masuk'}
-            </button>
-          </form>
+            <form onSubmit={submit} className="login-form">
+              <div className="field">
+                <label htmlFor="login-username">Username</label>
+                <input
+                  id="login-username"
+                  value={u}
+                  onChange={ev => setU(ev.target.value)}
+                  placeholder="Masukkan username"
+                  autoComplete="username"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="login-password">Kata sandi</label>
+                <input
+                  id="login-password"
+                  type="password"
+                  value={p}
+                  onChange={ev => setP(ev.target.value)}
+                  placeholder="Masukkan kata sandi"
+                  autoComplete="current-password"
+                />
+              </div>
+              <button className="button login-submit" disabled={l}>
+                {l ? 'Memproses...' : 'Masuk'}
+              </button>
+            </form>
+          </div>
         </div>
       </main>
     </div>

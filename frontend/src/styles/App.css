@@ -12,22 +12,30 @@
 @media (min-width: 640px)  { .container { padding: 2rem 1.5rem; } }
 @media (min-width: 1024px) { .container { padding: 2.5rem 2rem; } }
 
+/* Judul halaman — mobile-first: lebih ringkas di HP, ukuran penuh di layar lega.
+   Dashboard memakai pola yang sama agar hierarki judul konsisten. */
 .page-title {
   font-family: var(--font-display);
-  font-size: 28px;
-  line-height: 36px;
-  font-weight: 600;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--on-surface);
 }
 .page-subtitle {
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 14px;
+  line-height: 20px;
   color: var(--on-surface-variant);
   margin-top: 0.25rem;
   max-width: 42rem;
 }
-.page-head { margin-bottom: 2rem; }
+.page-head { margin-bottom: 1.25rem; }
+
+@media (min-width: 640px) {
+  .page-title { font-size: 28px; line-height: 36px; }
+  .page-subtitle { font-size: 16px; line-height: 24px; }
+  .page-head { margin-bottom: 2rem; }
+}
 
 /* Kartu -------------------------------------------------------------------- */
 .card {
@@ -231,25 +239,122 @@ table tbody tr:hover { background: var(--surface-low); }
   color: var(--on-secondary-container);
 }
 
-/* KPI grid ------------------------------------------------------------------ */
+/* KPI grid ------------------------------------------------------------------
+   Mobile-first: 2 kolom di HP (320–430px) agar dashboard tidak terlalu panjang.
+   Kolom fleksibel minmax(0, 1fr) + min-width:0 untuk mencegah overflow. */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+  margin-bottom: 1.25rem;
 }
 
 .kpi-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
-  padding: 1.25rem 1.5rem;
+  justify-content: center;
+  gap: 0.125rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.875rem 0.875rem 0.8125rem;
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
+
+/* Aksen tipis di sisi kiri untuk kartu berstatus — ringan, tidak menonjol. */
+.kpi-card.kpi-primary,
+.kpi-card.kpi-success,
+.kpi-card.kpi-warning,
+.kpi-card.kpi-error {
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+.kpi-card.kpi-primary { border-left-color: var(--primary); }
+.kpi-card.kpi-success { border-left-color: var(--success); }
+.kpi-card.kpi-warning { border-left-color: var(--warning); }
+.kpi-card.kpi-error   { border-left-color: var(--error); }
+
+/* Angka statistik = elemen utama kartu; label & detail menjadi pendukung. */
+.kpi-card .card-label {
+  font-size: 10px;
+  line-height: 13px;
+  letter-spacing: 0.03em;
+  color: var(--on-surface-variant);
+}
+
+.kpi-card .card-value {
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .kpi-detail {
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 11px;
+  line-height: 14px;
   color: var(--outline);
+  overflow-wrap: anywhere;
+}
+
+/* Tablet (640–899px): grid 2 kolom lebih lega + angka sedang. */
+@media (min-width: 640px) {
+  .kpi-grid {
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .kpi-card {
+    padding: 1rem 1.125rem;
+  }
+
+  .kpi-card .card-value {
+    font-size: 28px;
+    line-height: 34px;
+  }
+}
+
+/* Layar lebih lega: beralih ke 3 kolom agar 6 kartu terbagi rapi (2 baris).
+   Ukuran angka dikembalikan ke ukuran penuh. */
+@media (min-width: 900px) {
+  .kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .kpi-card {
+    gap: 0.375rem;
+    padding: 1.25rem 1.5rem;
+    border-radius: var(--radius-lg);
+  }
+
+  .kpi-card .card-label { font-size: 11px; line-height: 14px; }
+
+  .kpi-card .card-value {
+    font-size: 36px;
+    line-height: 44px;
+  }
+
+  .kpi-detail {
+    font-size: 12px;
+    line-height: 16px;
+  }
+}
+
+/* HP sangat sempit (≤360px): rapatkan sedikit agar nilai rupiah seperti
+   "Rp 115.000" tetap satu baris dan tinggi kartu tetap seragam. */
+@media (max-width: 360px) {
+  .kpi-grid { gap: 0.5rem; }
+
+  .kpi-card {
+    padding: 0.75rem 0.75rem 0.6875rem;
+  }
+
+  .kpi-card .card-value {
+    font-size: 21px;
+    line-height: 26px;
+  }
 }
 
 .kpi-primary { border-color: rgba(49, 92, 64, 0.35); }
@@ -260,6 +365,11 @@ table tbody tr:hover { background: var(--surface-low); }
 
 /* Section (card dengan header) --------------------------------------------- */
 .section-card { margin-bottom: 1.5rem; }
+
+/* Mobile: rapatkan sedikit jarak antar-bagian dashboard. */
+@media (max-width: 639px) {
+  .section-card { margin-bottom: 1rem; }
+}
 
 .section-head {
   display: flex;
@@ -273,6 +383,169 @@ table tbody tr:hover { background: var(--surface-low); }
 }
 
 .section-head .card-title { margin-bottom: 0; }
+
+/* Batch — tabel di desktop, kartu ringkas di mobile -----------------------
+   Tabel desktop disembunyikan di HP; kartu hanya tampil di HP. */
+.batch-list { display: none; }
+.sales-list { display: none; }
+
+@media (max-width: 639px) {
+  .batch-table-desktop { display: none; }
+  .batch-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .batch-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem 0.5625rem;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    background: var(--surface-lowest);
+  }
+
+  /* Kolom kiri: kode, produk, tanggal (bertumpuk). */
+  .batch-item-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1875rem;
+    min-width: 0;
+  }
+
+  .batch-item-head {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  /* Kode batch: badge pill kecil, hijau tegas (selaras palet NutriLokal).
+     Ditambah max-width + ellipsis agar kode panjang dipenggal terkontrol
+     dan tidak membuat overflow pada baris batch. */
+  .batch-code {
+    font-family: var(--font-display);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: #174d2a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    max-width: 100%;
+    padding: 0.125rem 0.4375rem;
+    border-radius: var(--radius-full);
+    background: #b7d9bd;
+  }
+
+  /* Stok: satu kelompok di sisi kanan, terpusat vertikal terhadap kartu. */
+  .batch-stock {
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 0.25rem;
+    flex-shrink: 0;
+    color: var(--primary);
+    font-family: var(--font-display);
+    text-align: right;
+    white-space: nowrap;
+  }
+  .batch-stock strong { font-size: 16px; line-height: 20px; font-variant-numeric: tabular-nums; }
+  .batch-stock-unit { font-size: 11px; line-height: 14px; color: var(--outline); }
+
+  .batch-item-product {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--on-surface);
+    overflow-wrap: anywhere;
+  }
+
+  .batch-item-date {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--on-surface-variant);
+    white-space: nowrap;
+  }
+  .batch-date-icon { font-size: 15px; color: var(--outline); }
+
+  /* Transaksi: tabel desktop disembunyikan, kartu ringkas ditampilkan. */
+  .sales-table-desktop { display: none; }
+  .sales-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .sales-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    background: var(--surface-lowest);
+  }
+
+  .sales-item-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1875rem;
+    min-width: 0;
+  }
+
+  /* Tanggal utuh dalam satu baris (tidak terpecah dua baris). */
+  .sales-item-date {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--on-surface-variant);
+    white-space: nowrap;
+  }
+  .sales-date-icon { font-size: 15px; color: var(--outline); }
+
+  /* Nominal tetap utuh sebagai satu nilai, tidak dipenggal. */
+  .sales-item-total {
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 700;
+    color: var(--on-surface);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .sales-item-status {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+  }
+  .sales-item-status .badge {
+    padding: 0.1875rem 0.5rem;
+    font-size: 10px;
+    line-height: 14px;
+  }
+}
+
+/* Badge kode batch pada tabel desktop: hijau tegas, konsisten dengan versi
+   kartu mobile. Di-scope agar tidak mengubah .badge.neutral lain di aplikasi. */
+.batch-table-desktop .badge.neutral {
+  background: #b7d9bd;
+  color: #174d2a;
+  padding: 0.125rem 0.5rem;
+  font-size: 11px;
+  line-height: 14px;
+}
 
 /* Toolbar ------------------------------------------------------------------- */
 .toolbar {
@@ -988,30 +1261,34 @@ table tbody tr:hover { background: var(--surface-low); }
 
 /* Navigasi tab (halaman Bahan Baku) ---------------------------------------- */
 .tab-nav {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Dua baris sama tinggi agar semua tombol seragam. */
+  grid-auto-rows: 1fr;
+  align-items: stretch;
   gap: 0.375rem;
   padding: 0.375rem;
-  margin-bottom: 1.75rem;
+  margin-bottom: 1.25rem;
   background: var(--surface-container);
   border: 1px solid var(--outline-variant);
   border-radius: var(--radius-lg);
-  /* Pada layar sempit tab digulir mendatar; halaman tidak ikut melebar. */
-  overflow-x: auto;
-  scrollbar-width: thin;
-  -webkit-overflow-scrolling: touch;
 }
-.tab-nav::-webkit-scrollbar { height: 4px; }
-.tab-nav::-webkit-scrollbar-thumb {
-  background: var(--outline-variant);
-  border-radius: var(--radius-full);
+
+/* Layar lega: kembali ke baris horizontal seperti sebelumnya. */
+@media (min-width: 640px) {
+  .tab-nav {
+    display: flex;
+    margin-bottom: 1.75rem;
+  }
 }
 
 .tab-btn {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
+  min-width: 0;
   padding: 0.625rem 1.125rem;
   border: none;
   border-radius: var(--radius);
@@ -1022,10 +1299,31 @@ table tbody tr:hover { background: var(--surface-low); }
   line-height: 18px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  white-space: nowrap;
+  text-align: center;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
+
+/* Mobile: tombol grid seragam, ikon di atas label agar teks dapat lebar penuh
+   dan tidak terpotong (mis. "Penyesuaian Stok"). */
+@media (max-width: 639px) {
+  .tab-btn {
+    flex: initial;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    min-height: 3.5rem;
+    white-space: normal;
+    overflow-wrap: break-word;
+    hyphens: none;
+    padding: 0.625rem 0.5rem;
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .tab-btn .material-symbols-outlined { flex-shrink: 0; font-size: 20px; }
+}
+
 .tab-btn:hover { background: var(--surface-container-high); color: var(--on-surface); }
 .tab-btn[aria-selected='true'] {
   background: var(--surface-lowest);
@@ -1055,6 +1353,322 @@ table tbody tr:hover { background: var(--surface-low); }
 .materials-page .form-row { row-gap: 1.25rem; margin-bottom: 0; }
 .materials-page .form-actions { padding-top: 0.25rem; }
 .materials-page .optional-hint { margin-top: 1rem; }
+
+/* Filter bahan baku pada judul bagian (mis. Riwayat Pergerakan Stok). */
+.filter-field { min-width: 240px; }
+
+/* Daftar kartu responsif (Bahan Baku & riwayat) ----------------------------
+   Kartu hanya tampil di HP; tabel desktop disembunyikan di HP. */
+.mobile-list { display: none; }
+.desktop-table { display: block; }
+
+@media (max-width: 639px) {
+  .desktop-table { display: none; }
+  .mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  /* Kartu bahan baku */
+  .material-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    background: var(--surface-lowest);
+  }
+  .material-item-main { min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+  .material-item-name {
+    font-family: var(--font-display);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--on-surface);
+    overflow-wrap: anywhere;
+  }
+  .material-item-desc { font-size: 12px; line-height: 16px; color: var(--on-surface-variant); overflow-wrap: anywhere; }
+  .material-item-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.375rem 0.625rem;
+  }
+  /* Stok aktual: angka + satuan sebagai satu kelompok. */
+  .material-item-stock {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.25rem;
+    font-family: var(--font-display);
+    color: var(--on-surface);
+  }
+  .material-item-stock strong { font-size: 15px; line-height: 20px; font-variant-numeric: tabular-nums; }
+  .material-item-stock .unit { font-size: 11px; color: var(--outline); }
+  .material-item-action { flex-shrink: 0; display: flex; align-items: center; }
+  .material-item-action .button { height: 2.25rem; padding: 0 0.75rem; font-size: 12px; }
+
+  /* Kartu riwayat (dasar): kolom, dipakai riwayat penerimaan. */
+  .history-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    background: var(--surface-lowest);
+  }
+
+  /* Riwayat pergerakan stok: dua sisi — info (kiri), angka (kanan). */
+  .history-item-split {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .history-item-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .history-item-type {
+    font-family: var(--font-display);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 600;
+    color: var(--on-surface);
+    overflow-wrap: break-word;
+  }
+  .history-item-date {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--on-surface-variant);
+    font-variant-numeric: tabular-nums;
+  }
+  .history-item-note {
+    font-size: 11px;
+    line-height: 15px;
+    color: var(--outline);
+    overflow-wrap: break-word;
+  }
+
+  /* Sisi kanan: jumlah perubahan sebagai angka utama, saldo di bawahnya.
+     Lebar mengikuti isi, tetapi boleh menyusut bila layar sangat sempit. */
+  .history-item-amount {
+    flex: 0 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.125rem;
+    text-align: right;
+    margin-left: auto;
+  }
+  .history-item-delta {
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 20px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    min-width: 0;
+    max-width: 100%;
+  }
+  /* Angka dan satuan boleh membungkus, tidak dipenggal / tidak memicu scroll. */
+  .history-item-delta strong { min-width: 0; overflow-wrap: break-word; }
+  .history-item-delta .unit { font-size: 11px; font-weight: 400; color: var(--outline); }
+  .history-item-delta.plus { color: var(--success); }
+  .history-item-delta.minus { color: var(--error); }
+  .history-item-balance {
+    font-size: 11px;
+    line-height: 15px;
+    color: var(--on-surface-variant);
+    font-variant-numeric: tabular-nums;
+    max-width: 100%;
+    overflow-wrap: break-word;
+  }
+
+  .history-item-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .history-item-foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--on-surface-variant);
+  }
+  .history-item-foot .balance { white-space: nowrap; }
+  .history-item-foot .by { overflow-wrap: anywhere; }
+
+  /* Kartu riwayat produksi & batch -----------------------------------------
+     Memetakan 6 kolom tabel: Tanggal, Produk, Hasil, Batch, Bahan Digunakan,
+     Aksi. Grid dua kolom stabil: kolom kiri (Hasil, Kedaluwarsa) dan kolom
+     kanan (Batch, Bahan Digunakan) — keduanya mulai pada posisi horizontal
+     yang sama untuk tiap kartu. */
+  .production-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    background: var(--surface-lowest);
+  }
+
+  .production-item-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .production-item-product {
+    font-family: var(--font-display);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--on-surface);
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+  .production-item-date {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--on-surface-variant);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .production-item-icon { font-size: 15px; color: var(--outline); }
+
+  /* Dua kolom stabil: lebar sama, titik awal konsisten.
+     Tiap kolom menumpuk bagiannya dengan jarak vertikal seragam. */
+  .production-item-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    column-gap: 0.75rem;
+    row-gap: 0.625rem;
+  }
+  .production-item-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    min-width: 0;
+  }
+  .production-item-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    min-width: 0;
+    text-align: left;
+  }
+  .production-item-label {
+    font-size: 11px;
+    line-height: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--outline);
+  }
+  .production-item-value {
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--on-surface);
+    overflow-wrap: break-word;
+  }
+  .production-item-value.num { font-variant-numeric: tabular-nums; }
+  .production-item-value.num strong {
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 700;
+  }
+  .production-item-value .unit { font-size: 11px; color: var(--outline); }
+
+  /* Kedaluwarsa: nilai di kolom kiri, di bawah Hasil. */
+  .production-item-expiry {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--on-surface-variant);
+    overflow-wrap: break-word;
+  }
+  .production-item-expiry .badge { margin-left: 0.25rem; }
+
+  /* Batch: kode (badge hijau) + keterangan stok dalam satu kelompok visual. */
+  .production-item-batch {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.125rem;
+    min-width: 0;
+  }
+  /* Kode batch di kartu ini tidak dipenggal: bila kolom sempit, kode turun
+     ke baris berikutnya agar tetap terbaca utuh (bukan ellipsis). */
+  .production-item .batch-code {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+  }
+  .production-item-sub {
+    font-size: 11px;
+    line-height: 15px;
+    color: var(--on-surface-variant);
+    overflow-wrap: break-word;
+  }
+
+  /* Bahan digunakan: satu kolom penuh, teks boleh membungkus. */
+  .production-item-usage {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--on-surface-variant);
+    overflow-wrap: break-word;
+  }
+
+  .production-item-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--outline-variant);
+  }
+  .production-item-action { flex-shrink: 0; height: 2.25rem; padding: 0 0.875rem; font-size: 12px; }
+
+  /* Filter dalam kartu: penuhi lebar kontainer di HP. */
+  .materials-page .filter-field { min-width: 0; width: 100%; }
+}
+
+/* Ringkasan: 3 kolom rapat di HP. */
+@media (max-width: 639px) {
+  .summary-row {
+    gap: 0.75rem;
+    padding: 0.75rem 0.875rem;
+    margin-bottom: 1rem;
+  }
+  .summary-item { flex: 1 1 0; min-width: 0; }
+  .summary-value { font-size: 18px; line-height: 24px; }
+}
 
 /* Blok opsional (mis. saldo awal pada form tambah bahan) ------------------- */
 .optional-block {

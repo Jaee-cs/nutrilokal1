@@ -87,7 +87,7 @@ export function DashboardPage() {
         ))}
       </div>
 
-      {/* Batch dengan stok */}
+      {/* Batch dengan stok — tabel di desktop, kartu ringkas di mobile */}
       <section className="card section-card">
         <div className="section-head">
           <h2 className="card-title">Batch dengan stok tersedia</h2>
@@ -96,32 +96,57 @@ export function DashboardPage() {
         {batches.length === 0 ? (
           <p className="text-muted">Belum ada batch dengan stok tersisa.</p>
         ) : (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Kode Batch</th>
-                  <th>Produk</th>
-                  <th>Tgl Produksi</th>
-                  <th>Stok</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batches.map((b, i) => (
-                  <tr key={b.code + i}>
-                    <td>
-                      <span className="badge neutral">{b.code}</span>
-                    </td>
-                    <td>{b.productName}</td>
-                    <td>{formatDate(b.productionDate)}</td>
-                    <td>
-                      <strong>{Number(b.stock).toLocaleString('id-ID')}</strong>
-                    </td>
+          <>
+            {/* Desktop: tabel */}
+            <div className="table-wrapper batch-table-desktop">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Kode Batch</th>
+                    <th>Produk</th>
+                    <th>Tgl Produksi</th>
+                    <th>Stok</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {batches.map((b, i) => (
+                    <tr key={b.code + i}>
+                      <td>
+                        <span className="badge neutral">{b.code}</span>
+                      </td>
+                      <td>{b.productName}</td>
+                      <td>{formatDate(b.productionDate)}</td>
+                      <td>
+                        <strong>{Number(b.stock).toLocaleString('id-ID')}</strong>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile: kartu batch responsif */}
+            <div className="batch-list">
+              {batches.map((b, i) => (
+                <article className="batch-item" key={b.code + i}>
+                  <div className="batch-item-body">
+                    <div className="batch-item-head">
+                      <span className="batch-code">{b.code}</span>
+                    </div>
+                    <div className="batch-item-product">{b.productName}</div>
+                    <div className="batch-item-date">
+                      <span className="material-symbols-outlined batch-date-icon">event</span>
+                      {formatDate(b.productionDate)}
+                    </div>
+                  </div>
+                  <span className="batch-stock">
+                    <strong>{Number(b.stock).toLocaleString('id-ID')}</strong>
+                    <span className="batch-stock-unit">stok</span>
+                  </span>
+                </article>
+              ))}
+            </div>
+          </>
         )}
       </section>
 
@@ -134,36 +159,57 @@ export function DashboardPage() {
         {recentSales.length === 0 ? (
           <p className="text-muted">Belum ada transaksi penjualan.</p>
         ) : (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Tanggal</th>
-                  <th>Tipe</th>
-                  <th>Total</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentSales.map(s => (
-                  <tr key={s.id}>
-                    <td>{formatDate(s.recordedAt)}</td>
-                    <td>
-                      {s.type === 'MANUAL' ? 'Manual' : s.type === 'POS' ? 'POS' : 'QRIS'}
-                    </td>
-                    <td>{rupiah(s.total)}</td>
-                    <td>
-                      {s.status === 'COMPLETED' ? (
-                        <span className="badge success">Aktif</span>
-                      ) : (
-                        <span className="badge error">Dibatalkan</span>
-                      )}
-                    </td>
+          <>
+            {/* Desktop: tabel */}
+            <div className="table-wrapper sales-table-desktop">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tanggal</th>
+                    <th>Total</th>
+                    <th>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {recentSales.map(s => (
+                    <tr key={s.id}>
+                      <td>{formatDate(s.recordedAt)}</td>
+                      <td>{rupiah(s.total)}</td>
+                      <td>
+                        {s.status === 'COMPLETED' ? (
+                          <span className="badge success">Aktif</span>
+                        ) : (
+                          <span className="badge error">Dibatalkan</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile: kartu transaksi responsif */}
+            <div className="sales-list">
+              {recentSales.map(s => (
+                <article className="sales-item" key={s.id}>
+                  <div className="sales-item-main">
+                    <span className="sales-item-date">
+                      <span className="material-symbols-outlined sales-date-icon">event</span>
+                      {formatDate(s.recordedAt)}
+                    </span>
+                    <div className="sales-item-total">{rupiah(s.total)}</div>
+                  </div>
+                  <div className="sales-item-status">
+                    {s.status === 'COMPLETED' ? (
+                      <span className="badge success">Aktif</span>
+                    ) : (
+                      <span className="badge error">Dibatalkan</span>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
         )}
       </section>
     </div>

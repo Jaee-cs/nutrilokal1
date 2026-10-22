@@ -514,51 +514,88 @@ export function MaterialsPage() {
                 {isAdmin ? ' Gunakan tab “Tambah Bahan” untuk menambah.' : ' Hubungi Admin untuk menambah bahan.'}
               </p>
             ) : (
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Nama Bahan</th>
-                      <th>Satuan</th>
-                      <th>Stok Aktual</th>
-                      <th>Status</th>
-                      {isAdmin && <th>Aksi</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {materials.map((m) => (
-                      <tr key={m.id}>
-                        <td>
-                          <div className="cell-primary">{m.name}</div>
-                          {m.description && <div className="cell-secondary">{m.description}</div>}
-                        </td>
-                        <td>{m.unit}</td>
-                        <td className="num">
-                          <strong>{Number(m.stock ?? 0).toLocaleString('id-ID')}</strong>
-                        </td>
-                        <td>
+              <>
+                {/* Desktop: tabel */}
+                <div className="table-wrapper desktop-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Nama Bahan</th>
+                        <th>Satuan</th>
+                        <th>Stok Aktual</th>
+                        <th>Status</th>
+                        {isAdmin && <th>Aksi</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {materials.map((m) => (
+                        <tr key={m.id}>
+                          <td>
+                            <div className="cell-primary">{m.name}</div>
+                            {m.description && <div className="cell-secondary">{m.description}</div>}
+                          </td>
+                          <td>{m.unit}</td>
+                          <td className="num">
+                            <strong>{Number(m.stock ?? 0).toLocaleString('id-ID')}</strong>
+                          </td>
+                          <td>
+                            {m.isActive ? (
+                              <span className="badge success">Aktif</span>
+                            ) : (
+                              <span className="badge neutral">Nonaktif</span>
+                            )}
+                          </td>
+                          {isAdmin && (
+                            <td>
+                              <button
+                                type="button"
+                                className="button secondary"
+                                onClick={() => toggleActive(m.id, m.isActive)}
+                              >
+                                {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile: kartu bahan baku */}
+                <div className="mobile-list">
+                  {materials.map((m) => (
+                    <article className="material-item" key={m.id}>
+                      <div className="material-item-main">
+                        <div className="material-item-name">{m.name}</div>
+                        {m.description && <div className="material-item-desc">{m.description}</div>}
+                        <div className="material-item-meta">
+                          <span className="material-item-stock">
+                            <strong>{Number(m.stock ?? 0).toLocaleString('id-ID')}</strong>
+                            <span className="unit">{m.unit}</span>
+                          </span>
                           {m.isActive ? (
                             <span className="badge success">Aktif</span>
                           ) : (
                             <span className="badge neutral">Nonaktif</span>
                           )}
-                        </td>
-                        {isAdmin && (
-                          <td>
-                            <button
-                              type="button"
-                              className="button secondary"
-                              onClick={() => toggleActive(m.id, m.isActive)}
-                            >
-                              {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                        </div>
+                      </div>
+                      {isAdmin && (
+                        <div className="material-item-action">
+                          <button
+                            type="button"
+                            className="button secondary"
+                            onClick={() => toggleActive(m.id, m.isActive)}
+                          >
+                            {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </>
             )}
           </section>
 
@@ -566,7 +603,7 @@ export function MaterialsPage() {
           <section className="card section-card">
             <div className="section-head">
               <h2 className="card-title">Riwayat Pergerakan Stok</h2>
-              <div className="field" style={{ minWidth: '240px' }}>
+              <div className="field filter-field">
                 <label htmlFor="movement-material">Bahan baku</label>
                 <select
                   id="movement-material"
@@ -588,7 +625,7 @@ export function MaterialsPage() {
               Riwayat hanya dapat dilihat — tidak dapat diedit atau dihapus. Kejadian terbaru
               berada paling atas; saldo dihitung mundur dari stok terkini.
             </p>
-            <div className="table-wrapper">
+            <div className="table-wrapper desktop-table">
               <table>
                 <thead>
                   <tr>
@@ -627,6 +664,38 @@ export function MaterialsPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            {/* Mobile: kartu riwayat pergerakan */}
+            <div className="mobile-list">
+              {!movementMaterialId ? (
+                <p className="text-muted">Pilih bahan baku untuk melihat riwayat pergerakan stok</p>
+              ) : loadingMovements ? (
+                <p className="text-muted">Memuat riwayat...</p>
+              ) : movementRows.length === 0 ? (
+                <p className="text-muted">Belum ada pergerakan stok</p>
+              ) : (
+                movementRows.map(({ movement, balance }) => (
+                  <article className="history-item history-item-split" key={movement.id}>
+                    <div className="history-item-main">
+                      <div className="history-item-type">{MOVEMENT_LABELS[movement.type] || movement.type}</div>
+                      <div className="history-item-date">{businessDate(movement.occurredAt)}</div>
+                      {movement.reason && <div className="history-item-note">{movement.reason}</div>}
+                      <div className="history-item-note">Dicatat oleh: {movement.recordedBy?.username || '-'}</div>
+                    </div>
+                    {/* Kanan: jumlah perubahan (numerik utama) + saldo setelahnya */}
+                    <div className="history-item-amount">
+                      <span className={`history-item-delta ${movement.delta >= 0 ? 'plus' : 'minus'}`}>
+                        <strong>{signed(movement.delta)}</strong>
+                        <span className="unit">{movementUnit}</span>
+                      </span>
+                      <span className="history-item-balance">
+                        Saldo: {balance !== undefined ? balance.toLocaleString('id-ID') : '-'} {movementUnit}
+                      </span>
+                    </div>
+                  </article>
+                ))
+              )}
             </div>
           </section>
         </div>
@@ -935,7 +1004,7 @@ export function MaterialsPage() {
           <section className="card section-card">
             <div className="section-head">
               <h2 className="card-title">Riwayat Penerimaan</h2>
-              <div className="field" style={{ minWidth: '240px' }}>
+              <div className="field filter-field">
                 <label htmlFor="receipt-material">Bahan baku</label>
                 <select
                   id="receipt-material"
@@ -949,7 +1018,7 @@ export function MaterialsPage() {
                 </select>
               </div>
             </div>
-            <div className="table-wrapper">
+            <div className="table-wrapper desktop-table">
               <table>
                 <thead>
                   <tr>
@@ -983,6 +1052,38 @@ export function MaterialsPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            {/* Mobile: kartu riwayat penerimaan */}
+            <div className="mobile-list">
+              {!receiptMaterialId ? (
+                <p className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</p>
+              ) : loadingReceipts ? (
+                <p className="text-muted">Memuat riwayat...</p>
+              ) : receipts.length === 0 ? (
+                <p className="text-muted">Belum ada riwayat penerimaan</p>
+              ) : (
+                receipts.slice(0, 20).map(r => (
+                  <article className="history-item" key={r.id}>
+                    <div className="history-item-top">
+                      <span className="history-item-date">
+                        {r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}
+                      </span>
+                      <span className="history-item-type">
+                        {materials.find(m => m.id === r.materialId)?.name || r.materialId}
+                      </span>
+                    </div>
+                    <div className="history-item-delta plus">
+                      <strong>+{Number(r.quantity).toLocaleString('id-ID')}</strong>
+                      <span className="unit">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
+                    </div>
+                    <div className="history-item-foot">
+                      <span className="by">Dicatat oleh: {r.recordedBy?.username || '-'}</span>
+                      {r.note && <span className="by">{r.note}</span>}
+                    </div>
+                  </article>
+                ))
+              )}
             </div>
           </section>
         </div>

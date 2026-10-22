@@ -46,7 +46,7 @@ export function Layout() {
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-top">
           <div className="sidebar-brand">
-            <span className="material-symbols-outlined brand-icon">eco</span>
+            <img src="/logo.png" alt="NutriLokal" className="brand-logo" />
             <span className="brand-name">NutriLokal</span>
           </div>
           <span className="sidebar-badge">V1.0 · KWT Gogor, Salam</span>
@@ -95,11 +95,9 @@ export function Layout() {
             >
               <span className="material-symbols-outlined">menu</span>
             </button>
-            <span className="header-location">
-              <span className="material-symbols-outlined location-icon">location_on</span>
-              KWT Gogor
-              <span className="location-sep">·</span>
-              <span className="location-detail">Kalurahan Salam, Patuk, Gunungkidul</span>
+            <span className="header-brand">
+              <img src="/logo.png" alt="NutriLokal" className="header-logo" />
+              <span className="header-brand-name">NutriLokal</span>
             </span>
           </div>
         </header>

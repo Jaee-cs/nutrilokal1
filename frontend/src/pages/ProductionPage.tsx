@@ -427,7 +427,8 @@ export function ProductionPage() {
           <h2 className="card-title">Riwayat Produksi &amp; Batch</h2>
           <span className="text-muted">{productions.length} catatan</span>
         </div>
-        <div className="table-wrapper">
+        {/* Desktop: tabel lengkap */}
+        <div className="table-wrapper desktop-table">
           <table>
             <thead>
               <tr>
@@ -492,6 +493,85 @@ export function ProductionPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: kartu riwayat produksi */}
+        <div className="mobile-list">
+          {loading ? (
+            <p className="text-muted">Memuat...</p>
+          ) : productions.length === 0 ? (
+            <p className="text-muted">Belum ada catatan produksi</p>
+          ) : (
+            productions.slice(0, 20).map(p => {
+              const summary = p.batch ? batchById.get(p.batch.id) : undefined
+              const expiry = expiryInfo(summary)
+              return (
+                <article className="production-item" key={p.id}>
+                  {/* Kepala: identitas produk + tanggal */}
+                  <div className="production-item-head">
+                    <div className="production-item-product">{p.product.name}</div>
+                    <div className="production-item-date">
+                      <span className="material-symbols-outlined production-item-icon">event</span>
+                      {wibDateLabel(p.productionDate)}
+                    </div>
+                  </div>
+
+                  {/* Dua kolom: kiri (Hasil, Kedaluwarsa) — kanan (Batch, Bahan) */}
+                  <div className="production-item-grid">
+                    <div className="production-item-col">
+                      <div className="production-item-field">
+                        <span className="production-item-label">Hasil</span>
+                        <span className="production-item-value num">
+                          <strong>{formatNumber(p.yieldQuantity)}</strong>{' '}
+                          <span className="unit">{p.product.unit}</span>
+                        </span>
+                      </div>
+                      {p.batch && (
+                        <div className="production-item-field">
+                          <span className="production-item-label">Kedaluwarsa</span>
+                          <span className="production-item-expiry">{expiry.text}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="production-item-col">
+                      <div className="production-item-field">
+                        <span className="production-item-label">Batch</span>
+                        {p.batch ? (
+                          <span className="production-item-batch">
+                            <span className="batch-code">{p.batch.code}</span>
+                            <span className="production-item-sub">
+                              stok {formatNumber(p.batch.stock)} {p.product.unit}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="production-item-value text-muted">-</span>
+                        )}
+                      </div>
+                      <div className="production-item-field">
+                        <span className="production-item-label">Bahan Digunakan</span>
+                        <span className="production-item-usage">
+                          {p.usages.map(u => `${u.material.name} ${u.quantity} ${u.material.unit}`).join(', ') || '-'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="production-item-foot">
+                    <span className="production-item-sub">dicatat {wibDateTime(p.recordedAt)}</span>
+                    {p.batch && (
+                      <button
+                        className="button secondary production-item-action"
+                        onClick={() => openDetail(p.batch!.id)}
+                      >
+                        Detail Batch
+                      </button>
+                    )}
+                  </div>
+                </article>
+              )
+            })
+          )}
         </div>
       </section>
 
