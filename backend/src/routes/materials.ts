@@ -11,7 +11,11 @@ import { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { pathId } from '../lib/http';
 import { hasOperationalHistory } from '../lib/master-history';
-import { toPublicMaterial } from '../lib/material';
+import {
+  MATERIAL_NAME_DUPLICATE_MESSAGE,
+  materialNameKey,
+  toPublicMaterial,
+} from '../lib/material';
 import { MATERIAL_MOVEMENT_INCLUDE, toPublicMaterialMovement } from '../lib/material-records';
 import { prisma } from '../lib/prisma';
 import { getMaterialStock } from '../lib/stock';
@@ -23,6 +27,16 @@ export const materialsRouter = Router();
 
 /** Penanda internal: bahan memiliki histori sehingga penghapusan ditolak. */
 class MaterialHasHistoryError extends Error {}
+
+/**
+ * Pelanggaran constraint unik `materials.name_key`. Dipakai sebagai jaring
+ * pengaman saat dua permintaan dengan nama sama datang hampir bersamaan:
+ * pemeriksaan awal bisa lolos di kedua permintaan, tetapi database hanya
+ * mengizinkan satu baris.
+ */
+function isMaterialNameConflict(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+}
 
 // ---------- Melihat (Admin & Operator) ----------
 
@@ -92,11 +106,31 @@ materialsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
-  const material = await prisma.material.create({
-    data: { name: name.trim(), unit: unit.trim() },
-  });
+  const trimmedName = name.trim();
+  const nameKey = materialNameKey(trimmedName);
 
-  res.status(201).json({ material: toPublicMaterial(material, 0) });
+  // Pemeriksaan awal untuk pesan yang cepat dan jelas. Bahan nonaktif ikut
+  // dihitung karena namanya tetap terdaftar.
+  const existing = await prisma.material.findUnique({ where: { nameKey }, select: { id: true } });
+  if (existing) {
+    res.status(409).json({ message: MATERIAL_NAME_DUPLICATE_MESSAGE });
+    return;
+  }
+
+  try {
+    const material = await prisma.material.create({
+      data: { name: trimmedName, nameKey, unit: unit.trim() },
+    });
+    res.status(201).json({ material: toPublicMaterial(material, 0) });
+  } catch (err) {
+    // Balapan dua permintaan dengan nama sama: constraint unik database
+    // menangkap yang kalah, bukan menyimpan duplikat.
+    if (isMaterialNameConflict(err)) {
+      res.status(409).json({ message: MATERIAL_NAME_DUPLICATE_MESSAGE });
+      return;
+    }
+    throw err;
+  }
 });
 
 materialsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
@@ -116,7 +150,21 @@ materialsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
       res.status(400).json({ message: nameError });
       return;
     }
-    data.name = body.name.trim();
+    const trimmedName = body.name.trim();
+    const nameKey = materialNameKey(trimmedName);
+
+    // Nama sendiri boleh dipakai ulang (mis. hanya mengubah kapitalisasi),
+    // tetapi tidak boleh menabrak nama bahan lain — termasuk yang nonaktif.
+    if (nameKey !== target.nameKey) {
+      const existing = await prisma.material.findUnique({ where: { nameKey }, select: { id: true } });
+      if (existing && existing.id !== target.id) {
+        res.status(409).json({ message: MATERIAL_NAME_DUPLICATE_MESSAGE });
+        return;
+      }
+    }
+
+    data.name = trimmedName;
+    data.nameKey = nameKey;
   }
 
   if (body.unit !== undefined) {
@@ -149,7 +197,19 @@ materialsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
-  const material = await prisma.material.update({ where: { id: target.id }, data });
+  let material;
+  try {
+    material = await prisma.material.update({ where: { id: target.id }, data });
+  } catch (err) {
+    // Balapan dua perubahan ke nama yang sama: constraint unik database
+    // yang memutuskan, bukan pemeriksaan di atas.
+    if (isMaterialNameConflict(err)) {
+      res.status(409).json({ message: MATERIAL_NAME_DUPLICATE_MESSAGE });
+      return;
+    }
+    throw err;
+  }
+
   res.json({ material: toPublicMaterial(material, await getMaterialStock(prisma, material.id)) });
 });
 

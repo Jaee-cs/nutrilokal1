@@ -4,6 +4,19 @@
  */
 import type { Material } from '@prisma/client';
 
+/** Pesan seragam saat nama bahan baku sudah dipakai bahan lain. */
+export const MATERIAL_NAME_DUPLICATE_MESSAGE =
+  'Nama bahan baku sudah terdaftar. Gunakan nama yang berbeda.';
+
+/**
+ * Kunci pembanding nama bahan baku: tanpa spasi di awal/akhir dan tanpa
+ * membedakan huruf besar/kecil. Hanya kecocokan penuh yang dianggap
+ * duplikat — "Singkong" tetap berbeda dari "Singkong Kuning".
+ */
+export function materialNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 export interface PublicMaterial {
   id: string;
   name: string;

@@ -690,6 +690,125 @@ describe('Master bahan baku — CRUD, hak akses, dan validasi', () => {
   });
 });
 
+describe('Master bahan baku — nama unik (tanpa beda kapitalisasi & spasi tepi)', () => {
+  const duplicateMessage = /Nama bahan baku sudah terdaftar/i;
+
+  it('menolak nama duplikat dengan variasi kapitalisasi dan spasi tepi (409)', async () => {
+    const material = await createMaterial('unik-dasar');
+
+    for (const candidate of [
+      material.name.toLowerCase(),
+      material.name.toUpperCase(),
+      ` ${material.name.toUpperCase()} `,
+    ]) {
+      const res = await request(app)
+        .post('/api/materials')
+        .set(auth(adminToken))
+        .send({ name: candidate, unit: 'kg' });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toMatch(duplicateMessage);
+    }
+
+    // Tidak ada baris tambahan yang tersimpan.
+    const stored = await prisma.material.count({
+      where: { nameKey: material.name.toLowerCase() },
+    });
+    expect(stored).toBe(1);
+  });
+
+  it('mengizinkan nama berbeda yang hanya mirip sebagian', async () => {
+    const base = `${runId}-bahan-singkong`;
+    const created = await request(app)
+      .post('/api/materials')
+      .set(auth(adminToken))
+      .send({ name: base, unit: 'kg' });
+    expect(created.status).toBe(201);
+
+    for (const suffix of ['Kuning', 'Putih', 'Mentega']) {
+      const res = await request(app)
+        .post('/api/materials')
+        .set(auth(adminToken))
+        .send({ name: `${base} ${suffix}`, unit: 'kg' });
+      expect(res.status).toBe(201);
+      expect(res.body.material.name).toBe(`${base} ${suffix}`);
+    }
+  });
+
+  it('bahan nonaktif tetap dianggap terdaftar sehingga tidak bisa dibuat ulang (409)', async () => {
+    const material = await createMaterial('nonaktif');
+
+    const off = await request(app)
+      .patch(`/api/materials/${material.id}`)
+      .set(auth(adminToken))
+      .send({ isActive: false });
+    expect(off.status).toBe(200);
+    expect(off.body.material.isActive).toBe(false);
+
+    const again = await request(app)
+      .post('/api/materials')
+      .set(auth(adminToken))
+      .send({ name: ` ${material.name.toUpperCase()} `, unit: 'kg' });
+    expect(again.status).toBe(409);
+    expect(again.body.message).toMatch(duplicateMessage);
+  });
+
+  it('edit nama: boleh memakai nama sendiri, ditolak bila menabrak bahan lain', async () => {
+    const own = await createMaterial('edit-diri');
+    const other = await createMaterial('edit-lain');
+    const ownRenamed = `${runId}-BAHAN-EDIT-DIRI`;
+
+    // Kapitalisasi/spasi nama sendiri boleh diubah (kunci tetap sama).
+    const sameOwn = await request(app)
+      .patch(`/api/materials/${own.id}`)
+      .set(auth(adminToken))
+      .send({ name: `  ${ownRenamed}  ` });
+    expect(sameOwn.status).toBe(200);
+    expect(sameOwn.body.material.name).toBe(ownRenamed);
+
+    const clash = await request(app)
+      .patch(`/api/materials/${own.id}`)
+      .set(auth(adminToken))
+      .send({ name: ` ${other.name.toUpperCase()} ` });
+    expect(clash.status).toBe(409);
+    expect(clash.body.message).toMatch(duplicateMessage);
+
+    // Nama hasil perubahan sebelumnya tetap utuh setelah penolakan.
+    const detail = await request(app).get(`/api/materials/${own.id}`).set(auth(adminToken));
+    expect(detail.body.material.name).toBe(ownRenamed);
+  });
+
+  it('dua permintaan bersamaan dengan nama sama: hanya satu yang tersimpan', async () => {
+    const name = `${runId}-bahan-balapan`;
+    const results = await Promise.all([
+      request(app).post('/api/materials').set(auth(adminToken)).send({ name, unit: 'kg' }),
+      request(app)
+        .post('/api/materials')
+        .set(auth(adminToken))
+        .send({ name: `  ${runId}-BAHAN-BALAPAN  `, unit: 'kg' }),
+    ]);
+
+    const statuses = results.map((res) => res.status).sort();
+    expect(statuses).toEqual([201, 409]);
+
+    const stored = await prisma.material.count({ where: { nameKey: name.toLowerCase() } });
+    expect(stored).toBe(1);
+  });
+
+  it('constraint database menolak duplikat meski validasi aplikasi dilewati', async () => {
+    const material = await createMaterial('constraint-db');
+
+    await expect(
+      prisma.material.create({
+        data: {
+          name: `${material.name} lain`,
+          nameKey: material.name.toLowerCase(),
+          unit: 'kg',
+        },
+      })
+    ).rejects.toThrow();
+  });
+});
+
 describe('Hapus bahan baku — validasi relasi nyata', () => {
   it('Bahan dengan penerimaan nyata ditolak (409) dan riwayat tetap utuh', async () => {
     const material = await createMaterial('ada-penerimaan');

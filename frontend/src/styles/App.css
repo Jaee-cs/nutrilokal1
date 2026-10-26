@@ -1314,7 +1314,54 @@ table tbody tr:hover { background: var(--surface-low); }
 .button.danger:hover { background: #93000a; }
 .button.danger:disabled { opacity: 0.55; }
 
-/* Hapus produk: destruktif tetapi tetap sekunder agar tidak mencolok. */
+/* Tombol aksi bahan yang digunakan pada form produksi --------------------- */
+.production-usage-actions {
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: nowrap;
+  width: 100%;
+}
+
+.production-usage-actions .button {
+  flex: 1 1 0;
+  justify-content: center;
+  text-align: center;
+  height: 2.5rem;
+  padding: 0 0.875rem;
+  min-width: 0;
+}
+
+.production-usage-remove:not(:disabled):hover {
+  background: var(--error-container);
+  border-color: var(--error);
+  color: var(--on-error-container);
+}
+
+/* Tombol Simpan Produksi pada form Catat Produksi ------------------------ */
+.production-submit-actions {
+  width: 100%;
+  justify-content: stretch;
+  margin-top: 0.25rem;
+}
+
+.production-submit-btn {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+  align-items: center;
+  height: 2.75rem;
+  padding: 0 1rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .production-submit-btn {
+    height: 2.875rem;
+    font-size: 14px;
+  }
+}
 .button.danger-outline {
   background: transparent;
   border: 1px solid var(--outline-variant);
@@ -2564,4 +2611,137 @@ table tbody tr:hover { background: var(--surface-low); }
   font-weight: 600;
   color: var(--on-surface);
   cursor: pointer;
+}
+
+/* Notifikasi terpusat --------------------------------------------------------- */
+/* Satu dialog untuk seluruh aplikasi: di tengah layar, di atas sidebar/header,
+   tidak menutup sendiri, dan tetap terbaca di layar sempit. */
+.notification-root {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.notification-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 28, 20, 0.55);
+  animation: drawer-fade 0.15s ease;
+}
+
+.notification-panel {
+  position: relative;
+  width: 100%;
+  max-width: 26rem;
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  padding: 1.5rem 1.25rem 1.25rem;
+  text-align: center;
+  animation: modal-pop 0.15s ease;
+  outline: none;
+}
+
+@media (min-width: 640px) {
+  .notification-panel {
+    padding: 1.75rem 1.5rem 1.5rem;
+  }
+}
+
+.notification-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--radius-full);
+  margin-bottom: 0.875rem;
+}
+
+.notification-icon .material-symbols-outlined {
+  font-size: 28px;
+}
+
+.notification-icon.success {
+  background: #e3f4e7;
+  color: var(--success);
+}
+.notification-icon.info {
+  background: var(--surface-container);
+  color: var(--primary-container);
+}
+.notification-icon.warning {
+  background: #fdf0df;
+  color: #a35f14;
+}
+.notification-icon.error,
+.notification-icon.danger {
+  background: var(--error-container);
+  color: var(--error);
+}
+
+.notification-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--on-surface);
+  margin-bottom: 0.5rem;
+}
+
+.notification-message {
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--on-surface-variant);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.notification-details {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--surface-container);
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--on-surface-variant);
+  text-align: left;
+}
+
+.notification-details p {
+  margin: 0 0 0.5rem;
+}
+.notification-details p:last-child {
+  margin-bottom: 0;
+}
+
+.notification-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.notification-actions .button {
+  min-width: 6.5rem;
+  justify-content: center;
+}
+
+@media (max-width: 479px) {
+  .notification-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .notification-actions .button {
+    width: 100%;
+  }
 }

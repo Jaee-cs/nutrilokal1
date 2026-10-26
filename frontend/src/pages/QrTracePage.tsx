@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import api from '../lib/api'
+import { useNotify } from '../components/NotificationProvider'
 import { productPhotoUrl } from '../utils/product-photo'
 
 // Respons backend: GET /api/public/qr/:code
@@ -31,21 +32,20 @@ type QrResponse = QrPublished | QrUnavailable
 
 export function QrTracePage() {
   const { code } = useParams()
+  const notify = useNotify()
   const [info, setInfo] = useState<QrResponse | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [input, setInput] = useState(code || '')
 
   async function fetchQr(c: string) {
     if (!c.trim()) return
     try {
       setLoading(true)
-      setError(null)
       setInfo(null)
       const res = await api.get(`/public/qr/${encodeURIComponent(c.trim())}`)
       setInfo(res.data)
     } catch (err: any) {
-      setError(err.response?.data?.message || 'QR tidak ditemukan atau belum dipublikasikan')
+      notify.error(err.response?.data?.message || 'QR tidak ditemukan atau belum dipublikasikan')
     } finally {
       setLoading(false)
     }
@@ -87,8 +87,6 @@ export function QrTracePage() {
           </div>
         </div>
       </section>
-
-      {error && <div className="alert error">{error}</div>}
 
       {info && info.status === 'UNAVAILABLE' && (
         <div className="alert error">{info.message}</div>

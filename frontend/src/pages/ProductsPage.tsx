@@ -3,6 +3,7 @@ import api from '../lib/api'
 import { Drawer } from '../components/Drawer'
 import { PhotoField } from '../components/PhotoField'
 import { useAuth } from '../hooks/useAuth'
+import { useNotify } from '../components/NotificationProvider'
 import { productPhotoUrl, uploadProductPhoto } from '../utils/product-photo'
 
 interface Product {
@@ -30,12 +31,14 @@ const EMPTY_FORM = {
 
 export function ProductsPage() {
   const { user } = useAuth()
+  const notify = useNotify()
   const isAdmin = user?.role === 'ADMIN'
 
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  // Kegagalan memuat daftar produk tetap tampil di halaman. Pesan hasil
+  // tindakan (simpan, ubah status, hapus, unggah foto) memakai dialog.
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -49,18 +52,17 @@ export function ProductsPage() {
   // Mode edit (hanya Admin): id produk yang sedang diubah + datanya.
   const [editTarget, setEditTarget] = useState<Product | null>(null)
 
-  // Dialog konfirmasi hapus (khusus Admin).
-  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
+  // Proses hapus berjalan setelah pengguna menyetujui dialog konfirmasi.
   const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   async function fetchProducts(): Promise<boolean> {
     try {
       const res = await api.get('/products')
       setProducts(res.data.data || res.data)
+      setLoadError(null)
       return true
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat produk')
+      setLoadError(err.response?.data?.message || 'Gagal memuat produk')
       return false
     } finally {
       setLoading(false)
@@ -76,7 +78,6 @@ export function ProductsPage() {
     setForm(EMPTY_FORM)
     setPhotoFile(undefined)
     setPhotoNotice(null)
-    setError(null)
     setDrawerOpen(true)
   }
 
@@ -92,8 +93,6 @@ export function ProductsPage() {
     })
     setPhotoFile(undefined)
     setPhotoNotice(null)
-    setError(null)
-    setSuccess(null)
     setDrawerOpen(true)
   }
 
@@ -102,7 +101,6 @@ export function ProductsPage() {
     setEditTarget(null)
     setPhotoFile(undefined)
     setPhotoNotice(null)
-    setError(null)
   }
 
   /**
@@ -127,8 +125,6 @@ export function ProductsPage() {
   async function createProduct(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
-    setError(null)
-    setSuccess(null)
     let created: Product | null = null
     try {
       const res = await api.post('/products', {
@@ -141,7 +137,7 @@ export function ProductsPage() {
       })
       created = res.data.product as Product
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal menambah produk')
+      notify.error(err.response?.data?.message || 'Gagal menambah produk')
       setSubmitting(false)
       return
     }
@@ -150,13 +146,13 @@ export function ProductsPage() {
     closeDrawer()
     const refreshed = await fetchProducts()
     if (refreshed) {
-      setSuccess(
-        photoError
-          ? `Produk berhasil ditambahkan, tetapi foto gagal disimpan: ${photoError}`
-          : photoFile
-            ? 'Produk berhasil ditambahkan beserta fotonya.'
-            : 'Produk berhasil ditambahkan'
-      )
+      if (photoError) {
+        notify.warning(`Produk berhasil ditambahkan, tetapi foto gagal disimpan: ${photoError}`)
+      } else if (photoFile) {
+        notify.success('Produk berhasil ditambahkan beserta fotonya.')
+      } else {
+        notify.success('Produk berhasil ditambahkan')
+      }
     }
     setSubmitting(false)
   }
@@ -166,8 +162,6 @@ export function ProductsPage() {
     if (!editTarget) return
 
     setSubmitting(true)
-    setError(null)
-    setSuccess(null)
     try {
       await api.patch(`/products/${editTarget.id}`, {
         name: form.name,
@@ -178,7 +172,7 @@ export function ProductsPage() {
         storageInstructions: form.storageInstructions,
       })
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal menyimpan perubahan produk')
+      notify.error(err.response?.data?.message || 'Gagal menyimpan perubahan produk')
       setSubmitting(false)
       return
     }
@@ -187,11 +181,11 @@ export function ProductsPage() {
     closeDrawer()
     const refreshed = await fetchProducts()
     if (refreshed) {
-      setSuccess(
-        photoError
-          ? `Perubahan produk tersimpan, tetapi foto gagal disimpan: ${photoError}`
-          : 'Perubahan produk berhasil disimpan'
-      )
+      if (photoError) {
+        notify.warning(`Perubahan produk tersimpan, tetapi foto gagal disimpan: ${photoError}`)
+      } else {
+        notify.success('Perubahan produk berhasil disimpan')
+      }
     }
     setSubmitting(false)
   }
@@ -199,36 +193,60 @@ export function ProductsPage() {
   async function toggleActive(id: string, current: boolean) {
     try {
       await api.patch(`/products/${id}`, { isActive: !current })
-      await fetchProducts()
+      const refreshed = await fetchProducts()
+      if (refreshed) {
+        notify.success(current ? 'Produk dinonaktifkan' : 'Produk diaktifkan kembali')
+      }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mengubah status')
+      notify.error(err.response?.data?.message || 'Gagal mengubah status')
     }
   }
 
-  function openDelete(product: Product) {
-    setError(null)
-    setSuccess(null)
-    setDeleteError(null)
-    setDeleteTarget(product)
-  }
-
-  async function confirmDelete() {
-    if (!deleteTarget) return
+  /**
+   * Konfirmasi hapus memakai dialog terpusat. Rincian stok dan batch tetap
+   * ditampilkan agar Admin memahami dampak tindakan sebelum menyetujuinya.
+   */
+  async function requestDelete(product: Product) {
+    const photo = productPhotoUrl(product.photoUrl)
+    const confirmed = await notify.confirm({
+      title: 'Hapus Produk',
+      message: `Produk "${product.name}" akan dihapus dari daftar produk.`,
+      tone: 'danger',
+      confirmLabel: 'Ya, Hapus',
+      cancelLabel: 'Batal',
+      details: (
+        <>
+          {photo && (
+            <img
+              src={photo}
+              alt={`Foto ${product.name}`}
+              style={{ width: '100%', maxHeight: 120, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }}
+            />
+          )}
+          <p>
+            Stok saat ini: {Number(product.stock ?? 0).toLocaleString('id-ID')} {product.unit} · Batch:{' '}
+            {Number(product.batchCount ?? 0).toLocaleString('id-ID')}
+          </p>
+          <p className="text-muted">
+            Produk tanpa riwayat operasional dihapus permanen. Produk yang sudah memiliki riwayat
+            akan diarsipkan, dan produk yang stoknya masih tersedia akan ditolak oleh sistem.
+          </p>
+        </>
+      ),
+    })
+    if (!confirmed) return
 
     setDeleting(true)
-    setDeleteError(null)
     try {
       // Backend yang menentukan hasil: hapus permanen (tanpa riwayat),
       // arsipkan (punya riwayat), atau tolak (stok masih ada).
-      const res = await api.delete(`/products/${deleteTarget.id}`)
-      setDeleteTarget(null)
+      const res = await api.delete(`/products/${product.id}`)
       const refreshed = await fetchProducts()
       if (refreshed) {
-        setSuccess(res.data?.message || 'Produk berhasil dihapus')
+        notify.success(res.data?.message || 'Produk berhasil dihapus')
       }
     } catch (err: any) {
-      // Ditampilkan di dalam dialog agar pesan penolakan tetap terbaca.
-      setDeleteError(err.response?.data?.message || 'Gagal menghapus produk')
+      notify.error(err.response?.data?.message || 'Gagal menghapus produk')
     } finally {
       setDeleting(false)
     }
@@ -246,10 +264,7 @@ export function ProductsPage() {
         </p>
       </div>
 
-      {error && !drawerOpen && <div className="alert error">{error}</div>}
-      {success && <div className="alert success">{success}</div>}
-
-      {photoNotice && <div className="alert error">{photoNotice}</div>}
+      {loadError && !drawerOpen && <div className="alert error">{loadError}</div>}
 
       {/* Ringkasan singkat */}
       <div className="summary-row">
@@ -346,7 +361,8 @@ export function ProductsPage() {
                   {isAdmin && (
                     <button
                       className="button danger-outline"
-                      onClick={() => openDelete(p)}
+                      onClick={() => requestDelete(p)}
+                      disabled={deleting}
                       aria-label={`Hapus ${p.name}`}
                     >
                       Hapus
@@ -365,7 +381,6 @@ export function ProductsPage() {
         title={editTarget ? 'Edit Produk' : 'Tambah Produk'}
         onClose={closeDrawer}
       >
-        {error && <div className="alert error">{error}</div>}
         <form onSubmit={editTarget ? updateProduct : createProduct} className="drawer-form">
           <div className="field">
             <label htmlFor="p-name">Nama Produk</label>
@@ -456,65 +471,6 @@ export function ProductsPage() {
         </form>
       </Drawer>
 
-      {/* Dialog konfirmasi hapus produk (Admin) */}
-      {deleteTarget && (
-        <div className="modal-root">
-          <div
-            className="modal-overlay"
-            onClick={() => {
-              if (!deleting) setDeleteTarget(null)
-            }}
-          />
-          <div
-            className="modal-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Konfirmasi hapus produk"
-          >
-            <h3 className="modal-title">Hapus Produk</h3>
-            <p className="mb-2">
-              <strong>{deleteTarget.name}</strong>
-            </p>
-            {productPhotoUrl(deleteTarget.photoUrl) && (
-              <div className="product-photo modal-photo">
-                <img
-                  src={productPhotoUrl(deleteTarget.photoUrl)!}
-                  alt={`Foto ${deleteTarget.name}`}
-                />
-              </div>
-            )}
-            <p className="text-muted mb-2">
-              Produk dengan riwayat tidak dihapus permanen — akan diarsipkan agar
-              riwayat produksi, batch, penjualan, dan QR tetap utuh. Produk yang
-              diarsipkan tidak lagi tersedia untuk produksi atau penjualan baru.
-            </p>
-            <p className="text-muted mb-2">
-              Stok saat ini: {Number(deleteTarget.stock ?? 0).toLocaleString('id-ID')}{' '}
-              {deleteTarget.unit} · Batch:{' '}
-              {Number(deleteTarget.batchCount ?? 0).toLocaleString('id-ID')}
-            </p>
-            {deleteError && <div className="alert error">{deleteError}</div>}
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="button secondary"
-                disabled={deleting}
-                onClick={() => setDeleteTarget(null)}
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                className="button danger-outline"
-                disabled={deleting}
-                onClick={confirmDelete}
-              >
-                {deleting ? 'Menghapus...' : 'Hapus'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

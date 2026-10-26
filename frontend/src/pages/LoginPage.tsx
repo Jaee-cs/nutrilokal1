@@ -2,26 +2,26 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
+import { useNotify } from '../components/NotificationProvider'
 import './LoginPage.css'
 
 export function LoginPage() {
   const [u, setU] = useState('')
   const [p, setP] = useState('')
-  const [e, setE] = useState<string | null>(null)
   const [l, setL] = useState(false)
   const { login } = useAuth()
+  const notify = useNotify()
   const nav = useNavigate()
 
   async function submit(ev: React.FormEvent) {
     ev.preventDefault()
     setL(true)
-    setE(null)
     try {
       const r = await api.post('/auth/login', { username: u, password: p })
       login(r.data.token, r.data.user)
       nav('/dashboard')
     } catch (err: any) {
-      setE(err.response?.data?.message || 'Gagal login')
+      notify.error(err.response?.data?.message || 'Gagal login')
     } finally {
       setL(false)
     }
@@ -61,8 +61,6 @@ export function LoginPage() {
           <div className="login-card">
             <h2 className="login-title">Masuk</h2>
             <p className="login-subtitle">Gunakan akun Admin atau Operator untuk melanjutkan.</p>
-
-            {e && <div className="alert error">{e}</div>}
 
             <form onSubmit={submit} className="login-form">
               <div className="field">

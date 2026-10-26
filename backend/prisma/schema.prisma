@@ -554,6 +554,11 @@ model Product {
 model Material {
   id        String   @id @default(cuid())
   name      String
+  /// Kunci pembanding nama bahan baku: huruf kecil tanpa spasi awal/akhir.
+  /// Unik di tingkat database agar duplikat (termasuk beda kapitalisasi)
+  /// tetap tertolak meski dua permintaan datang bersamaan. Bahan nonaktif
+  /// tetap menempati kuncinya sehingga tidak bisa dibuat ulang.
+  nameKey   String   @unique @map("name_key")
   /// Satuan dasar bahan baku (mis. "kg", "liter", "sachet").
   unit      String
   /// Bahan baku nonaktif tidak dipakai untuk pencatatan baru; riwayat

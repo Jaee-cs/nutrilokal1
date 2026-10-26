@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
+import { useNotify } from '../components/NotificationProvider'
 // Kode tanggal dan penanda kedaluwarsa memakai aturan bersama di
 // utils/batch-expiry.ts (kalender WIB, sama dengan backend lib/date.ts).
 import { wibDateCode, isBatchExpired } from '../utils/batch-expiry'
@@ -75,12 +76,13 @@ function formatDateTime(iso: string): string {
 
 export function SalesPage() {
   const { user } = useAuth()
+  const notify = useNotify()
   const [products, setProducts] = useState<Product[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  // Gagal memuat data halaman tetap inline; hasil tindakan memakai dialog.
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [formItems, setFormItems] = useState<SaleFormItem[]>(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [cancelTarget, setCancelTarget] = useState<Sale | null>(null)
@@ -98,8 +100,9 @@ export function SalesPage() {
       setProducts((p.data.data || p.data) || [])
       setBatches((b.data.data || b.data) || [])
       setSales((s.data.data || s.data) || [])
+      setLoadError(null)
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat data penjualan')
+      setLoadError(err.response?.data?.message || 'Gagal memuat data penjualan')
     } finally {
       setLoading(false)
     }
@@ -191,35 +194,33 @@ export function SalesPage() {
     const seenProducts = new Set<string>()
     for (const it of formItems) {
       if (!it.productId) {
-        setError('Setiap item harus memilih produk.')
+        notify.error('Setiap item harus memilih produk.')
         return
       }
       if (seenProducts.has(it.productId)) {
-        setError('Produk yang sama tidak boleh muncul dua kali dalam satu transaksi.')
+        notify.error('Produk yang sama tidak boleh muncul dua kali dalam satu transaksi.')
         return
       }
       seenProducts.add(it.productId)
       const seenBatches = new Set<string>()
       for (const alloc of it.allocations) {
         if (!alloc.batchId || !alloc.quantity) {
-          setError('Setiap alokasi wajib memilih batch dan mengisi jumlah.')
+          notify.error('Setiap alokasi wajib memilih batch dan mengisi jumlah.')
           return
         }
         if (seenBatches.has(alloc.batchId)) {
-          setError('Batch yang sama tidak boleh dialokasikan dua kali pada satu item.')
+          notify.error('Batch yang sama tidak boleh dialokasikan dua kali pada satu item.')
           return
         }
         seenBatches.add(alloc.batchId)
         const qty = Number(alloc.quantity)
         if (isNaN(qty) || qty <= 0) {
-          setError('Jumlah harus lebih dari 0')
+          notify.error('Jumlah harus lebih dari 0')
           return
         }
       }
     }
     setSubmitting(true)
-    setError(null)
-    setSuccess(null)
     try {
       const itemsPayload = formItems.map(it => ({
         productId: it.productId,
@@ -230,31 +231,33 @@ export function SalesPage() {
       }))
       const res = await api.post('/sales', { items: itemsPayload })
       const transaction = res.data?.transaction
-      setSuccess(transaction
-        ? `Penjualan berhasil. ID: ${transaction.id}`
-        : 'Penjualan berhasil.')
       setFormItems(EMPTY_FORM)
       await fetchData()
+      notify.success(transaction
+        ? `Penjualan berhasil. ID: ${transaction.id}`
+        : 'Penjualan berhasil.')
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mencatat penjualan')
+      notify.error(err.response?.data?.message || 'Gagal mencatat penjualan')
     } finally {
       setSubmitting(false)
     }
   }
 
   async function cancelSale() {
-    if (!cancelTarget || !cancelReason.trim()) return
+    if (!cancelTarget) return
+    if (!cancelReason.trim()) {
+      notify.error('Alasan pembatalan wajib diisi.')
+      return
+    }
     setCancelling(true)
-    setError(null)
-    setSuccess(null)
     try {
       await api.post(`/sales/${cancelTarget.id}/cancel`, { reason: cancelReason.trim() })
-      setSuccess('Transaksi berhasil dibatalkan')
       setCancelTarget(null)
       setCancelReason('')
       await fetchData()
+      notify.success('Transaksi berhasil dibatalkan')
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal membatalkan transaksi')
+      notify.error(err.response?.data?.message || 'Gagal membatalkan transaksi')
     } finally {
       setCancelling(false)
     }
@@ -265,12 +268,11 @@ export function SalesPage() {
       <div className="page-head">
         <h1 className="page-title">Penjualan &amp; Pembatalan</h1>
         <p className="page-subtitle">
-          Pencatatan penjualan berdasarkan stok batch aktual — riwayat tidak dapat diubah, hanya dibatalkan.
+          Catat transaksi penjualan dan kelola pembatalan transaksi.
         </p>
       </div>
 
-      {error && !cancelTarget && <div className="alert error">{error}</div>}
-      {success && <div className="alert success">{success}</div>}
+      {loadError && !cancelTarget && <div className="alert error">{loadError}</div>}
 
       {/* Form penjualan */}
       <section className="card section-card">
@@ -527,7 +529,6 @@ export function SalesPage() {
             <p className="text-muted" style={{ marginBottom: '1rem' }}>
               Transaksi tidak dihapus — statusnya diubah menjadi dibatalkan dan stok batch dikembalikan.
             </p>
-            {error && <div className="alert error">{error}</div>}
             <div className="field">
               <label htmlFor="cancel-reason">Alasan pembatalan (wajib)</label>
               <input

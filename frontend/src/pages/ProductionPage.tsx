@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import api from '../lib/api'
 import { Drawer } from '../components/Drawer'
 import { useAuth } from '../hooks/useAuth'
+import { useNotify } from '../components/NotificationProvider'
 import { wibDateCode, wibDateLabel, isBatchExpired } from '../utils/batch-expiry'
 import { productPhotoUrl } from '../utils/product-photo'
 
@@ -133,6 +134,7 @@ function expiryInfo(batch?: BatchSummary): { text: string; expired: boolean } {
 
 export function ProductionPage() {
   const { user } = useAuth()
+  const notify = useNotify()
   const isAdmin = user?.role === 'ADMIN'
 
   const [products, setProducts] = useState<Product[]>([])
@@ -140,9 +142,11 @@ export function ProductionPage() {
   const [productions, setProductions] = useState<Production[]>([])
   const [batches, setBatches] = useState<BatchSummary[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [form, setForm] = useState({ productId: '', productionDate: '', yieldQuantity: '', materialId: '', materialQty: '' })
+  // Gagal memuat data halaman tetap tampil inline; hasil tindakan memakai dialog.
+  const [loadError, setLoadError] = useState<string | null>(null)
+  type UsageRow = { materialId: string; materialQty: string }
+  const [form, setForm] = useState({ productId: '', productionDate: '', yieldQuantity: '' })
+  const [usageRows, setUsageRows] = useState<UsageRow[]>([{ materialId: '', materialQty: '' }])
   const [submitting, setSubmitting] = useState(false)
 
   // Detail batch (Admin & Operator boleh melihat; mengubah kedaluwarsa: Admin)
@@ -166,20 +170,17 @@ export function ProductionPage() {
       setMaterials((m.data.data || m.data) || [])
       setProductions((pr.data.data || pr.data) || [])
       setBatches((b.data.data || b.data) || [])
+      setLoadError(null)
       return true
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat data')
+      setLoadError(err.response?.data?.message || 'Gagal memuat data')
       return false
     } finally {
       setLoading(false)
     }
   }
 
-  /**
-   * Memuat detail batch. Tidak mengosongkan pesan error/sukses supaya pesan
-   * dari aksi pemanggil tidak ikut terhapus (pola yang sama dengan riwayat
-   * pergerakan stok bahan baku).
-   */
+  /** Memuat detail batch; kegagalan dilaporkan lewat dialog notifikasi. */
   async function loadDetail(batchId: string): Promise<boolean> {
     setDetailLoading(true)
     try {
@@ -189,7 +190,7 @@ export function ProductionPage() {
       setExpiryDraft(batch.expiryDate ? wibDateCode(batch.expiryDate) : '')
       return true
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat detail batch')
+      notify.error(err.response?.data?.message || 'Gagal memuat detail batch')
       return false
     } finally {
       setDetailLoading(false)
@@ -197,8 +198,6 @@ export function ProductionPage() {
   }
 
   async function openDetail(batchId: string) {
-    setError(null)
-    setSuccess(null)
     setClearArmed(false)
     setDetail(null)
     setDetailOpen(true)
@@ -209,8 +208,6 @@ export function ProductionPage() {
     setDetailOpen(false)
     setDetail(null)
     setClearArmed(false)
-    setError(null)
-    setSuccess(null)
   }
 
   useEffect(() => {
@@ -219,41 +216,54 @@ export function ProductionPage() {
 
   async function submitProduction(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.productId || !form.yieldQuantity) return
+    if (!form.productId || !form.yieldQuantity) {
+      notify.error('Produk dan jumlah hasil produksi wajib diisi.')
+      return
+    }
     setSubmitting(true)
-    setError(null)
-    setSuccess(null)
     try {
+      const materials = usageRows
+        .filter(r => r.materialId && r.materialQty)
+        .map(r => ({ materialId: r.materialId, quantity: Number(r.materialQty) }))
+
       const payload: any = {
         productId: form.productId,
         productionDate: form.productionDate || undefined,
         yieldQuantity: Number(form.yieldQuantity),
-        materials: [],
-      }
-      if (form.materialId && form.materialQty) {
-        payload.materials = [{ materialId: form.materialId, quantity: Number(form.materialQty) }]
+        materials,
       }
       const res = await api.post('/productions', payload)
-      setSuccess(`Produksi berhasil. Kode batch: ${res.data.production.batch?.code || '-'}`)
-      setForm({ productId: '', productionDate: '', yieldQuantity: '', materialId: '', materialQty: '' })
+      setForm({ productId: '', productionDate: '', yieldQuantity: '' })
+      setUsageRows([{ materialId: '', materialQty: '' }])
       await fetchData()
+      notify.success(`Produksi berhasil. Kode batch: ${res.data.production.batch?.code || '-'}`)
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mencatat produksi')
+      notify.error(err.response?.data?.message || 'Gagal mencatat produksi')
     } finally {
       setSubmitting(false)
     }
   }
 
+  function addUsageRow() {
+    setUsageRows(rows => [...rows, { materialId: '', materialQty: '' }])
+  }
+
+  function removeUsageRow(index: number) {
+    setUsageRows(rows => rows.filter((_, i) => i !== index))
+  }
+
+  function updateUsageRow(index: number, patch: Partial<UsageRow>) {
+    setUsageRows(rows => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+  }
+
   /** Menyimpan tanggal kedaluwarsa sekaligus memvalidasinya (khusus Admin). */
   async function saveExpiry(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
-    setSuccess(null)
 
     if (!detail) return
     const date = expiryDraft.trim()
     if (!date) {
-      setError('Tanggal kedaluwarsa wajib diisi.')
+      notify.error('Tanggal kedaluwarsa wajib diisi.')
       return
     }
 
@@ -265,10 +275,10 @@ export function ProductionPage() {
       const detailOk = await loadDetail(detail.id)
       const listOk = await fetchData()
       if (detailOk && listOk) {
-        setSuccess('Tanggal kedaluwarsa berhasil disimpan dan divalidasi')
+        notify.success('Tanggal kedaluwarsa berhasil disimpan dan divalidasi')
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal menyimpan tanggal kedaluwarsa')
+      notify.error(err.response?.data?.message || 'Gagal menyimpan tanggal kedaluwarsa')
     } finally {
       setSavingExpiry(false)
       setClearArmed(false)
@@ -278,18 +288,16 @@ export function ProductionPage() {
   /** Mengosongkan tanggal kedaluwarsa (kembali "belum tersedia"). */
   async function clearExpiry() {
     if (!detail) return
-    setError(null)
-    setSuccess(null)
     setSavingExpiry(true)
     try {
       await api.patch(`/batches/${detail.id}/expiry`, { expiryDate: null })
       const detailOk = await loadDetail(detail.id)
       const listOk = await fetchData()
       if (detailOk && listOk) {
-        setSuccess('Tanggal kedaluwarsa dikosongkan')
+        notify.success('Tanggal kedaluwarsa dikosongkan')
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mengosongkan tanggal kedaluwarsa')
+      notify.error(err.response?.data?.message || 'Gagal mengosongkan tanggal kedaluwarsa')
     } finally {
       setSavingExpiry(false)
       setClearArmed(false)
@@ -316,13 +324,11 @@ export function ProductionPage() {
       <div className="page-head">
         <h1 className="page-title">Produksi &amp; Batch</h1>
         <p className="page-subtitle">
-          Pencatatan produksi mengikuti aturan backend — kode batch dibuat otomatis, informasi batch
-          (stok dan tanggal kedaluwarsa) dapat dilihat per batch.
+          Catat produksi, pantau stok produk, dan kelola informasi batch.
         </p>
       </div>
 
-      {error && !detailOpen && <div className="alert error">{error}</div>}
-      {success && !detailOpen && <div className="alert success">{success}</div>}
+      {loadError && !detailOpen && <div className="alert error">{loadError}</div>}
 
       <div className="grid-2col">
         {/* Form produksi */}
@@ -366,35 +372,59 @@ export function ProductionPage() {
                 />
               </div>
             </div>
-            <div className="form-row">
-              <div className="field">
-                <label htmlFor="pr-material">Bahan Digunakan (opsional)</label>
-                <select
-                  id="pr-material"
-                  value={form.materialId}
-                  onChange={e => setForm(f => ({ ...f, materialId: e.target.value }))}
-                >
-                  <option value="">Pilih bahan (opsional)</option>
-                  {activeMaterials.map(m => (
-                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="pr-mqty">Jumlah Bahan</label>
-                <input
-                  id="pr-mqty"
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  value={form.materialQty}
-                  onChange={e => setForm(f => ({ ...f, materialQty: e.target.value }))}
-                  disabled={!form.materialId}
-                />
+            <div className="field">
+              <label>Bahan yang Digunakan</label>
+              <div className="stack-form" style={{ gap: '0.75rem' }}>
+                {usageRows.map((row, idx) => (
+                  <div key={idx} className="form-row" style={{ alignItems: 'flex-end' }}>
+                    <div className="field">
+                      <label htmlFor={`pr-material-${idx}`}>Bahan Baku</label>
+                      <select
+                        id={`pr-material-${idx}`}
+                        value={row.materialId}
+                        onChange={e => updateUsageRow(idx, { materialId: e.target.value })}
+                      >
+                        <option value="">Pilih bahan</option>
+                        {activeMaterials
+                          .filter(m => !usageRows.some((r, i) => i !== idx && r.materialId === m.id))
+                          .map(m => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ({m.unit}){m.stock !== undefined ? ` — stok ${m.stock}` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor={`pr-mqty-${idx}`}>Jumlah Digunakan</label>
+                      <input
+                        id={`pr-mqty-${idx}`}
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        value={row.materialQty}
+                        onChange={e => updateUsageRow(idx, { materialQty: e.target.value })}
+                        disabled={!row.materialId}
+                      />
+                    </div>
+                  </div>
+                ))}
+                <div className="form-actions production-usage-actions" style={{ marginTop: 0 }}>
+                  <button type="button" className="button secondary" onClick={addUsageRow}>
+                    Tambah Bahan
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary production-usage-remove"
+                    onClick={() => removeUsageRow(usageRows.length - 1)}
+                    disabled={usageRows.length === 1}
+                  >
+                    Hapus Bahan
+                  </button>
+                </div>
               </div>
             </div>
-            <div className="form-actions">
-              <button className="button" disabled={submitting}>
+            <div className="form-actions production-submit-actions">
+              <button className="button production-submit-btn" disabled={submitting}>
                 {submitting ? 'Menyimpan...' : 'Simpan Produksi'}
               </button>
             </div>
@@ -581,9 +611,6 @@ export function ProductionPage() {
         title={detail ? `Batch ${detail.code}` : 'Detail Batch'}
         onClose={closeDetail}
       >
-        {error && <div className="alert error">{error}</div>}
-        {success && <div className="alert success">{success}</div>}
-
         {detailLoading && !detail ? (
           <p className="text-muted">Memuat detail batch...</p>
         ) : !detail ? (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import api from '../lib/api'
+import { useNotify } from '../components/NotificationProvider'
 import { validatedExpiryLabel } from '../utils/batch-expiry'
 import { productPhotoUrl } from '../utils/product-photo'
 
@@ -65,10 +66,11 @@ function formatDate(iso: string | null) {
 }
 
 export function QrManagementPage() {
+  const notify = useNotify()
   const [batches, setBatches] = useState<Batch[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  // Gagal memuat daftar batch tetap inline; hasil tindakan memakai dialog.
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [detail, setDetail] = useState<QrDetail | null>(null)
   const [acting, setActing] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
@@ -79,8 +81,9 @@ export function QrManagementPage() {
       setLoading(true)
       const res = await api.get('/batches')
       setBatches((res.data.data || res.data) || [])
+      setLoadError(null)
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat batch')
+      setLoadError(err.response?.data?.message || 'Gagal memuat batch')
     } finally {
       setLoading(false)
     }
@@ -97,41 +100,36 @@ export function QrManagementPage() {
     }
     QRCode.toDataURL(publicTraceUrl(detail.code), QR_OPTIONS)
       .then(url => { if (active) setQrDataUrl(url) })
-      .catch(() => { if (active) setError('Gagal membuat gambar QR') })
+      .catch(() => { if (active) notify.error('Gagal membuat gambar QR') })
     return () => { active = false }
   }, [detail])
 
   async function fetchDetail(id: string): Promise<boolean> {
     try {
-      setError(null)
-      setSuccess(null)
       const res = await api.get(`/batches/${id}/qr`)
       setDetail(res.data.qr)
       return true
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat detail QR')
+      notify.error(err.response?.data?.message || 'Gagal memuat detail QR')
       return false
     }
   }
 
   async function act(id: string, action: 'validate' | 'publish' | 'withdraw') {
     setActing(true)
-    setError(null)
-    setSuccess(null)
     try {
       await api.post(`/batches/${id}/qr/${action}`, {})
       const actionLabel = action === 'validate' ? 'Validasi' : action === 'publish' ? 'Publikasi' : 'Penarikan'
-      // Muat ulang DULU (fetchDetail mengosongkan pesan), lalu tampilkan sukses
-      // agar pesan tidak langsung terhapus. Bila muat ulang gagal, pesan error
-      // dari fetchDetail dipertahankan (tidak ditimpa sukses).
+      // Muat ulang detail dan daftar lebih dulu; bila muat ulang gagal,
+      // fetchDetail sudah menampilkan pesan kegagalan dan sukses tidak ditampilkan.
       const refreshed = await fetchDetail(id)
       await fetchBatches()
       if (refreshed) {
-        setSuccess(`${actionLabel} QR berhasil`)
+        notify.success(`${actionLabel} QR berhasil`)
       }
     } catch (err: any) {
       const actionLabel = action === 'validate' ? 'memvalidasi' : action === 'publish' ? 'menerbitkan' : 'menarik'
-      setError(err.response?.data?.message || `Gagal ${actionLabel} QR`)
+      notify.error(err.response?.data?.message || `Gagal ${actionLabel} QR`)
     } finally {
       setActing(false)
     }
@@ -144,12 +142,11 @@ export function QrManagementPage() {
     expiryLabel: string | null,
     photoUrl: string | null
   ) {
-    setError(null)
     try {
       const dataUrl = await QRCode.toDataURL(publicTraceUrl(code), QR_OPTIONS)
       setLabel({ code, productName, expiryLabel, photoUrl, dataUrl })
     } catch {
-      setError('Gagal membuat gambar QR untuk label')
+      notify.error('Gagal membuat gambar QR untuk label')
     }
   }
 
@@ -179,12 +176,11 @@ export function QrManagementPage() {
       <div className="page-head">
         <h1 className="page-title">QR Traceability</h1>
         <p className="page-subtitle">
-          Validasi dan publikasi informasi QR per batch — siklus: validasi → terbitkan → (tarik).
+          Telusuri informasi produk dan batch melalui kode QR.
         </p>
       </div>
 
-      {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert success">{success}</div>}
+      {loadError && <div className="alert error">{loadError}</div>}
 
       <section className="card section-card">
         <div className="section-head">

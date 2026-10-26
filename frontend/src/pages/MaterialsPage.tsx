@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
+import { useNotify } from '../components/NotificationProvider'
 
 interface Material {
   id: string
@@ -78,6 +79,18 @@ function buildMovementRows(rows: Movement[], currentStock?: number) {
   })
 }
 
+/** Pesan seragam saat nama bahan baku sudah dipakai bahan lain. */
+const DUPLICATE_NAME_MESSAGE = 'Nama bahan baku sudah terdaftar. Gunakan nama yang berbeda.'
+
+/**
+ * Kunci pembanding nama bahan baku: tanpa spasi di awal/akhir dan tanpa
+ * membedakan huruf besar/kecil. Hanya kecocokan penuh yang dianggap
+ * duplikat — "Singkong" berbeda dari "Singkong Kuning".
+ */
+function materialNameKey(name: string): string {
+  return name.trim().toLowerCase()
+}
+
 /**
  * Halaman "Bahan Baku" dengan navigasi tab: Daftar Bahan, Tambah Bahan
  * (termasuk saldo awal opsional), Penyesuaian Stok (Admin), dan Penerimaan.
@@ -85,15 +98,16 @@ function buildMovementRows(rows: Movement[], currentStock?: number) {
  */
 export function MaterialsPage() {
   const { user } = useAuth()
+  const notify = useNotify()
   const isAdmin = user?.role === 'ADMIN'
 
   const [tab, setTab] = useState<TabKey>('list')
   const [materials, setMaterials] = useState<Material[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  // Kegagalan memuat daftar tetap tampil di halaman (keadaan halaman, bukan
+  // hasil tindakan). Pesan hasil tindakan memakai dialog terpusat.
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<Material | null>(null)
 
   // Tambah bahan baku (+ saldo awal opsional dalam satu alur, Admin)
   const [addForm, setAddForm] = useState(EMPTY_ADD)
@@ -126,9 +140,10 @@ export function MaterialsPage() {
       setLoading(true)
       const res = await api.get('/materials')
       setMaterials(res.data.data || res.data)
+      setLoadError(null)
       return true
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat bahan baku')
+      setLoadError(err.response?.data?.message || 'Gagal memuat bahan baku')
       return false
     } finally {
       setLoading(false)
@@ -146,7 +161,7 @@ export function MaterialsPage() {
       setMovements(res.data.data || res.data || [])
       return true
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat riwayat pergerakan stok')
+      notify.error(err.response?.data?.message || 'Gagal memuat riwayat pergerakan stok')
       setMovements([])
       return false
     } finally {
@@ -165,7 +180,7 @@ export function MaterialsPage() {
       setReceipts(res.data.data || res.data || [])
       return true
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat riwayat penerimaan')
+      notify.error(err.response?.data?.message || 'Gagal memuat riwayat penerimaan')
       setReceipts([])
       return false
     } finally {
@@ -187,13 +202,10 @@ export function MaterialsPage() {
   ]
   const activeTab: TabKey = tabs.some((t) => t.key === tab) ? tab : 'list'
 
-  /** Perpindahan tab tidak pernah mengirim formulir; pesan lama dibersihkan
-      agar tidak ada umpan balik dari tab lain yang menyesatkan. */
+  /** Perpindahan tab tidak pernah mengirim formulir. */
   function selectTab(key: TabKey) {
     if (key === activeTab) return
     setTab(key)
-    setError(null)
-    setSuccess(null)
   }
 
   /**
@@ -203,29 +215,34 @@ export function MaterialsPage() {
    */
   async function createMaterial(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
-    setSuccess(null)
 
     if (!addForm.name.trim()) {
-      setError('Nama bahan wajib diisi.')
+      notify.error('Nama bahan wajib diisi.')
+      return
+    }
+    // Backend tetap memeriksa ulang; ini hanya umpan balik cepat di form.
+    // Bahan nonaktif ikut diperiksa karena namanya tetap terdaftar.
+    const nameKey = materialNameKey(addForm.name)
+    if (materials.some(m => materialNameKey(m.name) === nameKey)) {
+      notify.error(DUPLICATE_NAME_MESSAGE)
       return
     }
     if (!addForm.unit.trim()) {
-      setError('Satuan bahan wajib diisi.')
+      notify.error('Satuan bahan wajib diisi.')
       return
     }
     if (obEnabled) {
       const obQuantity = Number(addObForm.quantity)
       if (!Number.isFinite(obQuantity) || obQuantity <= 0) {
-        setError('Jumlah saldo awal harus lebih besar dari nol.')
+        notify.error('Jumlah saldo awal harus lebih besar dari nol.')
         return
       }
       if (!addObForm.date) {
-        setError('Tanggal saldo awal wajib diisi.')
+        notify.error('Tanggal saldo awal wajib diisi.')
         return
       }
       if (!addObForm.reason.trim()) {
-        setError('Alasan saldo awal wajib diisi.')
+        notify.error('Alasan saldo awal wajib diisi.')
         return
       }
     }
@@ -256,15 +273,15 @@ export function MaterialsPage() {
       const refreshed = await fetchMaterials()
       if (refreshed) {
         if (openingBalanceError) {
-          setError(
+          notify.warning(
             `Bahan baku "${newMaterial.name}" berhasil ditambahkan, tetapi saldo awal gagal dicatat: ${openingBalanceError}`
           )
         } else if (obEnabled) {
-          setSuccess(
+          notify.success(
             `Bahan baku "${newMaterial.name}" berhasil ditambahkan beserta saldo awal ${Number(addObForm.quantity).toLocaleString('id-ID')} ${newMaterial.unit}`
           )
         } else {
-          setSuccess(`Bahan baku "${newMaterial.name}" berhasil ditambahkan`)
+          notify.success(`Bahan baku "${newMaterial.name}" berhasil ditambahkan`)
         }
       }
 
@@ -273,67 +290,69 @@ export function MaterialsPage() {
       setAddObForm(EMPTY_ADD_OB)
       setObEnabled(false)
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal menambah bahan baku')
+      notify.error(err.response?.data?.message || 'Gagal menambah bahan baku')
     } finally {
       setSubmittingAdd(false)
     }
   }
 
   async function toggleActive(id: string, current: boolean) {
-    setError(null)
-    setSuccess(null)
     try {
       await api.patch(`/materials/${id}`, { isActive: !current })
       const refreshed = await fetchMaterials()
       if (refreshed) {
-        setSuccess(current ? 'Bahan baku dinonaktifkan' : 'Bahan baku diaktifkan kembali')
+        notify.success(current ? 'Bahan baku dinonaktifkan' : 'Bahan baku diaktifkan kembali')
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mengubah status')
+      notify.error(err.response?.data?.message || 'Gagal mengubah status')
     }
   }
 
-  function openDeleteDialog(m: Material) {
-    setError(null)
-    setSuccess(null)
-    setDeleteTarget(m)
-  }
+  /**
+   * Konfirmasi hapus memakai dialog terpusat. Tindakan baru dijalankan
+   * setelah pengguna menekan "Ya, Hapus"; Batal/Escape tidak menghapus apa pun.
+   */
+  async function requestDelete(m: Material) {
+    const confirmed = await notify.confirm({
+      title: 'Hapus Bahan Baku',
+      message: `Bahan baku "${m.name}" (${m.unit}) akan dihapus permanen dari daftar bahan baku.`,
+      tone: 'danger',
+      confirmLabel: 'Ya, Hapus',
+      cancelLabel: 'Batal',
+      details: (
+        <p className="text-muted">
+          Bahan yang sudah memiliki riwayat penerimaan, saldo awal, pemakaian produksi,
+          atau penyesuaian stok tidak dapat dihapus — gunakan fitur Nonaktifkan sebagai gantinya.
+        </p>
+      ),
+    })
+    if (!confirmed) return
 
-  function closeDeleteDialog() {
-    if (deletingId) return
-    setDeleteTarget(null)
-  }
-
-  async function confirmDelete() {
-    if (!deleteTarget) return
-    setError(null)
-    setSuccess(null)
-    setDeletingId(deleteTarget.id)
+    setDeletingId(m.id)
     try {
-      const res = await api.delete(`/materials/${deleteTarget.id}`)
-      const message = res.data?.message || `Bahan baku "${deleteTarget.name}" berhasil dihapus.`
-      setMaterials(prev => prev.filter(m => m.id !== deleteTarget.id))
-      setDeleteTarget(null)
-      setSuccess(message)
-      if (movementMaterialId === deleteTarget.id) {
+      const res = await api.delete(`/materials/${m.id}`)
+      const message = res.data?.message || `Bahan baku "${m.name}" berhasil dihapus.`
+      setMaterials(prev => prev.filter(item => item.id !== m.id))
+      notify.success(message)
+      if (movementMaterialId === m.id) {
         setMovementMaterialId('')
         setMovements([])
       }
-      if (receiptMaterialId === deleteTarget.id) {
+      if (receiptMaterialId === m.id) {
         setReceiptMaterialId('')
         setReceipts([])
       }
-      if (adjForm.materialId === deleteTarget.id) {
+      if (adjForm.materialId === m.id) {
         setAdjForm(EMPTY_ADJ)
       }
-      if (receiptForm.materialId === deleteTarget.id) {
+      if (receiptForm.materialId === m.id) {
         setReceiptForm(EMPTY_RECEIPT)
       }
-      if (obForm.materialId === deleteTarget.id) {
+      if (obForm.materialId === m.id) {
         setObForm(EMPTY_OB)
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal menghapus bahan baku')
+      notify.error(err.response?.data?.message || 'Gagal menghapus bahan baku')
     } finally {
       setDeletingId(null)
     }
@@ -341,25 +360,21 @@ export function MaterialsPage() {
 
   async function submitAdjustment(e: React.FormEvent) {
     e.preventDefault()
-    // Setiap percobaan baru dimulai dari keadaan pesan yang bersih, termasuk
-    // saat validasi klien gagal (jangan biarkan pesan sukses lama menempel).
-    setError(null)
-    setSuccess(null)
 
     const targetId = adjForm.materialId
     const quantity = Number(adjForm.quantity)
     const reason = adjForm.reason.trim()
 
     if (!targetId) {
-      setError('Pilih bahan baku yang akan disesuaikan.')
+      notify.error('Pilih bahan baku yang akan disesuaikan.')
       return
     }
     if (!Number.isFinite(quantity) || quantity === 0) {
-      setError('Jumlah penyesuaian tidak boleh nol.')
+      notify.error('Jumlah penyesuaian tidak boleh nol.')
       return
     }
     if (!reason) {
-      setError('Alasan penyesuaian wajib diisi.')
+      notify.error('Alasan penyesuaian wajib diisi.')
       return
     }
 
@@ -382,10 +397,10 @@ export function MaterialsPage() {
         historyRefreshed = await loadMovements(targetId)
       }
       if (stockRefreshed && historyRefreshed) {
-        setSuccess('Penyesuaian stok berhasil dicatat')
+        notify.success('Penyesuaian stok berhasil dicatat')
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mencatat penyesuaian stok')
+      notify.error(err.response?.data?.message || 'Gagal mencatat penyesuaian stok')
     } finally {
       setSubmittingAdj(false)
     }
@@ -393,17 +408,15 @@ export function MaterialsPage() {
 
   async function submitReceipt(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
-    setSuccess(null)
 
     const targetId = receiptForm.materialId
     const quantity = Number(receiptForm.quantity)
     if (!targetId) {
-      setError('Pilih bahan baku yang diterima.')
+      notify.error('Pilih bahan baku yang diterima.')
       return
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setError('Jumlah penerimaan harus lebih besar dari nol.')
+      notify.error('Jumlah penerimaan harus lebih besar dari nol.')
       return
     }
 
@@ -422,10 +435,10 @@ export function MaterialsPage() {
       setReceiptMaterialId(historyTarget)
       const historyRefreshed = await loadReceipts(historyTarget)
       if (stockRefreshed && historyRefreshed) {
-        setSuccess('Penerimaan bahan baku berhasil dicatat')
+        notify.success('Penerimaan bahan baku berhasil dicatat')
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mencatat penerimaan')
+      notify.error(err.response?.data?.message || 'Gagal mencatat penerimaan')
     } finally {
       setSubmittingReceipt(false)
     }
@@ -433,8 +446,6 @@ export function MaterialsPage() {
 
   async function submitOpeningBalance(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
-    setSuccess(null)
 
     const materialId = obForm.materialId
     const quantity = Number(obForm.quantity)
@@ -442,19 +453,19 @@ export function MaterialsPage() {
     const reason = obForm.reason.trim()
 
     if (!materialId) {
-      setError('Pilih bahan baku untuk saldo awal.')
+      notify.error('Pilih bahan baku untuk saldo awal.')
       return
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setError('Jumlah saldo awal harus lebih besar dari nol.')
+      notify.error('Jumlah saldo awal harus lebih besar dari nol.')
       return
     }
     if (!date) {
-      setError('Tanggal saldo awal wajib diisi.')
+      notify.error('Tanggal saldo awal wajib diisi.')
       return
     }
     if (!reason) {
-      setError('Alasan saldo awal wajib diisi.')
+      notify.error('Alasan saldo awal wajib diisi.')
       return
     }
 
@@ -472,10 +483,10 @@ export function MaterialsPage() {
         historyRefreshed = await loadMovements(materialId)
       }
       if (stockRefreshed && historyRefreshed) {
-        setSuccess('Saldo awal bahan baku berhasil dicatat')
+        notify.success('Saldo awal bahan baku berhasil dicatat')
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mencatat saldo awal')
+      notify.error(err.response?.data?.message || 'Gagal mencatat saldo awal')
     } finally {
       setSubmittingOb(false)
     }
@@ -495,13 +506,11 @@ export function MaterialsPage() {
       <div className="page-head">
         <h1 className="page-title">Bahan Baku</h1>
         <p className="page-subtitle">
-          Master bahan baku, stok aktual, penerimaan, saldo awal, riwayat pergerakan, dan
-          penyesuaian — seluruh data berasal dari backend.
+          Kelola bahan baku, stok, penerimaan, dan riwayat pergerakan stok.
         </p>
       </div>
 
-      {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert success">{success}</div>}
+      {loadError && <div className="alert error">{loadError}</div>}
 
       {/* Ringkasan stok */}
       <div className="summary-row">
@@ -606,7 +615,8 @@ export function MaterialsPage() {
                                 <button
                                   type="button"
                                   className="button danger-outline"
-                                  onClick={() => openDeleteDialog(m)}
+                                  onClick={() => requestDelete(m)}
+                                  disabled={deletingId === m.id}
                                   title="Hapus bahan baku"
                                 >
                                   <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
@@ -652,7 +662,8 @@ export function MaterialsPage() {
                           <button
                             type="button"
                             className="button danger-outline material-item-delete"
-                            onClick={() => openDeleteDialog(m)}
+                            onClick={() => requestDelete(m)}
+                            disabled={deletingId === m.id}
                             aria-label={`Hapus bahan baku ${m.name}`}
                           >
                             <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
@@ -1156,57 +1167,6 @@ export function MaterialsPage() {
         </div>
       )}
 
-      {/* Dialog konfirmasi hapus bahan baku (hanya Admin) */}
-      {isAdmin && deleteTarget && (
-        <div className="modal-root">
-          <div className="modal-overlay" onClick={closeDeleteDialog} />
-          <div
-            className="modal-panel confirm-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="confirm-delete-title"
-          >
-            <div className="modal-head-row">
-              <div>
-                <h3 className="modal-title" id="confirm-delete-title">Hapus Bahan Baku</h3>
-                <p className="modal-subtitle">Tindakan ini tidak dapat dibatalkan.</p>
-              </div>
-              <button className="icon-btn" onClick={closeDeleteDialog} aria-label="Tutup" disabled={!!deletingId}>
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <div className="confirm-body">
-              <p>
-                Bahan baku <strong>{deleteTarget.name}</strong> ({deleteTarget.unit}) akan dihapus
-                secara permanen dari daftar bahan baku.
-              </p>
-              <p className="text-muted">
-                Bahan yang sudah memiliki riwayat penerimaan, saldo awal, pemakaian produksi, atau
-                penyesuaian stok tidak dapat dihapus — gunakan fitur Nonaktifkan sebagai gantinya.
-              </p>
-            </div>
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="button secondary"
-                onClick={closeDeleteDialog}
-                disabled={!!deletingId}
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                className="button danger"
-                onClick={confirmDelete}
-                disabled={!!deletingId}
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
-                {deletingId ? 'Menghapus...' : 'Hapus'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

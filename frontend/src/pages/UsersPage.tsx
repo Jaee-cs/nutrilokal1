@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
+import { useNotify } from '../components/NotificationProvider'
 
 interface User {
   id: string
@@ -14,20 +15,23 @@ interface User {
 }
 
 export function UsersPage() {
+  const notify = useNotify()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Kegagalan memuat daftar tetap ditampilkan di halaman karena pengguna
+  // perlu melihat keadaan halaman yang gagal dimuat (bukan hasil tindakan).
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [form, setForm] = useState({ username: '', password: '', name: '' })
   const [creating, setCreating] = useState(false)
-  const [success, setSuccess] = useState<string | null>(null)
 
   async function fetchUsers(): Promise<boolean> {
     try {
       const res = await api.get('/users')
       setUsers(res.data.data || res.data)
+      setLoadError(null)
       return true
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat pengguna')
+      setLoadError(err.response?.data?.message || 'Gagal memuat pengguna')
       return false
     } finally {
       setLoading(false)
@@ -41,8 +45,6 @@ export function UsersPage() {
   async function createOperator(e: React.FormEvent) {
     e.preventDefault()
     setCreating(true)
-    setError(null)
-    setSuccess(null)
     try {
       // Backend SELALU membuat akun baru dengan role OPERATOR (README: Admin hanya
       // dibuat lewat bootstrap). Field `role` tidak dikirim karena backend menolak
@@ -56,9 +58,9 @@ export function UsersPage() {
       // sukses — pesan tidak hilang akibat pemuatan ulang.
       setForm({ username: '', password: '', name: '' })
       const refreshed = await fetchUsers()
-      if (refreshed) setSuccess('Operator berhasil dibuat')
+      if (refreshed) notify.success('Operator berhasil dibuat')
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal membuat pengguna')
+      notify.error(err.response?.data?.message || 'Gagal membuat pengguna')
     } finally {
       setCreating(false)
     }
@@ -69,7 +71,7 @@ export function UsersPage() {
       await api.patch(`/users/${id}`, { isActive: !current })
       await fetchUsers()
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mengubah status')
+      notify.error(err.response?.data?.message || 'Gagal mengubah status')
     }
   }
 
@@ -77,9 +79,9 @@ export function UsersPage() {
     try {
       await api.post(`/users/${id}/password-reset`)
       await fetchUsers()
-      setSuccess('Reset kata sandi berhasil. Pengguna wajib ganti kata sandi saat login berikutnya.')
+      notify.success('Reset kata sandi berhasil. Pengguna wajib ganti kata sandi saat login berikutnya.')
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal mereset kata sandi')
+      notify.error(err.response?.data?.message || 'Gagal mereset kata sandi')
     }
   }
 
@@ -95,8 +97,7 @@ export function UsersPage() {
         </p>
       </div>
 
-      {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert success">{success}</div>}
+      {loadError && <div className="alert error">{loadError}</div>}
 
       <div className="summary-row">
         <div className="summary-item">
