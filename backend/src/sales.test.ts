@@ -249,6 +249,7 @@ afterAll(async () => {
 
   // Hapus berdasarkan relasi (tanpa ON DELETE CASCADE di skema).
   await prisma.batchStockMovement.deleteMany({ where: { batchId: { in: batchIds } } });
+  await prisma.batchExpiryChange.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.stockAdjustment.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.saleAllocation.deleteMany({ where: { item: { transactionId: { in: saleIds } } } });
   await prisma.saleItem.deleteMany({ where: { transactionId: { in: saleIds } } });

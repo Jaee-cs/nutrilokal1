@@ -36,7 +36,12 @@ import {
   toPublicBatch,
   toPublicBatchDetail,
 } from '../lib/stock-view';
-import { isBusinessDateInFuture, parseBusinessDate, todayBusinessDateCode } from '../lib/date';
+import {
+  isBusinessDateAfter,
+  isBusinessDateInFuture,
+  parseBusinessDate,
+  todayBusinessDateCode,
+} from '../lib/date';
 import { pathId } from '../lib/http';
 import { readIdempotencyKey, runIdempotent } from '../lib/idempotency';
 import { prisma } from '../lib/prisma';
@@ -113,41 +118,78 @@ batchesRouter.patch('/:id/expiry', authenticate, requireAdmin, async (req, res) 
     return;
   }
 
-  const batch = await prisma.batch.findUnique({ where: { id: batchId } });
-  if (!batch) {
-    res.status(404).json({ message: 'Batch tidak ditemukan.' });
-    return;
-  }
-
   const value = body.expiryDate;
   if (value !== null && typeof value !== 'string') {
     res.status(400).json({ message: 'expiryDate harus berupa tanggal (YYYY-MM-DD) atau null.' });
     return;
   }
 
-  if (value === null) {
-    const cleared = await prisma.batch.update({
+  if (value !== null) {
+    const dateError = validateDateOnly(value);
+    if (dateError) {
+      res.status(400).json({ message: dateError });
+      return;
+    }
+  }
+
+  const storedDate = value === null ? null : parseBusinessDate(value);
+  const changedById = req.user!.id;
+
+  const result = await prisma.$transaction(async (tx) => {
+    const current = await tx.batch.findUnique({ where: { id: batchId } });
+    if (!current) {
+      return { kind: 'not_found' as const };
+    }
+
+    if (
+      storedDate &&
+      current.productionDate &&
+      !isBusinessDateAfter(storedDate, current.productionDate)
+    ) {
+      return { kind: 'invalid_date' as const };
+    }
+
+    const previousTime = current.expiryDate?.getTime() ?? null;
+    const nextTime = storedDate?.getTime() ?? null;
+    const changedAt = new Date();
+
+    const updated = await tx.batch.update({
       where: { id: batchId },
-      data: { expiryDate: null, expiryValidatedAt: null },
+      // Tanggal yang dicatat Admin sekaligus menjadi tervalidasi.
+      data: {
+        expiryDate: storedDate,
+        expiryValidatedAt: storedDate ? changedAt : null,
+      },
       include: BATCH_INCLUDE,
     });
-    res.json({ batch: toPublicBatch(cleared) });
-    return;
-  }
 
-  const dateError = validateDateOnly(value);
-  if (dateError) {
-    res.status(400).json({ message: dateError });
-    return;
-  }
+    // Abaikan penyimpanan ulang tanggal yang sama; catatan audit hanya
+    // bertambah ketika tanggal benar-benar berubah (termasuk pengosongan).
+    if (previousTime !== nextTime) {
+      await tx.batchExpiryChange.create({
+        data: {
+          batchId,
+          changedById,
+          changedAt,
+          previousExpiryDate: current.expiryDate,
+          newExpiryDate: storedDate,
+        },
+      });
+    }
 
-  const updated = await prisma.batch.update({
-    where: { id: batchId },
-    // Tanggal yang dicatat Admin sekaligus menjadi tervalidasi.
-    data: { expiryDate: parseBusinessDate(value), expiryValidatedAt: new Date() },
-    include: BATCH_INCLUDE,
+    return { kind: 'ok' as const, batch: updated };
   });
-  res.json({ batch: toPublicBatch(updated) });
+
+  if (result.kind === 'not_found') {
+    res.status(404).json({ message: 'Batch tidak ditemukan.' });
+    return;
+  }
+  if (result.kind === 'invalid_date') {
+    res.status(400).json({ message: 'Tanggal kedaluwarsa harus setelah tanggal produksi.' });
+    return;
+  }
+
+  res.json({ batch: toPublicBatch(result.batch) });
 });
 
 // ---------------------------------------------------------------------------

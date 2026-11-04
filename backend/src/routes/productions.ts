@@ -21,7 +21,12 @@
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { allocateBatchCode, isBatchCodeConflict, MAX_BATCH_CODE_ATTEMPTS } from '../lib/batch';
-import { businessDateCode, isBusinessDateInFuture, parseBusinessDate } from '../lib/date';
+import {
+  businessDateCode,
+  isBusinessDateAfter,
+  isBusinessDateInFuture,
+  parseBusinessDate,
+} from '../lib/date';
 import { pathId } from '../lib/http';
 import { readIdempotencyKey, runIdempotent } from '../lib/idempotency';
 import { PRODUCTION_INCLUDE, toPublicProduction, type ProductionWithRelations } from '../lib/production';
@@ -58,13 +63,17 @@ function isProductionIdMissing(error: unknown): boolean {
   return error instanceof Error && error.message === 'CATATAN_PRODUKSI_TIDAK_DITEMUKAN';
 }
 
+function isExpiryBeforeNewProductionDate(error: unknown): boolean {
+  return error instanceof Error && error.message === 'TANGGAL_KEDALUWARSA_TIDAK_SETELAH_PRODUKSI';
+}
+
 // ---------------------------------------------------------------------------
 // Mencatat produksi (Admin & Operator)
 // ---------------------------------------------------------------------------
 
 productionsRouter.post('/', authenticate, async (req, res) => {
   const body = req.body ?? {};
-  const { productId, productionDate, yieldQuantity, note, materials } = body;
+  const { productId, productionDate, expiryDate, yieldQuantity, note, materials } = body;
 
   if (typeof productId !== 'string' || productId.trim() === '') {
     res.status(400).json({ message: 'productId wajib diisi.' });
@@ -74,6 +83,16 @@ productionsRouter.post('/', authenticate, async (req, res) => {
   const dateError = validateDateOnly(productionDate);
   if (dateError) {
     res.status(400).json({ message: dateError });
+    return;
+  }
+
+  if (typeof expiryDate !== 'string' || expiryDate.trim() === '') {
+    res.status(400).json({ message: 'Tanggal kedaluwarsa wajib diisi.' });
+    return;
+  }
+  const expiryFormatError = validateDateOnly(expiryDate);
+  if (expiryFormatError) {
+    res.status(400).json({ message: expiryFormatError });
     return;
   }
 
@@ -116,6 +135,12 @@ productionsRouter.post('/', authenticate, async (req, res) => {
   const businessDate = parseBusinessDate(productionDate);
   if (isBusinessDateInFuture(businessDate)) {
     res.status(400).json({ message: 'Tanggal produksi tidak boleh berada di masa depan.' });
+    return;
+  }
+
+  const expiryBusinessDate = parseBusinessDate(expiryDate);
+  if (!isBusinessDateAfter(expiryBusinessDate, businessDate)) {
+    res.status(400).json({ message: 'Tanggal kedaluwarsa harus setelah tanggal produksi.' });
     return;
   }
 
@@ -176,8 +201,31 @@ productionsRouter.post('/', authenticate, async (req, res) => {
           }
 
           const code = await allocateBatchCode(tx, businessDate);
+          const expiryRecordedAt = new Date();
           const batch = await tx.batch.create({
-            data: { code, productId: product.id, productionDate: businessDate, stockQuantity: 0 },
+            data: {
+              code,
+              productId: product.id,
+              productionDate: businessDate,
+              stockQuantity: 0,
+              // Tanggal kedaluwarsa kini menjadi bagian wajib pencatatan
+              // produksi. Nilainya langsung dianggap tervalidasi karena
+              // dicatat bersama fakta produksi yang disimpan.
+              expiryDate: expiryBusinessDate,
+              expiryValidatedAt: expiryRecordedAt,
+            },
+          });
+
+          // Audit awal: tanggal lama belum ada, tanggal baru berasal dari
+          // pencatatan produksi. Perubahan berikutnya menambah baris baru.
+          await tx.batchExpiryChange.create({
+            data: {
+              batchId: batch.id,
+              changedById: recordedById,
+              changedAt: expiryRecordedAt,
+              previousExpiryDate: null,
+              newExpiryDate: expiryBusinessDate,
+            },
           });
 
           const production = await tx.production.create({
@@ -348,6 +396,17 @@ productionsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => 
             throw new Error('CATATAN_PRODUKSI_TIDAK_DITEMUKAN');
           }
 
+          // Tanggal produksi tidak boleh digeser hingga menyamai/melewati
+          // tanggal kedaluwarsa batch. Ini menjaga invariant yang sama
+          // dengan pencatatan produksi dan edit tanggal kedaluwarsa.
+          if (
+            hasDateChange &&
+            current.batch?.expiryDate &&
+            !isBusinessDateAfter(current.batch.expiryDate, newBusinessDate!)
+          ) {
+            throw new Error('TANGGAL_KEDALUWARSA_TIDAK_SETELAH_PRODUKSI');
+          }
+
           const corrections: Prisma.ProductionCorrectionCreateManyInput[] = [];
 
           // --- Koreksi jumlah hasil: dampak stok batch dihitung backend ---
@@ -443,6 +502,12 @@ productionsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => 
       }
       if (isProductionIdMissing(error)) {
         res.status(404).json({ message: 'Catatan produksi tidak ditemukan.' });
+        return;
+      }
+      if (isExpiryBeforeNewProductionDate(error)) {
+        res.status(400).json({
+          message: 'Tanggal produksi baru harus sebelum tanggal kedaluwarsa batch.',
+        });
         return;
       }
       if (!isBatchCodeConflict(error)) {

@@ -20,8 +20,14 @@ import { Prisma } from '@prisma/client';
 import express, { Router } from 'express';
 import { pathId } from '../lib/http';
 import { hasOperationalHistory } from '../lib/master-history';
+import { parseReportPeriod } from '../lib/report';
 import { prisma } from '../lib/prisma';
 import { toPublicProduct } from '../lib/product';
+import {
+  PRODUCT_STOCK_MOVEMENT_INCLUDE,
+  buildProductStockHistory,
+  parseProductStockMovementType,
+} from '../lib/product-stock-history';
 import {
   ALLOWED_PHOTO_MIME_LIST,
   MAX_PHOTO_BYTES,
@@ -191,6 +197,114 @@ productsRouter.get('/', authenticate, async (_req, res) => {
       toPublicProduct(product, totalsByProduct.get(product.id) ?? { stock: 0, batchCount: 0 })
     ),
   });
+});
+
+// ---------------------------------------------------------------------------
+// Riwayat pergerakan stok produk jadi (Admin & Operator) — hanya baca
+//
+// Sumber: ledger BatchStockMovement. Filter produk/waktu/jenis/batch
+// dijalankan di backend. Saldo berjalan selalu dihitung dari seluruh ledger
+// produk agar tetap benar meski filter memilih sebagian baris.
+// ---------------------------------------------------------------------------
+
+async function sendProductStockHistory(
+  req: express.Request,
+  res: express.Response,
+  productId: string
+): Promise<void> {
+  if (!productId) {
+    res.status(400).json({ message: 'productId wajib diisi untuk melihat riwayat stok produk.' });
+    return;
+  }
+
+  const period = parseReportPeriod(req.query as Record<string, unknown>);
+  if (!period.ok) {
+    res.status(400).json({ message: period.message });
+    return;
+  }
+
+  const parsedType = parseProductStockMovementType(req.query.type);
+  if (!parsedType.ok) {
+    res.status(400).json({
+      message:
+        'Jenis aktivitas tidak valid. Gunakan PRODUCTION_YIELD, YIELD_CORRECTION, ' +
+        'OPENING_BALANCE, ADJUSTMENT, SALE, atau SALE_CANCELLATION.',
+    });
+    return;
+  }
+
+  const batchIdQuery = req.query.batchId;
+  if (
+    batchIdQuery !== undefined &&
+    batchIdQuery !== null &&
+    typeof batchIdQuery !== 'string'
+  ) {
+    res.status(400).json({ message: 'batchId harus berupa satu kode ID batch.' });
+    return;
+  }
+  const batchId =
+    typeof batchIdQuery === 'string' && batchIdQuery.trim() !== ''
+      ? batchIdQuery.trim()
+      : null;
+
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) {
+    res.status(404).json({ message: 'Produk tidak ditemukan.' });
+    return;
+  }
+
+  const batches = await prisma.batch.findMany({
+    where: { productId: product.id },
+    select: {
+      id: true,
+      code: true,
+      stockQuantity: true,
+      productionDate: true,
+      createdAt: true,
+    },
+    orderBy: [{ code: 'asc' }],
+  });
+
+  if (batchId && !batches.some((batch) => batch.id === batchId)) {
+    res.status(404).json({ message: 'Batch tidak ditemukan untuk produk ini.' });
+    return;
+  }
+
+  // Seluruh ledger produk diperlukan untuk saldo berjalan, walaupun respons
+  // akhirnya hanya memuat baris yang lolos filter.
+  const movements = await prisma.batchStockMovement.findMany({
+    where: { batch: { productId: product.id } },
+    orderBy: [{ occurredAt: 'asc' }, { recordedAt: 'asc' }, { id: 'asc' }],
+    include: PRODUCT_STOCK_MOVEMENT_INCLUDE,
+  });
+
+  const history = buildProductStockHistory({
+    product: { id: product.id, name: product.name, unit: product.unit },
+    batches,
+    movements,
+    filters: {
+      from: period.period.from,
+      to: period.period.to,
+      range: period.period.range,
+      type: parsedType.type,
+      batchId,
+    },
+  });
+
+  res.json(history);
+}
+
+// Bentuk URL dengan produk sebagai query (produk tetap salah satu filter).
+productsRouter.get('/stock-movements', authenticate, async (req, res) => {
+  const query = req.query.productId;
+  const productId =
+    typeof query === 'string' && query.trim() !== '' ? query.trim() : '';
+  await sendProductStockHistory(req, res, productId);
+});
+
+// Bentuk URL per produk: GET /api/products/:id/stock-movements.
+productsRouter.get('/:id/stock-movements', authenticate, async (req, res) => {
+  await sendProductStockHistory(req, res, pathId(req));
 });
 
 productsRouter.get('/:id', authenticate, async (req, res) => {

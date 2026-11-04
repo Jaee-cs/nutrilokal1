@@ -124,7 +124,13 @@ beforeAll(async () => {
   const production = await request(app)
     .post('/api/productions')
     .set(auth(operatorToken))
-    .send({ productId, productionDate: dayCode(-2), yieldQuantity: 6, materials: [{ materialId, quantity: 3 }] });
+    .send({
+      productId,
+      productionDate: dayCode(-2),
+      expiryDate: dayCode(30),
+      yieldQuantity: 6,
+      materials: [{ materialId, quantity: 3 }],
+    });
   expect(production.status).toBe(201);
 
   const adjustment = await request(app)
@@ -159,6 +165,7 @@ afterAll(async () => {
   // Urutan penghapusan mengikuti arah relasi (tanpa ON DELETE CASCADE).
   await prisma.materialStockMovement.deleteMany({ where: { materialId: { in: materialIds } } });
   await prisma.batchStockMovement.deleteMany({ where: { batchId: { in: batchIds } } });
+  await prisma.batchExpiryChange.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.stockAdjustment.deleteMany({
     where: { OR: [{ materialId: { in: materialIds } }, { batchId: { in: batchIds } }] },
   });

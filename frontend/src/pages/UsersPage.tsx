@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../lib/api'
 import { useNotify } from '../components/NotificationProvider'
 
@@ -14,6 +14,58 @@ interface User {
   lastLoginAt?: string | null
 }
 
+/**
+ * Isi dialog kata sandi sementara. Kata sandi hanya hidup di elemen ini
+ * selama dialog terbuka dan tidak disimpan di state halaman.
+ */
+function TemporaryPasswordDetails({ username, password }: { username: string; password: string }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [copied, setCopied] = useState(false)
+
+  async function copyPassword() {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(password)
+      } else {
+        inputRef.current?.focus()
+        inputRef.current?.select()
+        document.execCommand('copy')
+      }
+      setCopied(true)
+    } catch {
+      // Clipboard bisa diblokir browser; pilih teks agar dapat disalin manual.
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }
+
+  return (
+    <div className="temp-password">
+      <p className="temp-password-label">
+        Kata sandi sementara untuk <strong>{username}</strong>
+      </p>
+      <input
+        ref={inputRef}
+        className="temp-password-value"
+        value={password}
+        readOnly
+        aria-label="Kata sandi sementara"
+        onFocus={(event) => event.currentTarget.select()}
+      />
+      <button type="button" className="button secondary temp-password-copy" onClick={copyPassword}>
+        <span className="material-symbols-outlined" aria-hidden="true">
+          {copied ? 'check' : 'content_copy'}
+        </span>
+        {copied ? 'Tersalin' : 'Salin kata sandi'}
+      </button>
+      <p className="temp-password-warning">
+        Kata sandi ini hanya ditampilkan sekali. Setelah dialog ditutup, kata sandi tidak
+        dapat dilihat lagi — lakukan reset ulang jika perlu.
+      </p>
+    </div>
+  )
+}
+
 export function UsersPage() {
   const notify = useNotify()
   const [users, setUsers] = useState<User[]>([])
@@ -23,6 +75,7 @@ export function UsersPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [form, setForm] = useState({ username: '', password: '', name: '' })
   const [creating, setCreating] = useState(false)
+  const [resettingId, setResettingId] = useState<string | null>(null)
 
   async function fetchUsers(): Promise<boolean> {
     try {
@@ -75,13 +128,44 @@ export function UsersPage() {
     }
   }
 
-  async function resetPassword(id: string) {
+  async function resetPassword(user: User) {
+    const confirmed = await notify.confirm({
+      title: 'Reset Kata Sandi',
+      message:
+        `Reset kata sandi untuk "${user.username}"? Kata sandi lama dan semua sesi login ` +
+        'akun ini akan langsung tidak berlaku.',
+      confirmLabel: 'Ya, Reset',
+      tone: 'warning',
+    })
+    if (!confirmed) return
+
+    setResettingId(user.id)
     try {
-      await api.post(`/users/${id}/password-reset`)
-      await fetchUsers()
-      notify.success('Reset kata sandi berhasil. Pengguna wajib ganti kata sandi saat login berikutnya.')
+      const res = await api.post(`/users/${user.id}/password-reset`)
+      const temporaryPassword: string | undefined = res.data?.temporaryPassword
+      // Segarkan daftar tanpa menunda dialog: kata sandi sementara hanya
+      // ditampilkan sekali, jadi jangan bergantung pada keberhasilan refresh.
+      void fetchUsers()
+      if (temporaryPassword) {
+        notify.info(
+          `Berikan kata sandi sementara ini kepada ${user.username}. Pengguna wajib ` +
+            'menggantinya sebelum dapat menggunakan sistem kembali.',
+          'Kata Sandi Sementara',
+          {
+            tone: 'warning',
+            confirmLabel: 'Saya sudah menyalin',
+            details: (
+              <TemporaryPasswordDetails username={user.username} password={temporaryPassword} />
+            ),
+          },
+        )
+      } else {
+        notify.success('Reset kata sandi berhasil.')
+      }
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal mereset kata sandi')
+    } finally {
+      setResettingId(null)
     }
   }
 
@@ -215,10 +299,10 @@ export function UsersPage() {
                           </button>
                           <button
                             className="button secondary"
-                            onClick={() => resetPassword(u.id)}
-                            disabled={u.role === 'ADMIN'}
+                            onClick={() => resetPassword(u)}
+                            disabled={u.role === 'ADMIN' || resettingId === u.id}
                           >
-                            Reset Password
+                            {resettingId === u.id ? 'Mereset...' : 'Reset Password'}
                           </button>
                         </div>
                       </td>
@@ -277,10 +361,10 @@ export function UsersPage() {
                   </button>
                   <button
                     className="button secondary"
-                    onClick={() => resetPassword(u.id)}
-                    disabled={u.role === 'ADMIN'}
+                    onClick={() => resetPassword(u)}
+                    disabled={u.role === 'ADMIN' || resettingId === u.id}
                   >
-                    Reset Password
+                    {resettingId === u.id ? 'Mereset...' : 'Reset Password'}
                   </button>
                 </div>
               </article>

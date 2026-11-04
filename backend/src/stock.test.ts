@@ -91,8 +91,16 @@ async function stockViaReceipt(materialId: string, quantity: number) {
   return res.body.stock as number;
 }
 
+/** Default fixture: kedaluwarsa 90 hari setelah hari ini. */
+function defaultExpiry(): string {
+  return new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
+}
+
 function postProduction(body: Record<string, unknown>, token = operatorToken) {
-  return request(app).post('/api/productions').set(auth(token)).send(body);
+  return request(app)
+    .post('/api/productions')
+    .set(auth(token))
+    .send({ expiryDate: defaultExpiry(), ...body });
 }
 
 /** Mencatat stok awal produk jadi (khusus Admin). */
@@ -246,6 +254,7 @@ afterAll(async () => {
 
   // Hapus berdasarkan relasi (tanpa ON DELETE CASCADE di skema).
   await prisma.batchStockMovement.deleteMany({ where: { batchId: { in: batchIds } } });
+  await prisma.batchExpiryChange.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.materialStockMovement.deleteMany({ where: { materialId: { in: materialIds } } });
   // Penyesuaian dirujuk oleh pergerakan — dihapus setelah pergerakan.
   await prisma.stockAdjustment.deleteMany({

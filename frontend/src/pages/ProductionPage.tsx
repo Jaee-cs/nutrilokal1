@@ -3,7 +3,7 @@ import api from '../lib/api'
 import { Drawer } from '../components/Drawer'
 import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
-import { wibDateCode, wibDateLabel, isBatchExpired } from '../utils/batch-expiry'
+import { wibDateCode, wibDateLabel, isBatchExpired, nextDateCode } from '../utils/batch-expiry'
 import { productPhotoUrl } from '../utils/product-photo'
 
 interface Product {
@@ -28,6 +28,8 @@ interface ProductionBatch {
   productionDate: string | null
   stock: number
   aliases: string[]
+  expiryDate: string | null
+  expiryValidated: boolean
 }
 
 interface Production {
@@ -76,6 +78,14 @@ interface BatchMovement {
   reason: string | null
 }
 
+interface BatchExpiryChange {
+  id: string
+  previousExpiryDate: string | null
+  newExpiryDate: string | null
+  changedAt: string
+  changedBy: { id: string; username: string; name?: string | null }
+}
+
 /** Detail batch dari GET /batches/:id (toPublicBatchDetail). */
 interface BatchDetail extends BatchSummary {
   openingBalance: {
@@ -86,6 +96,7 @@ interface BatchDetail extends BatchSummary {
     createdAt: string
   } | null
   movements: BatchMovement[]
+  expiryHistory: BatchExpiryChange[]
 }
 
 const MOVEMENT_LABELS: Record<BatchMovementType, string> = {
@@ -145,7 +156,12 @@ export function ProductionPage() {
   // Gagal memuat data halaman tetap tampil inline; hasil tindakan memakai dialog.
   const [loadError, setLoadError] = useState<string | null>(null)
   type UsageRow = { materialId: string; materialQty: string }
-  const [form, setForm] = useState({ productId: '', productionDate: '', yieldQuantity: '' })
+  const [form, setForm] = useState({
+    productId: '',
+    productionDate: '',
+    expiryDate: '',
+    yieldQuantity: '',
+  })
   const [usageRows, setUsageRows] = useState<UsageRow[]>([{ materialId: '', materialQty: '' }])
   const [submitting, setSubmitting] = useState(false)
 
@@ -216,8 +232,12 @@ export function ProductionPage() {
 
   async function submitProduction(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.productId || !form.yieldQuantity) {
-      notify.error('Produk dan jumlah hasil produksi wajib diisi.')
+    if (!form.productId || !form.productionDate || !form.expiryDate || !form.yieldQuantity) {
+      notify.error('Produk, tanggal produksi, tanggal kedaluwarsa, dan jumlah hasil wajib diisi.')
+      return
+    }
+    if (form.expiryDate <= form.productionDate) {
+      notify.error('Tanggal kedaluwarsa harus setelah tanggal produksi.')
       return
     }
     setSubmitting(true)
@@ -228,12 +248,13 @@ export function ProductionPage() {
 
       const payload: any = {
         productId: form.productId,
-        productionDate: form.productionDate || undefined,
+        productionDate: form.productionDate,
+        expiryDate: form.expiryDate,
         yieldQuantity: Number(form.yieldQuantity),
         materials,
       }
       const res = await api.post('/productions', payload)
-      setForm({ productId: '', productionDate: '', yieldQuantity: '' })
+      setForm({ productId: '', productionDate: '', expiryDate: '', yieldQuantity: '' })
       setUsageRows([{ materialId: '', materialQty: '' }])
       await fetchData()
       notify.success(`Produksi berhasil. Kode batch: ${res.data.production.batch?.code || '-'}`)
@@ -266,6 +287,20 @@ export function ProductionPage() {
       notify.error('Tanggal kedaluwarsa wajib diisi.')
       return
     }
+
+    const productionDate = detail.productionDate ? wibDateCode(detail.productionDate) : null
+    if (productionDate && date <= productionDate) {
+      notify.error('Tanggal kedaluwarsa harus setelah tanggal produksi.')
+      return
+    }
+
+    const previousLabel = detail.expiryDate ? wibDateLabel(detail.expiryDate) : 'belum dicatat'
+    const confirmed = await notify.confirm({
+      title: 'Simpan Tanggal Kedaluwarsa',
+      message: `Tanggal kedaluwarsa batch ${detail.code} akan diubah dari ${previousLabel} menjadi ${wibDateLabel(date)}. Simpan perubahan?`,
+      confirmLabel: 'Ya, Simpan',
+    })
+    if (!confirmed) return
 
     setSavingExpiry(true)
     try {
@@ -307,6 +342,9 @@ export function ProductionPage() {
   const activeProducts = products.filter(p => p.isActive)
   const activeMaterials = materials.filter(m => m.isActive)
   const batchById = new Map(batches.map(b => [b.id, b]))
+  const minProductionExpiry = form.productionDate ? nextDateCode(form.productionDate) : undefined
+  const minDetailExpiry =
+    detail?.productionDate ? nextDateCode(wibDateCode(detail.productionDate)) : undefined
 
   const detailExpiry = detail ? expiryInfo(detail) : null
   const detailUnit = detail?.product.unit || ''
@@ -351,26 +389,42 @@ export function ProductionPage() {
             </div>
             <div className="form-row">
               <div className="field">
-                <label htmlFor="pr-date">Tanggal Produksi (opsional)</label>
+                <label htmlFor="pr-date">Tanggal Produksi</label>
                 <input
                   id="pr-date"
                   type="date"
                   value={form.productionDate}
+                  max={wibDateCode(new Date())}
                   onChange={e => setForm(f => ({ ...f, productionDate: e.target.value }))}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="pr-yield">Jumlah Hasil</label>
-                <input
-                  id="pr-yield"
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  value={form.yieldQuantity}
-                  onChange={e => setForm(f => ({ ...f, yieldQuantity: e.target.value }))}
                   required
                 />
               </div>
+              <div className="field">
+                <label htmlFor="pr-expiry">Tanggal Kedaluwarsa</label>
+                <input
+                  id="pr-expiry"
+                  type="date"
+                  value={form.expiryDate}
+                  min={minProductionExpiry}
+                  onChange={e => setForm(f => ({ ...f, expiryDate: e.target.value }))}
+                  required
+                />
+                <span className="text-muted" style={{ fontSize: 12 }}>
+                  Harus setelah tanggal produksi.
+                </span>
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="pr-yield">Jumlah Hasil</label>
+              <input
+                id="pr-yield"
+                type="number"
+                step="0.001"
+                min="0"
+                value={form.yieldQuantity}
+                onChange={e => setForm(f => ({ ...f, yieldQuantity: e.target.value }))}
+                required
+              />
             </div>
             <div className="field">
               <label>Bahan yang Digunakan</label>
@@ -679,6 +733,46 @@ export function ProductionPage() {
               )}
             </div>
 
+            {/* Audit perubahan tanggal kedaluwarsa, terlihat untuk semua role. */}
+            {detail.expiryHistory.length > 0 && (
+              <div className="card section-card">
+                <h2 className="card-title">Riwayat Perubahan Kedaluwarsa</h2>
+                <div className="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Tanggal Lama</th>
+                        <th>Tanggal Baru</th>
+                        <th>Waktu Perubahan</th>
+                        <th>Diubah oleh</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.expiryHistory.map(change => (
+                        <tr key={change.id}>
+                          <td>
+                            {change.previousExpiryDate
+                              ? wibDateLabel(change.previousExpiryDate)
+                              : 'Belum dicatat'}
+                          </td>
+                          <td>
+                            {change.newExpiryDate
+                              ? wibDateLabel(change.newExpiryDate)
+                              : 'Dikosongkan'}
+                          </td>
+                          <td>{wibDateTime(change.changedAt)}</td>
+                          <td>
+                            {change.changedBy.name || change.changedBy.username}
+                            <div className="cell-secondary">{change.changedBy.username}</div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Mengatur tanggal kedaluwarsa: hanya Admin (ditegakkan backend) */}
             {isAdmin && (
               <div className="card section-card">
@@ -694,9 +788,13 @@ export function ProductionPage() {
                       id="batch-expiry"
                       type="date"
                       value={expiryDraft}
+                      min={minDetailExpiry}
                       onChange={e => setExpiryDraft(e.target.value)}
                       required
                     />
+                    <span className="text-muted" style={{ fontSize: 12 }}>
+                      Harus setelah tanggal produksi batch.
+                    </span>
                   </div>
                   <div className="form-actions">
                     <button className="button" disabled={savingExpiry}>

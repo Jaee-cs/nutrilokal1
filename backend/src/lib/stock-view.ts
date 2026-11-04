@@ -20,6 +20,12 @@ export const BATCH_DETAIL_INCLUDE = {
     orderBy: { recordedAt: 'desc' as const },
     include: { recordedBy: RECORDED_BY_SELECT },
   },
+  // Riwayat perubahan tanggal kedaluwarsa, terbaru lebih dulu. Baris lama
+  // tidak pernah ditimpa sehingga seluruh perubahan dapat diaudit.
+  expiryChanges: {
+    orderBy: { changedAt: 'desc' as const },
+    include: { changedBy: RECORDED_BY_SELECT },
+  },
 } as const;
 
 export type BatchWithSummary = Prisma.BatchGetPayload<{ include: typeof BATCH_INCLUDE }>;
@@ -83,6 +89,14 @@ export function toPublicBatchMovement(
   };
 }
 
+export interface PublicBatchExpiryChange {
+  id: string;
+  previousExpiryDate: Date | null;
+  newExpiryDate: Date | null;
+  changedAt: Date;
+  changedBy: { id: string; username: string; name: string | null };
+}
+
 export interface PublicBatchDetail extends PublicBatch {
   openingBalance: {
     id: string;
@@ -92,6 +106,7 @@ export interface PublicBatchDetail extends PublicBatch {
     createdAt: Date;
   } | null;
   movements: PublicBatchMovement[];
+  expiryHistory: PublicBatchExpiryChange[];
 }
 
 export function toPublicBatchDetail(batch: BatchWithDetail): PublicBatchDetail {
@@ -107,6 +122,13 @@ export function toPublicBatchDetail(batch: BatchWithDetail): PublicBatchDetail {
         }
       : null,
     movements: batch.stockMovements.map(toPublicBatchMovement),
+    expiryHistory: batch.expiryChanges.map((change) => ({
+      id: change.id,
+      previousExpiryDate: change.previousExpiryDate,
+      newExpiryDate: change.newExpiryDate,
+      changedAt: change.changedAt,
+      changedBy: change.changedBy,
+    })),
   };
 }
 

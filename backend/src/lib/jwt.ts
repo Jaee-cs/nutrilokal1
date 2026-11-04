@@ -10,6 +10,11 @@ export interface TokenPayload {
   /** User id. */
   sub: string;
   role: 'ADMIN' | 'OPERATOR';
+  /**
+   * Sidik jari hash kata sandi saat token diterbitkan. Dipakai untuk
+   * membatalkan token lama setelah kata sandi direset/diganti.
+   */
+  pwd: string;
 }
 
 /** Masa berlaku token login (satu hari kerja). */
@@ -25,10 +30,11 @@ export function verifyToken(token: string): TokenPayload {
   if (
     typeof decoded === 'string' ||
     typeof decoded.sub !== 'string' ||
-    (decoded.role !== 'ADMIN' && decoded.role !== 'OPERATOR')
+    (decoded.role !== 'ADMIN' && decoded.role !== 'OPERATOR') ||
+    typeof decoded.pwd !== 'string'
   ) {
     throw new Error('Isi token tidak valid.');
   }
 
-  return { sub: decoded.sub, role: decoded.role };
+  return { sub: decoded.sub, role: decoded.role, pwd: decoded.pwd };
 }

@@ -167,9 +167,9 @@ export function QrManagementPage() {
 
   const statusInfo = detail ? STATUS_LABEL[detail.status] : null
   // Foto produk untuk batch yang sedang dibuka (dari daftar batch).
-  const detailPhotoUrl = detail
-    ? batches.find((b) => b.id === detail.batchId)?.product.photoUrl ?? null
-    : null
+  const detailBatch = detail ? batches.find((b) => b.id === detail.batchId) : null
+  const detailPhotoUrl = detailBatch?.product.photoUrl ?? null
+  const detailExpiryLabel = detailBatch ? validatedExpiryLabel(detailBatch) : null
 
   return (
     <div className="container">
@@ -195,21 +195,23 @@ export function QrManagementPage() {
                   <th>Kode Batch</th>
                   <th>Produk</th>
                   <th>Tgl Produksi</th>
+                  <th>Kedaluwarsa</th>
                   <th>Stok</th>
                   <th>Aksi</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={5}>Memuat...</td></tr>
+                  <tr><td colSpan={6}>Memuat...</td></tr>
                 ) : batches.length === 0 ? (
-                  <tr><td colSpan={5} className="text-muted">Belum ada batch</td></tr>
+                  <tr><td colSpan={6} className="text-muted">Belum ada batch</td></tr>
                 ) : (
                   batches.slice(0, 30).map(b => (
                     <tr key={b.id} className={detail?.batchId === b.id ? 'row-active' : ''}>
                       <td><span className="badge neutral">{b.code}</span></td>
                       <td className="cell-primary">{b.product.name}</td>
                       <td>{b.productionDate ?? '-'}</td>
+                      <td>{validatedExpiryLabel(b) ?? '—'}</td>
                       <td className="num">{b.stock.toLocaleString('id-ID')}</td>
                       <td>
                         <div className="row-actions">
@@ -252,6 +254,10 @@ export function QrManagementPage() {
                   <div className="qr-batch-row">
                     <span className="qr-batch-key">Tanggal Produksi</span>
                     <span className="qr-batch-val">{b.productionDate ?? '-'}</span>
+                  </div>
+                  <div className="qr-batch-row">
+                    <span className="qr-batch-key">Kedaluwarsa</span>
+                    <span className="qr-batch-val">{validatedExpiryLabel(b) ?? '—'}</span>
                   </div>
                   <div className="qr-batch-row">
                     <span className="qr-batch-key">Stok</span>
@@ -357,6 +363,10 @@ export function QrManagementPage() {
                 <div className="qr-meta-item">
                   <span className="card-label">Status</span>
                   <span className="qr-meta-value">{statusInfo.label}</span>
+                </div>
+                <div className="qr-meta-item">
+                  <span className="card-label">Kedaluwarsa</span>
+                  <span className="qr-meta-value">{detailExpiryLabel ?? '—'}</span>
                 </div>
                 <div className="qr-meta-item">
                   <span className="card-label">Divalidasi</span>

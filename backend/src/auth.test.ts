@@ -297,60 +297,167 @@ describe('DELETE /api/users/:id', () => {
 });
 
 describe('Alur reset kata sandi oleh Admin', () => {
-  it('reset: kata sandi lama mati, token wajib ganti kata sandi, dan akses pulih setelah set-password', async () => {
-    const { user, password } = await createTempOperator('reset');
+  it('reset membuat kata sandi sementara dan tidak mengubah identitas akun', async () => {
+    const { user, password } = await createTempOperator('reset-identitas');
 
-    // 1. Admin memulai reset dan mendapatkan kata sandi sementara (sekali tampil).
+    // Sesi lama dibuat sebelum reset — harus langsung tidak berlaku.
+    const oldLogin = await login(user.username, password);
+    expect(oldLogin.status).toBe(200);
+    const oldToken = oldLogin.body.token as string;
+
     const reset = await request(app)
       .post(`/api/users/${user.id}/password-reset`)
       .set('Authorization', `Bearer ${adminToken}`);
     expect(reset.status).toBe(200);
     expect(typeof reset.body.temporaryPassword).toBe('string');
     expect(reset.body.temporaryPassword.startsWith('NL-')).toBe(true);
+    expect(JSON.stringify(reset.body)).not.toContain('passwordHash');
     const tempPassword = reset.body.temporaryPassword as string;
 
-    // 2. Kata sandi lama sudah tidak berlaku.
-    const oldLogin = await login(user.username, password);
-    expect(oldLogin.status).toBe(401);
+    // Hanya hash + wajib ganti yang berubah; username, role, status tetap.
+    const afterReset = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(afterReset.username).toBe(user.username);
+    expect(afterReset.role).toBe('OPERATOR');
+    expect(afterReset.isActive).toBe(true);
+    expect(afterReset.mustChangePassword).toBe(true);
+    expect(afterReset.passwordHash).not.toBe(tempPassword);
+    expect(await verifyPassword(tempPassword, afterReset.passwordHash)).toBe(true);
 
-    // 3. Login dengan kata sandi sementara berhasil, wajib ganti kata sandi.
+    // Sesi login lama tidak dapat dipakai lagi.
+    const oldSession = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${oldToken}`);
+    expect(oldSession.status).toBe(401);
+
+    // Kata sandi lama juga mati.
+    const oldPasswordLogin = await login(user.username, password);
+    expect(oldPasswordLogin.status).toBe(401);
+  });
+
+  it('wajib ganti kata sandi: /me tetap terbuka, endpoint operasional ditolak, lalu akses pulih', async () => {
+    const { user, password } = await createTempOperator('reset-alur');
+
+    const reset = await request(app)
+      .post(`/api/users/${user.id}/password-reset`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(reset.status).toBe(200);
+    const tempPassword = reset.body.temporaryPassword as string;
+
+    // Kata sandi sementara dapat dipakai login.
     const tempLogin = await login(user.username, tempPassword);
     expect(tempLogin.status).toBe(200);
     expect(tempLogin.body.user.mustChangePassword).toBe(true);
     const tempToken = tempLogin.body.token as string;
 
-    // 4. Semua endpoint lain ditolak sampai kata sandi baru ditetapkan.
-    const blocked = await request(app).get('/api/users').set('Authorization', `Bearer ${tempToken}`);
-    expect(blocked.status).toBe(403);
-    expect(blocked.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+    // Identitas sendiri tetap dapat dibaca (dibutuhkan setelah refresh),
+    // tetapi Dashboard/API operasional diblokir backend.
+    const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${tempToken}`);
+    expect(me.status).toBe(200);
+    expect(me.body.user.mustChangePassword).toBe(true);
 
-    // 5. Set-password menolak kata sandi lemah lalu menerima yang valid.
+    const blockedDashboard = await request(app)
+      .get('/api/dashboard')
+      .set('Authorization', `Bearer ${tempToken}`);
+    expect(blockedDashboard.status).toBe(403);
+    expect(blockedDashboard.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+
+    const blockedUsers = await request(app).get('/api/users').set('Authorization', `Bearer ${tempToken}`);
+    expect(blockedUsers.status).toBe(403);
+
+    // Kata sandi saat ini wajib diisi dan harus benar.
+    const withoutCurrent = await request(app)
+      .post('/api/auth/set-password')
+      .set('Authorization', `Bearer ${tempToken}`)
+      .send({ newPassword: 'kata-sandi-baru-123' });
+    expect(withoutCurrent.status).toBe(400);
+
+    const wrongCurrent = await request(app)
+      .post('/api/auth/set-password')
+      .set('Authorization', `Bearer ${tempToken}`)
+      .send({ currentPassword: 'salah-total', newPassword: 'kata-sandi-baru-123' });
+    expect(wrongCurrent.status).toBe(400);
+    expect(wrongCurrent.body.message).toMatch(/saat ini salah/i);
+
     const weak = await request(app)
       .post('/api/auth/set-password')
       .set('Authorization', `Bearer ${tempToken}`)
-      .send({ newPassword: 'pendek' });
+      .send({ currentPassword: tempPassword, newPassword: 'pendek' });
     expect(weak.status).toBe(400);
+
+    const sameAsCurrent = await request(app)
+      .post('/api/auth/set-password')
+      .set('Authorization', `Bearer ${tempToken}`)
+      .send({ currentPassword: tempPassword, newPassword: tempPassword });
+    expect(sameAsCurrent.status).toBe(400);
 
     const setNew = await request(app)
       .post('/api/auth/set-password')
       .set('Authorization', `Bearer ${tempToken}`)
-      .send({ newPassword: 'kata-sandi-baru-123' });
+      .send({ currentPassword: tempPassword, newPassword: 'kata-sandi-baru-123' });
     expect(setNew.status).toBe(200);
+    expect(typeof setNew.body.token).toBe('string');
+    expect(setNew.body.user.mustChangePassword).toBe(false);
 
-    // 6. Akses pulih; kata sandi sementara sudah mati.
-    const recovered = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${tempToken}`);
-    expect(recovered.status).toBe(200);
+    // Token sesi lama (sebelum password diganti) dan token sementara mati;
+    // token baru dari respons set-password langsung berlaku.
+    const oldTempSession = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${tempToken}`);
+    expect(oldTempSession.status).toBe(401);
 
+    const newSession = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${setNew.body.token}`);
+    expect(newSession.status).toBe(200);
+    expect(newSession.body.user.mustChangePassword).toBe(false);
+
+    // Kata sandi sementara tidak lagi berlaku; kata sandi baru berlaku.
     const tempLoginAgain = await login(user.username, tempPassword);
     expect(tempLoginAgain.status).toBe(401);
 
     const newLogin = await login(user.username, 'kata-sandi-baru-123');
     expect(newLogin.status).toBe(200);
     expect(newLogin.body.user.mustChangePassword).toBe(false);
+
+    // Admin tetap dapat mengelola akun setelah reset.
+    const adminUsers = await request(app).get('/api/users').set('Authorization', `Bearer ${adminToken}`);
+    expect(adminUsers.status).toBe(200);
+    expect(adminUsers.body.data.some((item: { id: string }) => item.id === user.id)).toBe(true);
+
+    // Kata sandi lama tidak pernah kembali berlaku.
+    const oldPasswordLogin = await login(user.username, password);
+    expect(oldPasswordLogin.status).toBe(401);
+  });
+
+  it('reset berulang: kata sandi sementara sebelumnya langsung tidak berlaku', async () => {
+    const { user } = await createTempOperator('reset-berulang');
+
+    const firstReset = await request(app)
+      .post(`/api/users/${user.id}/password-reset`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(firstReset.status).toBe(200);
+    const firstTemp = firstReset.body.temporaryPassword as string;
+
+    const secondReset = await request(app)
+      .post(`/api/users/${user.id}/password-reset`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(secondReset.status).toBe(200);
+    const secondTemp = secondReset.body.temporaryPassword as string;
+
+    expect(secondTemp).not.toBe(firstTemp);
+
+    const firstLogin = await login(user.username, firstTemp);
+    expect(firstLogin.status).toBe(401);
+
+    const secondLogin = await login(user.username, secondTemp);
+    expect(secondLogin.status).toBe(200);
+    expect(secondLogin.body.user.mustChangePassword).toBe(true);
   });
 
   it('set-password menolak request tanpa token (401)', async () => {
-    const res = await request(app).post('/api/auth/set-password').send({ newPassword: 'kata-sandi-baru' });
+    const res = await request(app)
+      .post('/api/auth/set-password')
+      .send({ currentPassword: 'apa-saja', newPassword: 'kata-sandi-baru' });
     expect(res.status).toBe(401);
   });
 

@@ -9,6 +9,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { Role } from '@prisma/client';
 import { verifyToken } from '../lib/jwt';
+import { passwordFingerprint } from '../lib/password';
 import { prisma } from '../lib/prisma';
 
 export interface AuthUser {
@@ -37,8 +38,9 @@ async function resolveAuthUser(req: Request): Promise<AuthResult> {
   }
 
   let sub: string;
+  let pwd: string;
   try {
-    ({ sub } = verifyToken(header.slice('Bearer '.length)));
+    ({ sub, pwd } = verifyToken(header.slice('Bearer '.length)));
   } catch {
     return { error: { status: 401, message: 'Token tidak valid atau sudah kedaluwarsa.' } };
   }
@@ -47,6 +49,12 @@ async function resolveAuthUser(req: Request): Promise<AuthResult> {
 
   if (!user || !user.isActive) {
     return { error: { status: 401, message: 'Akun tidak ditemukan atau sudah dinonaktifkan.' } };
+  }
+
+  // Token yang diterbitkan sebelum kata sandi direset/diganti tidak boleh
+  // dipakai lagi. Perbandingan sidik jari ini juga menangani reset berulang.
+  if (pwd !== passwordFingerprint(user.passwordHash)) {
+    return { error: { status: 401, message: 'Sesi Anda sudah tidak berlaku. Silakan login kembali.' } };
   }
 
   return { user: { id: user.id, username: user.username, role: user.role, mustChangePassword: user.mustChangePassword } };
@@ -79,7 +87,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
 
 /**
  * Seperti authenticate, tetapi mengizinkan pengguna yang wajib mengganti
- * kata sandi. Hanya dipakai oleh endpoint set-password.
+ * kata sandi. Hanya dipakai oleh endpoint identitas sendiri (/auth/me) dan
+ * set-password; endpoint operasional tetap memakai authenticate.
  */
 export async function authenticateAllowPendingPasswordChange(
   req: Request,

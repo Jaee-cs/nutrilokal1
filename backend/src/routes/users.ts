@@ -144,19 +144,21 @@ usersRouter.post('/:id/password-reset', async (req, res) => {
     return;
   }
 
-  // Kata sandi sementara dibuat acak dan hanya ditampilkan SEKALI ini.
-  // Kata sandi lama tidak pernah dilihat atau dikirim oleh sistem.
-  const temporaryPassword = `NL-${randomBytes(8).toString('hex')}`;
+  // Kata sandi sementara dibuat acak kuat (96 bit) dan hanya ditampilkan
+  // SEKALI ini. Kata sandi lama tidak pernah dilihat atau dikirim oleh sistem.
+  const temporaryPassword = `NL-${randomBytes(12).toString('base64url')}`;
 
   await prisma.user.update({
     where: { id: target.id },
     data: { passwordHash: await hashPassword(temporaryPassword), mustChangePassword: true },
   });
 
+  res.set('Cache-Control', 'no-store');
   res.json({
     message:
-      'Reset kata sandi dimulai. Berikan kata sandi sementara ini kepada pengguna; ' +
-      'pengguna wajib menetapkan kata sandi baru sebelum dapat menggunakan sistem kembali.',
+      'Kata sandi berhasil direset. Sesi login lama akun ini sudah tidak berlaku. ' +
+      'Berikan kata sandi sementara ini kepada pengguna; pengguna wajib menetapkan ' +
+      'kata sandi baru sebelum dapat menggunakan sistem kembali.',
     temporaryPassword,
   });
 });

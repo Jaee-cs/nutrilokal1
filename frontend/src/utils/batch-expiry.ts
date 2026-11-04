@@ -16,6 +16,16 @@ export function wibDateCode(iso: string | Date): string {
   return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
 }
 
+/**
+ * Kode tanggal 'YYYY-MM-DD' sehari setelah tanggal yang diberikan.
+ * Dipakai sebagai batas minimum tanggal kedaluwarsa (harus setelah produksi).
+ */
+export function nextDateCode(code: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(code)) return code
+  const [year, month, day] = code.split('-').map(Number)
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10)
+}
+
 /** Tanggal WIB yang ramah dibaca, mis. '20 Okt 2026'. */
 export function wibDateLabel(iso: string | Date): string {
   const d = new Date(iso)

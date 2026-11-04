@@ -47,6 +47,11 @@ export function nextBusinessDateCode(code: string): string {
   return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
 }
 
+/** True bila tanggal bisnis `date` jatuh setelah tanggal bisnis `reference`. */
+export function isBusinessDateAfter(date: Date, reference: Date): boolean {
+  return businessDateCode(date) > businessDateCode(reference);
+}
+
 /**
  * Rentang instan [awal hari `fromCode` WIB, awal hari SETELAH `toCode` WIB)
  * untuk filter laporan. Kedua tanggal bisnis tersimpan (tengah malam UTC

@@ -53,6 +53,7 @@ model User {
   productionCorrections   ProductionCorrection[]
   batchStockMovements     BatchStockMovement[]
   batchOpeningBalances    BatchOpeningBalance[]
+  batchExpiryChanges      BatchExpiryChange[]
   stockAdjustments        StockAdjustment[]
   saleTransactions        SaleTransaction[] @relation("SaleRecordedBy")
   saleCancellations       SaleTransaction[] @relation("SaleCancelledBy")
@@ -255,6 +256,7 @@ model Batch {
   stockMovements BatchStockMovement[]
   stockAdjustments StockAdjustment[]
   saleAllocations SaleAllocation[]
+  expiryChanges  BatchExpiryChange[]
   /// Status QR traceability batch (README 5.6): satu baris per batch —
   /// siklus validasi → penerbitan → (penarikan) oleh Admin.
   qrPublication QrPublication?
@@ -275,6 +277,26 @@ model BatchAlias {
 
   @@index([batchId])
   @@map("batch_aliases")
+}
+
+/// Jejak audit setiap perubahan tanggal kedaluwarsa batch (README 5.5/5.6).
+/// Baris lama tidak pernah ditimpa: perubahan baru selalu menambah catatan.
+/// Batch stok awal juga dapat memiliki riwayat ini karena tabel terikat ke
+/// batch, bukan ke catatan produksi.
+model BatchExpiryChange {
+  id                 String    @id @default(cuid())
+  batch              Batch     @relation(fields: [batchId], references: [id])
+  batchId            String
+  changedBy          User      @relation(fields: [changedById], references: [id])
+  changedById        String
+  changedAt          DateTime  @default(now())
+  /// Null berarti tanggal belum pernah dicatat (mis. pencatatan awal).
+  previousExpiryDate DateTime?
+  /// Null berarti tanggal dikosongkan.
+  newExpiryDate      DateTime?
+
+  @@index([batchId])
+  @@map("batch_expiry_changes")
 }
 
 /// Jejak audit koreksi catatan produksi oleh Admin (README 5.3).

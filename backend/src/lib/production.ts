@@ -39,6 +39,9 @@ export interface PublicProduction {
     productionDate: Date | null;
     stock: number;
     aliases: string[];
+    /** Tanggal kedaluwarsa terbaru batch, termasuk setelah diedit Admin. */
+    expiryDate: Date | null;
+    expiryValidated: boolean;
   } | null;
   usages: {
     materialId: string;
@@ -64,6 +67,8 @@ export function toPublicProduction(p: ProductionWithRelations): PublicProduction
           productionDate: p.batch.productionDate,
           stock: Number(p.batch.stockQuantity),
           aliases: p.batch.aliases.map((alias) => alias.code),
+          expiryDate: p.batch.expiryDate,
+          expiryValidated: p.batch.expiryValidatedAt !== null,
         }
       : null,
     usages: p.usages.map((usage) => ({

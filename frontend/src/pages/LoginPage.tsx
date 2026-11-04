@@ -19,7 +19,9 @@ export function LoginPage() {
     try {
       const r = await api.post('/auth/login', { username: u, password: p })
       login(r.data.token, r.data.user)
-      nav('/dashboard')
+      // Akun hasil reset Admin belum boleh masuk Dashboard; arahkan langsung
+      // ke halaman wajib ganti kata sandi.
+      nav(r.data.user?.mustChangePassword ? '/change-password' : '/dashboard')
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal login')
     } finally {

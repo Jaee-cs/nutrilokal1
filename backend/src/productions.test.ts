@@ -20,6 +20,7 @@ const runId = `b5-${Date.now().toString(36)}-${Math.random().toString(36).slice(
 let adminToken = '';
 let operatorToken = '';
 let adminId = '';
+let operatorId = '';
 
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
@@ -43,6 +44,14 @@ function tomorrowCode(): string {
 /** Kode batch yang diharapkan untuk satu tanggal produksi. */
 function expectedCode(dateCode: string, sequence: number): string {
   return `NL-${dateCode.replace(/-/g, '')}-${String(sequence).padStart(3, '0')}`;
+}
+
+/** Tanggal kedaluwarsa default fixture: 90 hari setelah tanggal produksi. */
+function expiryAfter(productionDate: unknown): string {
+  const match = typeof productionDate === 'string' ? productionDate.match(/^\d{4}-\d{2}-\d{2}$/) : null;
+  const base = match ? new Date(`${productionDate}T00:00:00.000Z`) : new Date();
+  base.setUTCDate(base.getUTCDate() + 90);
+  return base.toISOString().slice(0, 10);
 }
 
 async function login(username: string, password: string) {
@@ -78,7 +87,12 @@ async function stockViaReceipt(materialId: string, quantity: number) {
 }
 
 function postProduction(body: Record<string, unknown>, token = operatorToken) {
-  return request(app).post('/api/productions').set(auth(token)).send(body);
+  // Fixture lama belum mengirim expiryDate; tambahkan bawaan yang valid.
+  // Pengujian khusus dapat mengirim expiryDate: undefined/null secara eksplisit.
+  return request(app)
+    .post('/api/productions')
+    .set(auth(token))
+    .send({ expiryDate: expiryAfter(body.productionDate), ...body });
 }
 
 async function getMaterialStockApi(materialId: string): Promise<number> {
@@ -92,9 +106,10 @@ beforeAll(async () => {
   });
   const admin = await prisma.user.findUniqueOrThrow({ where: { username: `${runId}-admin` } });
   adminId = admin.id;
-  await prisma.user.create({
+  const operator = await prisma.user.create({
     data: { username: `${runId}-operator`, passwordHash: await hashPassword('operator-rahasia-123'), role: 'OPERATOR' },
   });
+  operatorId = operator.id;
 
   adminToken = (await login(`${runId}-admin`, 'admin-rahasia-123')).body.token;
   operatorToken = (await login(`${runId}-operator`, 'operator-rahasia-123')).body.token;
@@ -123,6 +138,7 @@ afterAll(async () => {
 
   // Hapus berdasarkan relasi (tanpa ON DELETE CASCADE di skema).
   await prisma.batchStockMovement.deleteMany({ where: { batchId: { in: batchIds } } });
+  await prisma.batchExpiryChange.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.productionCorrection.deleteMany({ where: { productionId: { in: productionIds } } });
   await prisma.materialStockMovement.deleteMany({ where: { materialId: { in: materialIds } } });
   await prisma.productionMaterialUsage.deleteMany({ where: { productionId: { in: productionIds } } });
@@ -147,9 +163,11 @@ describe('Pencatatan produksi', () => {
     await stockViaReceipt(bahanB.id, 50);
 
     const productionDate = pastCode(3);
+    const expiryDate = expiryAfter(productionDate);
     const res = await postProduction({
       productId: product.id,
       productionDate,
+      expiryDate,
       yieldQuantity: 25,
       note: 'Batch percobaan',
       materials: [
@@ -166,6 +184,22 @@ describe('Pencatatan produksi', () => {
     expect(res.body.production.batch.code).toBe(expectedCode(productionDate, 1));
     expect(res.body.production.batch.stock).toBe(25);
     expect(res.body.production.batch.aliases).toEqual([]);
+    expect(res.body.production.batch.expiryDate).toContain(expiryDate);
+    expect(res.body.production.batch.expiryValidated).toBe(true);
+
+    // Tanggal tersimpan pada batch yang sama dan tercatat sebagai audit awal.
+    const savedBatch = await prisma.batch.findUniqueOrThrow({
+      where: { id: res.body.production.batch.id },
+    });
+    expect(savedBatch.expiryDate?.toISOString().slice(0, 10)).toBe(expiryDate);
+    expect(savedBatch.expiryValidatedAt).not.toBeNull();
+    const initialAudit = await prisma.batchExpiryChange.findMany({
+      where: { batchId: savedBatch.id },
+    });
+    expect(initialAudit).toHaveLength(1);
+    expect(initialAudit[0].previousExpiryDate).toBeNull();
+    expect(initialAudit[0].newExpiryDate?.toISOString().slice(0, 10)).toBe(expiryDate);
+    expect(initialAudit[0].changedById).toBe(operatorId);
 
     // Stok bahan berkurang sesuai pemakaian aktual.
     expect(await getMaterialStockApi(bahanA.id)).toBe(90);
@@ -350,6 +384,39 @@ describe('Penolakan produksi yang tidak valid', () => {
       materials: [{ materialId: bahan.id, quantity: 1 }],
     });
     expect(invalid.status).toBe(400);
+  });
+
+  it('Mewajibkan tanggal kedaluwarsa dan menolak tanggal yang tidak setelah produksi', async () => {
+    const product = await createProduct('validasi-expiry');
+    const bahan = await createMaterial('validasi-expiry');
+    await stockViaReceipt(bahan.id, 10);
+
+    const productionDate = pastCode(5);
+    const base = {
+      productId: product.id,
+      productionDate,
+      yieldQuantity: 1,
+      materials: [{ materialId: bahan.id, quantity: 1 }],
+    };
+
+    const missing = await postProduction({ ...base, expiryDate: undefined });
+    expect(missing.status).toBe(400);
+    expect(missing.body.message).toBe('Tanggal kedaluwarsa wajib diisi.');
+
+    const same = await postProduction({ ...base, expiryDate: productionDate });
+    expect(same.status).toBe(400);
+    expect(same.body.message).toBe('Tanggal kedaluwarsa harus setelah tanggal produksi.');
+
+    const earlier = await postProduction({ ...base, expiryDate: pastCode(6) });
+    expect(earlier.status).toBe(400);
+    expect(earlier.body.message).toBe('Tanggal kedaluwarsa harus setelah tanggal produksi.');
+
+    const invalid = await postProduction({ ...base, expiryDate: 'bukan-tanggal' });
+    expect(invalid.status).toBe(400);
+
+    // Tidak ada batch/produksi yang setengah jadi akibat permintaan ditolak.
+    expect(await prisma.production.count({ where: { productId: product.id } })).toBe(0);
+    expect(await prisma.batch.count({ where: { productId: product.id } })).toBe(0);
   });
 
   it('Menolak jumlah hasil dan pemakaian yang tidak valid (400)', async () => {
@@ -798,6 +865,116 @@ describe('Koreksi catatan produksi (hanya Admin)', () => {
 
     const batch = await prisma.batch.findUniqueOrThrow({ where: { id: batchId } });
     expect(Number(batch.stockQuantity)).toBe(5);
+  });
+});
+
+describe('Pengelolaan tanggal kedaluwarsa batch', () => {
+  it('Admin dapat mengubah tanggal, Operator ditolak, dan setiap perubahan tercatat', async () => {
+    const product = await createProduct('expiry-admin');
+    const bahan = await createMaterial('expiry-admin');
+    await stockViaReceipt(bahan.id, 20);
+
+    const productionDate = pastCode(10);
+    const initialExpiry = pastCode(-30);
+    const created = await postProduction({
+      productId: product.id,
+      productionDate,
+      expiryDate: initialExpiry,
+      yieldQuantity: 5,
+      materials: [{ materialId: bahan.id, quantity: 1 }],
+    });
+    expect(created.status).toBe(201);
+    const batchId = created.body.production.batch.id as string;
+    const batchCode = created.body.production.batch.code as string;
+    const initialAuditCount = await prisma.batchExpiryChange.count({ where: { batchId } });
+    expect(initialAuditCount).toBe(1);
+
+    const asOperator = await request(app)
+      .patch(`/api/batches/${batchId}/expiry`)
+      .set(auth(operatorToken))
+      .send({ expiryDate: pastCode(-60) });
+    expect(asOperator.status).toBe(403);
+
+    const notAfter = await request(app)
+      .patch(`/api/batches/${batchId}/expiry`)
+      .set(auth(adminToken))
+      .send({ expiryDate: productionDate });
+    expect(notAfter.status).toBe(400);
+    expect(notAfter.body.message).toBe('Tanggal kedaluwarsa harus setelah tanggal produksi.');
+
+    const nextExpiry = pastCode(-60);
+    const updated = await request(app)
+      .patch(`/api/batches/${batchId}/expiry`)
+      .set(auth(adminToken))
+      .send({ expiryDate: nextExpiry });
+    expect(updated.status).toBe(200);
+    expect(updated.body.batch.code).toBe(batchCode);
+    expect(updated.body.batch.stock).toBe(5);
+    expect(updated.body.batch.expiryDate).toContain(nextExpiry);
+    expect(updated.body.batch.expiryValidated).toBe(true);
+
+    const detail = await request(app).get(`/api/batches/${batchId}`).set(auth(operatorToken));
+    expect(detail.status).toBe(200);
+    expect(detail.body.batch.expiryDate).toContain(nextExpiry);
+    expect(detail.body.batch.expiryHistory).toHaveLength(2);
+    const latest = detail.body.batch.expiryHistory[0];
+    expect(latest.previousExpiryDate).toContain(initialExpiry);
+    expect(latest.newExpiryDate).toContain(nextExpiry);
+    expect(latest.changedBy.id).toBe(adminId);
+    expect(typeof latest.changedAt).toBe('string');
+
+    // Menyimpan tanggal yang sama tidak menambah catatan audit.
+    const sameAgain = await request(app)
+      .patch(`/api/batches/${batchId}/expiry`)
+      .set(auth(adminToken))
+      .send({ expiryDate: nextExpiry });
+    expect(sameAgain.status).toBe(200);
+    expect(await prisma.batchExpiryChange.count({ where: { batchId } })).toBe(2);
+
+    // Pengosongan juga merupakan perubahan yang tercatat.
+    const cleared = await request(app)
+      .patch(`/api/batches/${batchId}/expiry`)
+      .set(auth(adminToken))
+      .send({ expiryDate: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.batch.expiryDate).toBeNull();
+    expect(cleared.body.batch.expiryValidated).toBe(false);
+
+    const clearedDetail = await request(app).get(`/api/batches/${batchId}`).set(auth(adminToken));
+    expect(clearedDetail.body.batch.expiryHistory).toHaveLength(3);
+    expect(clearedDetail.body.batch.expiryHistory[0].previousExpiryDate).toContain(nextExpiry);
+    expect(clearedDetail.body.batch.expiryHistory[0].newExpiryDate).toBeNull();
+  });
+
+  it('Koreksi tanggal produksi tidak boleh menyamai atau melewati tanggal kedaluwarsa', async () => {
+    const product = await createProduct('expiry-koreksi');
+    const bahan = await createMaterial('expiry-koreksi');
+    await stockViaReceipt(bahan.id, 20);
+
+    const productionDate = pastCode(20);
+    const expiryDate = pastCode(10);
+    const created = await postProduction({
+      productId: product.id,
+      productionDate,
+      expiryDate,
+      yieldQuantity: 3,
+      materials: [{ materialId: bahan.id, quantity: 1 }],
+    });
+    expect(created.status).toBe(201);
+
+    const res = await request(app)
+      .patch(`/api/productions/${created.body.production.id}`)
+      .set(auth(adminToken))
+      .send({ productionDate: expiryDate });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain('sebelum tanggal kedaluwarsa');
+
+    // Tanggal dan kode batch lama tidak berubah.
+    const detail = await request(app)
+      .get(`/api/productions/${created.body.production.id}`)
+      .set(auth(operatorToken));
+    expect(detail.body.production.productionDate).toContain(productionDate);
+    expect(detail.body.production.batch.code).toBe(created.body.production.batch.code);
   });
 });
 

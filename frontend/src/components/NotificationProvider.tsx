@@ -39,6 +39,15 @@ export interface ConfirmOptions extends BaseOptions {
   details?: ReactNode
 }
 
+/** Opsi tambahan untuk dialog informasi, termasuk konten interaktif. */
+export interface InfoOptions {
+  tone?: NoticeTone
+  /** Label tombol penutup; bawaan "OK". */
+  confirmLabel?: string
+  /** Konten tambahan (mis. kata sandi sementara sekali tampil). */
+  details?: ReactNode
+}
+
 interface DialogState {
   id: number
   mode: 'info' | 'confirm'
@@ -55,7 +64,7 @@ export interface NotificationApi {
   error: (message: string, title?: string) => void
   success: (message: string, title?: string) => void
   warning: (message: string, title?: string) => void
-  info: (message: string, title?: string) => void
+  info: (message: string, title?: string, options?: InfoOptions) => void
   /**
    * Dialog konfirmasi. Promise selesai `true` hanya bila pengguna menekan
    * tombol konfirmasi; Batal, Escape, atau klik backdrop menghasilkan `false`.
@@ -142,15 +151,17 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   )
 
   const pushInfo = useCallback(
-    (tone: NoticeTone, message: string, title?: string) => {
+    (tone: NoticeTone, message: string, title?: string, options?: InfoOptions) => {
+      const resolvedTone = options?.tone ?? tone
       enqueue({
         id: nextId(),
         mode: 'info',
-        tone,
-        title: title ?? DEFAULT_TITLE[tone],
+        tone: resolvedTone,
+        title: title ?? DEFAULT_TITLE[resolvedTone],
         message,
-        confirmLabel: 'OK',
+        confirmLabel: options?.confirmLabel ?? 'OK',
         cancelLabel: 'Batal',
+        details: options?.details,
       })
     },
     [enqueue],
@@ -189,7 +200,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       error: (message, title) => pushInfo('error', message, title),
       success: (message, title) => pushInfo('success', message, title),
       warning: (message, title) => pushInfo('warning', message, title),
-      info: (message, title) => pushInfo('info', message, title),
+      info: (message, title, options) => pushInfo('info', message, title, options),
       confirm,
     }),
     [confirm, pushInfo],

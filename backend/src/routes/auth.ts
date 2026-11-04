@@ -6,9 +6,9 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { signToken } from '../lib/jwt';
-import { hashPassword, validateNewPassword, verifyPassword } from '../lib/password';
+import { hashPassword, passwordFingerprint, validateNewPassword, verifyPassword } from '../lib/password';
 import { toPublicUser } from '../lib/user';
-import { authenticate, authenticateAllowPendingPasswordChange } from '../middleware/auth';
+import { authenticateAllowPendingPasswordChange } from '../middleware/auth';
 
 export const authRouter = Router();
 
@@ -38,13 +38,18 @@ authRouter.post('/login', async (req, res) => {
 
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
+  // Respons berisi token/kredensial tidak boleh disimpan cache HTTP.
+  res.set('Cache-Control', 'no-store');
   res.json({
-    token: signToken({ sub: user.id, role: user.role }),
+    token: signToken({ sub: user.id, role: user.role, pwd: passwordFingerprint(user.passwordHash) }),
     user: toPublicUser(user),
   });
 });
 
-authRouter.get('/me', authenticate, async (req, res) => {
+// /me harus tetap bisa diakses saat mustChangePassword=true agar frontend
+// dapat memulihkan sesi setelah refresh dan mengetahui bahwa pengguna wajib
+// mengganti kata sandi. Endpoint operasional tetap diblokir oleh authenticate.
+authRouter.get('/me', authenticateAllowPendingPasswordChange, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
 
   if (!user) {
@@ -56,7 +61,12 @@ authRouter.get('/me', authenticate, async (req, res) => {
 });
 
 authRouter.post('/set-password', authenticateAllowPendingPasswordChange, async (req, res) => {
-  const { newPassword } = req.body ?? {};
+  const { currentPassword, newPassword } = req.body ?? {};
+
+  if (typeof currentPassword !== 'string' || currentPassword === '') {
+    res.status(400).json({ message: 'Kata sandi saat ini wajib diisi.' });
+    return;
+  }
 
   const passwordError = validateNewPassword(newPassword);
   if (passwordError) {
@@ -64,10 +74,35 @@ authRouter.post('/set-password', authenticateAllowPendingPasswordChange, async (
     return;
   }
 
-  await prisma.user.update({
-    where: { id: req.user!.id },
+  // Endpoint ini hanya menargetkan akun pemilik token (req.user.id).
+  // Operator tidak memiliki cara mengubah kata sandi akun lain di sini.
+  const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+  if (!user) {
+    res.status(401).json({ message: 'Akun tidak ditemukan atau sudah dinonaktifkan.' });
+    return;
+  }
+
+  if (!(await verifyPassword(currentPassword, user.passwordHash))) {
+    res.status(400).json({ message: 'Kata sandi saat ini salah.' });
+    return;
+  }
+
+  if (await verifyPassword(newPassword, user.passwordHash)) {
+    res.status(400).json({ message: 'Kata sandi baru harus berbeda dari kata sandi saat ini.' });
+    return;
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: user.id },
     data: { passwordHash: await hashPassword(newPassword), mustChangePassword: false },
   });
 
-  res.json({ message: 'Kata sandi berhasil diperbarui. Gunakan kata sandi baru untuk login berikutnya.' });
+  // Kata sandi berubah → sidik jari token lama berubah. Terbitkan token baru
+  // agar sesi yang sedang dipakai tetap berjalan dengan aman.
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    message: 'Kata sandi berhasil diperbarui.',
+    token: signToken({ sub: updated.id, role: updated.role, pwd: passwordFingerprint(updated.passwordHash) }),
+    user: toPublicUser(updated),
+  });
 });

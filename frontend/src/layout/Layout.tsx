@@ -23,6 +23,10 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
   { to: '/qr-management', label: 'QR Traceability', icon: 'qr_code_2' },
 ]
 
+const PASSWORD_NAV_ITEMS: NavItem[] = [
+  { to: '/change-password', label: 'Perbarui Password', icon: 'lock_reset' },
+]
+
 export function Layout() {
   const { logout, user } = useAuth()
   const navigate = useNavigate()
@@ -33,7 +37,14 @@ export function Layout() {
     navigate('/login')
   }
 
-  const allItems = user?.role === 'ADMIN' ? [...NAV_ITEMS, ...ADMIN_NAV_ITEMS] : NAV_ITEMS
+  // Selama wajib ganti kata sandi, navigasi operasional disembunyikan agar
+  // pengguna hanya melihat langkah yang harus diselesaikan. Backend tetap
+  // menolak seluruh endpoint operasional pada kondisi ini.
+  const allItems = user?.mustChangePassword
+    ? PASSWORD_NAV_ITEMS
+    : user?.role === 'ADMIN'
+      ? [...NAV_ITEMS, ...ADMIN_NAV_ITEMS]
+      : NAV_ITEMS
 
   return (
     <div className="app-shell">
@@ -71,10 +82,13 @@ export function Layout() {
             <div className="profile-info">
               <div className="profile-name">{user?.name || user?.username || 'Pengguna'}</div>
               <div className="profile-role">
-                {/* Role hanya diklaim bila terkonfirmasi backend; sesi tanpa
-                    identitas terverifikasi (mis. mustChangePassword) jangan
-                    menampilkan peran yang belum pasti. */}
-                {user ? (user.role === 'ADMIN' ? 'Administrator' : 'Operator') : 'Sesi terbatas'}
+                {user
+                  ? user.mustChangePassword
+                    ? 'Wajib ganti password'
+                    : user.role === 'ADMIN'
+                      ? 'Administrator'
+                      : 'Operator'
+                  : 'Sesi terbatas'}
               </div>
             </div>
             <button className="logout-btn" onClick={handleLogout} title="Keluar">

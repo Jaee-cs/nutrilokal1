@@ -1,10 +1,11 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from './layout/Layout'
-import { AdminRoute, ProtectedRoute } from './components/ProtectedRoute'
+import { AdminRoute, PasswordChangeRoute, ProtectedRoute } from './components/ProtectedRoute'
 import { NotificationProvider } from './components/NotificationProvider'
 import { AuthProvider } from './hooks/useAuth'
 import { LandingPage } from './pages/LandingPage'
 import { LoginPage } from './pages/LoginPage'
+import { ChangePasswordPage } from './pages/ChangePasswordPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { UsersPage } from './pages/UsersPage'
 import { ProductsPage } from './pages/ProductsPage'
@@ -31,6 +32,11 @@ export default function App() {
             <Route path="login" element={<LoginPage />} />
             {/* Halaman internal tetap di balik penjaga autentikasi. */}
             <Route element={<Layout />}>
+              {/* Wajib ganti kata sandi: halaman ini tetap dapat diakses
+                  setelah refresh, tetapi halaman operasional tidak. */}
+              <Route element={<PasswordChangeRoute />}>
+                <Route path="change-password" element={<ChangePasswordPage />} />
+              </Route>
               <Route element={<ProtectedRoute />}>
                 <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="products" element={<ProductsPage />} />

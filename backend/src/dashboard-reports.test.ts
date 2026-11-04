@@ -145,6 +145,7 @@ afterAll(async () => {
     where: { materialId: { in: materialIds } },
   });
   await prisma.batchStockMovement.deleteMany({ where: { batchId: { in: batchIds } } });
+  await prisma.batchExpiryChange.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.saleAllocation.deleteMany({ where: { item: { transactionId: { in: saleIds } } } });
   await prisma.saleItem.deleteMany({ where: { transactionId: { in: saleIds } } });
   await prisma.saleTransaction.deleteMany({ where: { id: { in: saleIds } } });
@@ -283,6 +284,7 @@ describe('dashboard & laporan dengan data aktual', () => {
     .send({
       productId: prodA,
       productionDate: today(),
+      expiryDate: dateCode(90),
       yieldQuantity: 10,
       materials: [{ materialId: matA, quantity: 4 }],
     });
@@ -297,6 +299,7 @@ describe('dashboard & laporan dengan data aktual', () => {
     .send({
       productId: prodA,
       productionDate: yesterday(),
+      expiryDate: dateCode(90),
       yieldQuantity: 6,
       materials: [{ materialId: matA, quantity: 2 }],
     });

@@ -6,6 +6,7 @@ interface User {
   username: string
   role: 'ADMIN' | 'OPERATOR'
   name?: string | null
+  mustChangePassword: boolean
 }
 
 /**
@@ -14,9 +15,11 @@ interface User {
  *                      ke backend (GET /auth/me) — route guard BELUM boleh
  *                      mengarahkan ke mana pun (tanpa redirect prematur).
  * - 'authenticated'  : sesi aktif. `user` bisa sementara null bila backend
- *                      menjawab 403 PASSWORD_CHANGE_REQUIRED atau gangguan
- *                      jaringan — token tetap disimpan, guard berbasis role
- *                      yang menuntut role pasti akan menahan akses.
+ *                      mengalami gangguan jaringan — token tetap disimpan,
+ *                      guard berbasis role yang menuntut role pasti akan
+ *                      menahan akses. Pengguna dengan mustChangePassword
+ *                      tetap memiliki `user` (dari GET /auth/me) dan
+ *                      diarahkan ke halaman Perbarui Password.
  * - 'unauthenticated': tidak ada sesi.
  */
 type AuthStatus = 'restoring' | 'authenticated' | 'unauthenticated'
@@ -72,11 +75,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        // 403 PASSWORD_CHANGE_REQUIRED: token valid, tetapi seluruh endpoint
-        // (kecuali set-password) diblokir backend. Tanpa UI set-password di
-        // frontend, sesi dipertahankan — guard role tetap menahan akses
-        // halaman Admin karena identitas peran tidak terkonfirmasi.
         // Gangguan jaringan/server: jangan hapus sesi karena gagal verifikasi.
+        // Halaman yang membutuhkan identitas pasti akan menahan akses sampai
+        // pemulihan berikutnya berhasil.
         setUser(null)
         setStatus('authenticated')
       })

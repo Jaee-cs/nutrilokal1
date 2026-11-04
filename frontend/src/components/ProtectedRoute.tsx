@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
 /**
@@ -8,12 +8,35 @@ import { useAuth } from '../hooks/useAuth'
  * JANGAN mengarahkan ke mana pun — hanya tampilkan pemuatan. Redirect
  * prematur adalah akar penyebab hard refresh di /users & /qr-management
  * terlempar ke /dashboard (F12).
+ *
+ * Pengguna yang wajib mengganti kata sandi diarahkan ke /change-password
+ * sebelum halaman operasional mana pun dirender. Backend juga menolak
+ * seluruh endpoint operasional dengan 403 PASSWORD_CHANGE_REQUIRED, jadi
+ * pembatasan ini tidak bergantung pada URL saja.
  */
 export function ProtectedRoute() {
-  const { status } = useAuth()
+  const { status, user } = useAuth()
+  const location = useLocation()
 
   if (status === 'restoring') return <RouteLoading />
   if (status === 'unauthenticated') return <Navigate to="/login" replace />
+  if (user?.mustChangePassword && location.pathname !== '/change-password') {
+    return <Navigate to="/change-password" replace />
+  }
+  return <Outlet />
+}
+
+/**
+ * Penjaga khusus halaman Perbarui Password.
+ * Hanya dapat dibuka oleh sesi yang valid dan memang sedang wajib mengganti
+ * kata sandi. Setelah selesai, pengguna diarahkan ke Dashboard.
+ */
+export function PasswordChangeRoute() {
+  const { status, user } = useAuth()
+
+  if (status === 'restoring') return <RouteLoading />
+  if (status === 'unauthenticated') return <Navigate to="/login" replace />
+  if (user && !user.mustChangePassword) return <Navigate to="/dashboard" replace />
   return <Outlet />
 }
 
@@ -28,8 +51,9 @@ export function AdminRoute() {
 
   if (status === 'restoring') return <RouteLoading />
   if (status === 'unauthenticated') return <Navigate to="/login" replace />
-  // Role pasti diperlukan untuk masuk; bila tidak terkonfirmasi (mis. 403
-  // PASSWORD_CHANGE_REQUIRED), tahan di dashboard.
+  if (user?.mustChangePassword) return <Navigate to="/change-password" replace />
+  // Role pasti diperlukan untuk masuk; bila tidak terkonfirmasi, tahan di
+  // dashboard.
   if (user?.role !== 'ADMIN') return <Navigate to="/dashboard" replace />
   return <Outlet />
 }

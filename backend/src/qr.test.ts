@@ -167,6 +167,7 @@ afterAll(async () => {
   await prisma.qrPublication.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batchAlias.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batchStockMovement.deleteMany({ where: { batchId: { in: batchIds } } });
+  await prisma.batchExpiryChange.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.stockAdjustment.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batchOpeningBalance.deleteMany({ where: { batchId: { in: batchIds } } });
   await prisma.batch.deleteMany({ where: { id: { in: batchIds } } });
@@ -343,6 +344,50 @@ describe('QR traceability per batch', () => {
     await expect(
       prisma.qrPublication.create({ data: { batchId: batchFull } })
     ).rejects.toThrow();
+  });
+
+  it('perubahan tanggal kedaluwarsa langsung tampil di QR tanpa mengganti kode batch', async () => {
+    const codeBefore = await getBatchCode(batchFull);
+    const batchBefore = await request(app).get(`/api/batches/${batchFull}`).set(auth(adminToken));
+    const stockBefore = batchBefore.body.batch.stock;
+    const publicationBefore = await prisma.qrPublication.findUnique({
+      where: { batchId: batchFull },
+    });
+    const newExpiry = wibDateCode(45);
+
+    const update = await request(app)
+      .patch(`/api/batches/${batchFull}/expiry`)
+      .set(auth(adminToken))
+      .send({ expiryDate: newExpiry });
+    expect(update.status).toBe(200);
+    expect(update.body.batch.code).toBe(codeBefore);
+
+    // Kode batch, stok, QR, dan publikasi yang sudah ada tidak berubah.
+    expect(await getBatchCode(batchFull)).toBe(codeBefore);
+    const batchAfter = await request(app).get(`/api/batches/${batchFull}`).set(auth(adminToken));
+    expect(batchAfter.body.batch.code).toBe(codeBefore);
+    expect(batchAfter.body.batch.stock).toBe(stockBefore);
+    expect(batchAfter.body.batch.expiryDate).toContain(newExpiry);
+    expect(await prisma.qrPublication.findUnique({ where: { batchId: batchFull } })).toEqual(
+      publicationBefore
+    );
+
+    // Daftar batch, Detail Batch, dan QR publik membaca sumber yang sama.
+    const list = await request(app).get('/api/batches').set(auth(adminToken));
+    expect(list.status).toBe(200);
+    const listed = list.body.data.find((batch: { id: string }) => batch.id === batchFull);
+    expect(listed.expiryDate).toContain(newExpiry);
+
+    const publicByCurrentCode = await getPublicQr(codeBefore);
+    expect(publicByCurrentCode.status).toBe(200);
+    expect(publicByCurrentCode.body.batch.code).toBe(codeBefore);
+    expect(publicByCurrentCode.body.batch.expiryDate).toBe(newExpiry);
+
+    // Alias kode lama tetap membuka batch yang sama dengan tanggal terbaru.
+    const publicByAlias = await getPublicQr(oldCode);
+    expect(publicByAlias.status).toBe(200);
+    expect(publicByAlias.body.batch.code).toBe(codeBefore);
+    expect(publicByAlias.body.batch.expiryDate).toBe(newExpiry);
   });
 
   it('kolom yang belum tersedia/tervalidasi disembunyikan dari QR', async () => {
