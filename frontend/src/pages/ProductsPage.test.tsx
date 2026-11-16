@@ -129,6 +129,60 @@ async function selectProduct() {
   return user
 }
 
+describe('ProductsPage — modal tambah produk', () => {
+  beforeEach(() => {
+    mocks.get.mockReset()
+    Object.values(mocks.notify).forEach((fn) => fn.mockReset())
+    mockApi()
+  })
+
+  it('menampilkan form tambah produk sebagai dialog terpusat dengan seluruh isian', async () => {
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('button', { name: /Tambah Produk/ }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Tambah Produk' })
+    expect(within(dialog).getByLabelText('Nama Produk')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Satuan Dasar')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Harga Jual (Rp)')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Foto Produk (opsional)')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Deskripsi (opsional)')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Komposisi (opsional)')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Petunjuk Penyimpanan (opsional)')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Batal' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Simpan Produk' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Tutup dialog produk' })).toBeInTheDocument()
+    expect(document.body.style.overflow).toBe('hidden')
+  })
+
+  it('menutup modal lewat tombol X, Escape, dan backdrop tanpa menutup saat isian diklik', async () => {
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    const openModal = async () =>
+      user.click(await screen.findByRole('button', { name: /Tambah Produk/ }))
+
+    await openModal()
+    await user.type(screen.getByLabelText('Nama Produk'), 'Produk Uji')
+    await user.click(screen.getByLabelText('Deskripsi (opsional)'))
+    expect(screen.getByRole('dialog', { name: /Tambah Produk/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('Nama Produk')).toHaveValue('Produk Uji')
+
+    await user.click(screen.getByRole('button', { name: 'Tutup dialog produk' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(document.body.style.overflow).toBe('')
+
+    await openModal()
+    expect(screen.getByLabelText('Nama Produk')).toHaveValue('')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await openModal()
+    fireEvent.click(document.querySelector('.modal-overlay') as HTMLElement)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+})
+
 describe('ProductsPage — riwayat pergerakan stok produk', () => {
   beforeEach(() => {
     mocks.get.mockReset()

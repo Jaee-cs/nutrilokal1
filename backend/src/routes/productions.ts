@@ -43,6 +43,7 @@ import {
   validateQuantity,
   validateUsageList,
 } from '../lib/validate';
+import { convertQuantity } from '../lib/unit-conversion';
 import { authenticate, requireAdmin } from '../middleware/auth';
 
 export const productionsRouter = Router();
@@ -51,8 +52,13 @@ const CREATE_ENDPOINT = 'POST /api/productions';
 
 interface UsageInput {
   materialId: string;
-  quantity: number;
-  quantityText: string;
+  /** Jumlah aktual dalam satuan input pengguna (resep/manual). */
+  inputQuantity: number;
+  inputQuantityText: string;
+  inputUnit: string;
+  /** Jumlah hasil konversi ke satuan stok bahan baku. */
+  stockQuantity: number;
+  stockQuantityText: string;
 }
 
 function normalizeNote(value: unknown): string | null {
@@ -114,7 +120,7 @@ productionsRouter.post('/', authenticate, async (req, res) => {
     return;
   }
 
-  const usages: UsageInput[] = [];
+  const rawUsages: { materialId: string; inputQuantity: number; inputUnit?: string }[] = [];
   const seenMaterialIds = new Set<string>();
   for (const item of materials as Record<string, unknown>[]) {
     const quantity = item.quantity as number;
@@ -129,7 +135,8 @@ productionsRouter.post('/', authenticate, async (req, res) => {
       return;
     }
     seenMaterialIds.add(materialId);
-    usages.push({ materialId, quantity, quantityText: quantity.toFixed(3) });
+    const rawUnit = typeof item.unit === 'string' ? item.unit.trim() : '';
+    rawUsages.push({ materialId, inputQuantity: quantity, inputUnit: rawUnit || undefined });
   }
 
   const businessDate = parseBusinessDate(productionDate);
@@ -155,19 +162,42 @@ productionsRouter.post('/', authenticate, async (req, res) => {
   }
 
   const materialsInDb = await prisma.material.findMany({
-    where: { id: { in: usages.map((u) => u.materialId) } },
+    where: { id: { in: rawUsages.map((u) => u.materialId) } },
   });
   const materialById = new Map(materialsInDb.map((m) => [m.id, m]));
-  for (const usage of usages) {
-    const material = materialById.get(usage.materialId);
+
+  const usages: UsageInput[] = [];
+  for (const raw of rawUsages) {
+    const material = materialById.get(raw.materialId);
     if (!material) {
-      res.status(404).json({ message: `Bahan baku "${usage.materialId}" tidak ditemukan.` });
+      res.status(404).json({ message: `Bahan baku "${raw.materialId}" tidak ditemukan.` });
       return;
     }
     if (!material.isActive) {
       res.status(409).json({ message: `Bahan baku "${material.name}" tidak aktif dan tidak dapat dipakai pada produksi baru.` });
       return;
     }
+
+    const inputUnit = raw.inputUnit || material.unit;
+    if (inputUnit.length > 30) {
+      res.status(400).json({ message: `Satuan pemakaian bahan "${material.name}" maksimal 30 karakter.` });
+      return;
+    }
+
+    const converted = convertQuantity(new Prisma.Decimal(raw.inputQuantity.toFixed(3)), inputUnit, material.unit);
+    if (!converted.ok) {
+      res.status(400).json({ message: `${converted.message} (Bahan: ${material.name})` });
+      return;
+    }
+
+    usages.push({
+      materialId: material.id,
+      inputQuantity: raw.inputQuantity,
+      inputQuantityText: raw.inputQuantity.toFixed(3),
+      inputUnit,
+      stockQuantity: Number(converted.valueText),
+      stockQuantityText: converted.value.toFixed(3),
+    });
   }
 
   let key: string | null;
@@ -189,13 +219,18 @@ productionsRouter.post('/', authenticate, async (req, res) => {
         { key, endpoint: CREATE_ENDPOINT, userId: recordedById },
         async (tx) => {
           // Validasi stok bahan di dalam transaksi (README 5.2: produksi
-          // ditolak jika stok salah satu bahan tidak mencukupi).
+          // ditolak jika stok salah satu bahan tidak mencukupi). Perbandingan
+          // dan pengurangan memakai jumlah dalam satuan stok bahan baku.
           for (const usage of usages) {
             const stock = await getMaterialStock(tx, usage.materialId);
-            if (stock < usage.quantity) {
+            if (stock < usage.stockQuantity) {
               const material = materialById.get(usage.materialId)!;
+              const needed =
+                usage.inputUnit === material.unit
+                  ? `${usage.inputQuantityText} ${material.unit}`
+                  : `${usage.inputQuantityText} ${usage.inputUnit} (${usage.stockQuantityText} ${material.unit})`;
               throw new InsufficientStockError(
-                `Stok bahan baku "${material.name}" tidak mencukupi (tersedia ${stock}, dibutuhkan ${usage.quantity}).`
+                `Stok bahan baku "${material.name}" tidak mencukupi (tersedia ${stock} ${material.unit}, dibutuhkan ${needed}).`
               );
             }
           }
@@ -239,24 +274,38 @@ productionsRouter.post('/', authenticate, async (req, res) => {
             },
           });
 
-          // Pemakaian aktual bahan dicatat manual (README 5.2) — mengurangi
-          // stok bahan dan terhubung ke pergerakan stok sebagai jejak audit.
+          // Pemakaian aktual bahan dicatat (README 5.2) — mengurangi stok
+          // bahan dalam satuan stok dan terhubung ke pergerakan stok sebagai jejak audit.
           for (const usage of usages) {
+            const material = materialById.get(usage.materialId)!;
             const usageRecord = await tx.productionMaterialUsage.create({
-              data: { productionId: production.id, materialId: usage.materialId, quantity: usage.quantityText },
+              data: {
+                productionId: production.id,
+                materialId: usage.materialId,
+                quantity: usage.stockQuantityText,
+                inputQuantity: usage.inputQuantityText,
+                inputUnit: usage.inputUnit,
+              } as any,
             });
             await tx.materialStockMovement.create({
               data: {
                 materialId: usage.materialId,
                 type: 'PRODUCTION_USAGE',
-                quantity: usage.quantityText,
+                quantity: usage.stockQuantityText,
                 occurredAt: businessDate,
                 recordedById,
-                reason: `Pemakaian produksi batch ${code}`,
+                reason:
+                  usage.inputUnit === material.unit
+                    ? `Pemakaian produksi batch ${code}`
+                    : `Pemakaian produksi batch ${code} (${usage.inputQuantityText} ${usage.inputUnit} = ${usage.stockQuantityText} ${material.unit})`,
                 productionUsageId: usageRecord.id,
               },
             });
-            await applyMaterialStockChange(tx, usage.materialId, new Prisma.Decimal(usage.quantityText).negated());
+            await applyMaterialStockChange(
+              tx,
+              usage.materialId,
+              new Prisma.Decimal(usage.stockQuantityText).negated()
+            );
           }
 
           // Hasil produksi menambah stok produk jadi batch (README 5.3).

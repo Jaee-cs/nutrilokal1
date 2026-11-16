@@ -19,25 +19,48 @@ interface Stat {
   tone?: 'primary' | 'success' | 'warning' | 'error'
 }
 
+type DashboardPeriod = 'today' | 'week' | 'month'
+
+const PERIOD_OPTIONS: Array<{ id: DashboardPeriod; label: string }> = [
+  { id: 'today', label: 'Hari Ini' },
+  { id: 'week', label: 'Minggu Ini' },
+  { id: 'month', label: 'Bulan Ini' },
+]
+
+const PERIOD_LABELS: Record<DashboardPeriod, string> = {
+  today: 'hari ini',
+  week: '7 hari terakhir',
+  month: '30 hari terakhir',
+}
+
 export function DashboardPage() {
   const [d, setD] = useState<any>(null)
   const [err, setErr] = useState<string | null>(null)
   const [ld, setLd] = useState(true)
+  const [period, setPeriod] = useState<DashboardPeriod>('month')
 
   useEffect(() => {
+    let active = true
+    setLd(true)
     ;(async () => {
       try {
-        const r = await api.get('/dashboard')
+        const r = await api.get('/dashboard', { params: { period } })
+        if (!active) return
         setD(r.data)
+        setErr(null)
       } catch (e: any) {
+        if (!active) return
         setErr(e.response?.data?.message || 'Gagal memuat dashboard')
       } finally {
-        setLd(false)
+        if (active) setLd(false)
       }
     })()
-  }, [])
+    return () => {
+      active = false
+    }
+  }, [period])
 
-  if (ld) {
+  if (ld && !d) {
     return (
       <div className="container">
         <p className="text-muted">Memuat dashboard...</p>
@@ -45,7 +68,7 @@ export function DashboardPage() {
     )
   }
 
-  if (err) {
+  if (err && !d) {
     return (
       <div className="container">
         <div className="alert error">{err}</div>
@@ -56,8 +79,16 @@ export function DashboardPage() {
   if (!d) return null
 
   const stats: Stat[] = [
-    { label: 'Jenis Bahan Baku', value: String(d.materials.count), detail: 'Bahan terdaftar' },
-    { label: 'Produk', value: String(d.products.count), detail: 'Produk olahan' },
+    {
+      label: 'Jenis Bahan Baku',
+      value: String(d.materials.periodCount ?? d.materials.count),
+      detail: 'Ditambahkan periode ini',
+    },
+    {
+      label: 'Produk',
+      value: String(d.products.periodCount ?? d.products.count),
+      detail: 'Ditambahkan periode ini',
+    },
     { label: 'Catatan Produksi', value: String(d.production.recordCount), detail: 'Batch tercatat' },
     { label: 'Transaksi Aktif', value: String(d.sales.transactionCount), detail: 'Selesai', tone: 'success' },
     { label: 'Transaksi Dibatalkan', value: String(d.sales.cancelledCount), detail: 'Dibatalkan', tone: 'warning' },
@@ -72,12 +103,34 @@ export function DashboardPage() {
       <div className="page-head">
         <h1 className="page-title">Dashboard operasional</h1>
         <p className="page-subtitle">
-          Ringkasan produksi, stok, dan penjualan KWT Gogor hari ini.
+          Ringkasan produksi, stok, dan penjualan KWT Gogor {PERIOD_LABELS[period]}.
         </p>
       </div>
 
+      {err && <div className="alert error">{err}</div>}
+
+      {/* Filter periode untuk seluruh kartu statistik */}
+      <div
+        className="dashboard-period-filter"
+        role="tablist"
+        aria-label="Filter periode dashboard"
+      >
+        {PERIOD_OPTIONS.map(option => (
+          <button
+            key={option.id}
+            type="button"
+            className={`reports-tab ${period === option.id ? 'active' : ''}`}
+            role="tab"
+            aria-selected={period === option.id}
+            onClick={() => setPeriod(option.id)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
       {/* KPI grid */}
-      <div className="kpi-grid">
+      <div className="kpi-grid" aria-busy={ld}>
         {stats.map(s => (
           <div key={s.label} className={`card kpi-card ${s.tone ? `kpi-${s.tone}` : ''}`}>
             <div className="card-label">{s.label}</div>

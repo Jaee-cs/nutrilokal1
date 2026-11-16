@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Pencil, Plus, Trash2, X } from 'lucide-react'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
@@ -39,7 +41,7 @@ interface Movement {
   sourceId?: string | null
 }
 
-type TabKey = 'list' | 'add' | 'adjust' | 'receipt'
+type ModalKey = 'add' | 'receipt' | 'adjust' | null
 
 const MOVEMENT_LABELS: Record<MovementType, string> = {
   RECEIPT: 'Penerimaan',
@@ -91,17 +93,133 @@ function materialNameKey(name: string): string {
   return name.trim().toLowerCase()
 }
 
+interface MaterialModalProps {
+  open: boolean
+  title: string
+  description?: string
+  onClose: () => void
+  children: ReactNode
+}
+
 /**
- * Halaman "Bahan Baku" dengan navigasi tab: Daftar Bahan, Tambah Bahan
- * (termasuk saldo awal opsional), Penyesuaian Stok (Admin), dan Penerimaan.
- * Semua data dan aturan berasal dari backend — tidak ada aturan bisnis baru.
+ * Modal terpusat untuk form bahan baku. Memakai kelas modal NutriLokal yang
+ * sudah ada, mengunci gulir halaman, menjebak fokus, dan mendukung Escape.
+ */
+function MaterialModal({ open, title, description, onClose, children }: MaterialModalProps) {
+  const titleId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  useEffect(() => {
+    if (!open) return
+
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    const panel = panelRef.current
+    const firstField = panel?.querySelector<HTMLElement>(
+      'input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
+    )
+    const firstFocusable = panel?.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )
+    ;(firstField ?? firstFocusable ?? panel)?.focus()
+
+    function focusables(): HTMLElement[] {
+      if (!panel) return []
+      return Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      )
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !panel) return
+
+      const items = focusables()
+      if (items.length === 0) {
+        event.preventDefault()
+        panel.focus()
+        return
+      }
+
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement
+      const inside = active instanceof Node && panel.contains(active)
+
+      if (event.shiftKey && (active === first || !inside)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (active === last || !inside)) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      previousFocus?.focus?.()
+    }
+  }, [open])
+
+  if (!open) return null
+
+  return createPortal(
+    <div className="modal-root material-modal-root">
+      <div className="modal-overlay" onClick={onClose} />
+      <div
+        ref={panelRef}
+        className="modal-panel material-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <div className="material-modal-head">
+          <div className="material-modal-heading">
+            <h2 className="modal-title" id={titleId}>{title}</h2>
+            {description && <p className="material-modal-subtitle">{description}</p>}
+          </div>
+          <button
+            type="button"
+            className="icon-button material-modal-close"
+            onClick={onClose}
+            aria-label="Tutup dialog"
+            title="Tutup"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/**
+ * Halaman "Bahan Baku". Tambah bahan, penerimaan, dan penyesuaian stok
+ * dibuka sebagai modal terpusat; daftar, riwayat pergerakan, dan riwayat
+ * penerimaan tetap tampil di halaman. Semua aturan berasal dari backend.
  */
 export function MaterialsPage() {
   const { user } = useAuth()
   const notify = useNotify()
   const isAdmin = user?.role === 'ADMIN'
+  const canReceive = isAdmin || user?.role === 'OPERATOR'
 
-  const [tab, setTab] = useState<TabKey>('list')
+  const [activeModal, setActiveModal] = useState<ModalKey>(null)
   const [materials, setMaterials] = useState<Material[]>([])
   const [loading, setLoading] = useState(true)
   // Kegagalan memuat daftar tetap tampil di halaman (keadaan halaman, bukan
@@ -192,20 +310,22 @@ export function MaterialsPage() {
     fetchMaterials()
   }, [])
 
-  // Tab yang tersedia mengikuti hak akses backend: menambah bahan, menonaktifkan
-  // bahan, dan penyesuaian stok hanya Admin; penerimaan juga untuk Operator.
-  const tabs: Array<{ key: TabKey; label: string; icon: string }> = [
-    { key: 'list', label: 'Daftar Bahan', icon: 'list_alt' },
-    ...(isAdmin ? [{ key: 'add' as TabKey, label: 'Tambah Bahan', icon: 'add_box' }] : []),
-    ...(isAdmin ? [{ key: 'adjust' as TabKey, label: 'Penyesuaian Stok', icon: 'tune' }] : []),
-    { key: 'receipt', label: 'Penerimaan', icon: 'move_to_inbox' },
-  ]
-  const activeTab: TabKey = tabs.some((t) => t.key === tab) ? tab : 'list'
+  function openAddModal() {
+    setActiveModal('add')
+  }
 
-  /** Perpindahan tab tidak pernah mengirim formulir. */
-  function selectTab(key: TabKey) {
-    if (key === activeTab) return
-    setTab(key)
+  function openReceiptModal(material: Material) {
+    setReceiptForm({ ...EMPTY_RECEIPT, materialId: material.id })
+    setActiveModal('receipt')
+  }
+
+  function openAdjustModal(material: Material) {
+    setAdjForm({ ...EMPTY_ADJ, materialId: material.id })
+    setActiveModal('adjust')
+  }
+
+  function closeModal() {
+    setActiveModal(null)
   }
 
   /**
@@ -289,6 +409,7 @@ export function MaterialsPage() {
       setAddForm(EMPTY_ADD)
       setAddObForm(EMPTY_ADD_OB)
       setObEnabled(false)
+      setActiveModal(null)
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal menambah bahan baku')
     } finally {
@@ -399,6 +520,7 @@ export function MaterialsPage() {
       if (stockRefreshed && historyRefreshed) {
         notify.success('Penyesuaian stok berhasil dicatat')
       }
+      setActiveModal(null)
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal mencatat penyesuaian stok')
     } finally {
@@ -437,6 +559,7 @@ export function MaterialsPage() {
       if (stockRefreshed && historyRefreshed) {
         notify.success('Penerimaan bahan baku berhasil dicatat')
       }
+      setActiveModal(null)
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal mencatat penerimaan')
     } finally {
@@ -528,49 +651,25 @@ export function MaterialsPage() {
         </div>
       </div>
 
-      {/* Navigasi tab (responsif: dapat digulir mendatar pada layar sempit) */}
-      <div className="tab-nav" role="tablist" aria-label="Bagian halaman bahan baku">
-        {tabs.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            role="tab"
-            id={`tab-${item.key}`}
-            aria-selected={activeTab === item.key}
-            aria-controls={`panel-${item.key}`}
-            className="tab-btn"
-            onClick={() => selectTab(item.key)}
-          >
-            <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>{item.icon}</span>
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <section className="card section-card">
+        <div className="toolbar">
+          <h2 className="card-title">Daftar Bahan Baku</h2>
+          {isAdmin && (
+            <button type="button" className="button" onClick={openAddModal}>
+              <Plus size={18} aria-hidden="true" />
+              Tambah Bahan
+            </button>
+          )}
+        </div>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* Tab: Daftar Bahan                                                */}
-      {/* ---------------------------------------------------------------- */}
-      {activeTab === 'list' && (
-        <div className="tab-panel" role="tabpanel" id="panel-list" aria-labelledby="tab-list">
-          <section className="card section-card">
-            <div className="toolbar">
-              <h2 className="card-title">Daftar Bahan Baku</h2>
-              {isAdmin && (
-                <button type="button" className="button" onClick={() => selectTab('add')}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
-                  Tambah Bahan
-                </button>
-              )}
-            </div>
-
-            {loading ? (
-              <p className="text-muted">Memuat bahan baku...</p>
-            ) : materials.length === 0 ? (
-              <p className="text-muted">
-                Belum ada bahan baku.
-                {isAdmin ? ' Gunakan tab “Tambah Bahan” untuk menambah.' : ' Hubungi Admin untuk menambah bahan.'}
-              </p>
-            ) : (
+        {loading ? (
+          <p className="text-muted">Memuat bahan baku...</p>
+        ) : materials.length === 0 ? (
+          <p className="text-muted">
+            Belum ada bahan baku.
+            {isAdmin ? ' Gunakan tombol “Tambah Bahan” untuk menambah.' : ' Hubungi Admin untuk menambah bahan.'}
+          </p>
+        ) : (
               <>
                 {/* Desktop: tabel */}
                 <div className="table-wrapper desktop-table">
@@ -581,7 +680,7 @@ export function MaterialsPage() {
                         <th>Satuan</th>
                         <th>Stok Aktual</th>
                         <th>Status</th>
-                        {isAdmin && <th>Aksi</th>}
+                        {(isAdmin || canReceive) && <th>Aksi</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -602,26 +701,55 @@ export function MaterialsPage() {
                               <span className="badge neutral">Nonaktif</span>
                             )}
                           </td>
-                          {isAdmin && (
+                          {(isAdmin || canReceive) && (
                             <td>
-                              <div className="row-actions">
-                                <button
-                                  type="button"
-                                  className="button secondary"
-                                  onClick={() => toggleActive(m.id, m.isActive)}
-                                >
-                                  {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="button danger-outline"
-                                  onClick={() => requestDelete(m)}
-                                  disabled={deletingId === m.id}
-                                  title="Hapus bahan baku"
-                                >
-                                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
-                                  Hapus
-                                </button>
+                              <div className="material-row-actions">
+                                <div className="material-action-grid">
+                                  {canReceive && (
+                                    <button
+                                      type="button"
+                                      className="button material-stock-button"
+                                      onClick={() => openReceiptModal(m)}
+                                      disabled={!m.isActive}
+                                      title={m.isActive ? `Tambah stok ${m.name}` : 'Bahan nonaktif tidak dapat menerima stok'}
+                                    >
+                                      <Plus size={16} aria-hidden="true" />
+                                      Tambah Stok
+                                    </button>
+                                  )}
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      className="icon-button material-action-icon"
+                                      onClick={() => openAdjustModal(m)}
+                                      aria-label={`Penyesuaian stok ${m.name}`}
+                                      title="Penyesuaian stok"
+                                    >
+                                      <Pencil size={16} aria-hidden="true" />
+                                    </button>
+                                  )}
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      className="button secondary"
+                                      onClick={() => toggleActive(m.id, m.isActive)}
+                                    >
+                                      {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                                    </button>
+                                  )}
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      className="icon-button material-action-icon material-action-danger"
+                                      onClick={() => requestDelete(m)}
+                                      disabled={deletingId === m.id}
+                                      aria-label={`Hapus bahan baku ${m.name}`}
+                                      title="Hapus bahan baku"
+                                    >
+                                      <Trash2 size={16} aria-hidden="true" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </td>
                           )}
@@ -650,24 +778,53 @@ export function MaterialsPage() {
                           )}
                         </div>
                       </div>
-                      {isAdmin && (
-                        <div className="material-item-action">
-                          <button
-                            type="button"
-                            className="button secondary"
-                            onClick={() => toggleActive(m.id, m.isActive)}
-                          >
-                            {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                          </button>
-                          <button
-                            type="button"
-                            className="button danger-outline material-item-delete"
-                            onClick={() => requestDelete(m)}
-                            disabled={deletingId === m.id}
-                            aria-label={`Hapus bahan baku ${m.name}`}
-                          >
-                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
-                          </button>
+                      {(isAdmin || canReceive) && (
+                        <div className="material-item-side">
+                          <div className="material-action-grid">
+                            {canReceive && (
+                              <button
+                                type="button"
+                                className="button material-stock-button"
+                                onClick={() => openReceiptModal(m)}
+                                disabled={!m.isActive}
+                                title={m.isActive ? `Tambah stok ${m.name}` : 'Bahan nonaktif tidak dapat menerima stok'}
+                              >
+                                Tambah Stok
+                              </button>
+                            )}
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                className="icon-button material-action-icon"
+                                onClick={() => openAdjustModal(m)}
+                                aria-label={`Penyesuaian stok ${m.name}`}
+                                title="Penyesuaian stok"
+                              >
+                                <Pencil size={16} aria-hidden="true" />
+                              </button>
+                            )}
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                className="button secondary"
+                                onClick={() => toggleActive(m.id, m.isActive)}
+                              >
+                                {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                              </button>
+                            )}
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                className="icon-button material-action-icon material-action-danger"
+                                onClick={() => requestDelete(m)}
+                                disabled={deletingId === m.id}
+                                aria-label={`Hapus bahan baku ${m.name}`}
+                                title="Hapus bahan baku"
+                              >
+                                <Trash2 size={16} aria-hidden="true" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )}
                     </article>
@@ -776,271 +933,296 @@ export function MaterialsPage() {
               )}
             </div>
           </section>
-        </div>
-      )}
 
       {/* ---------------------------------------------------------------- */}
-      {/* Tab: Tambah Bahan (+ saldo awal opsional) — hanya Admin          */}
-      {/* ---------------------------------------------------------------- */}
-      {activeTab === 'add' && isAdmin && (
-        <div className="tab-panel" role="tabpanel" id="panel-add" aria-labelledby="tab-add">
-          <section className="card section-card">
-            <h2 className="card-title">Tambah Bahan Baku</h2>
-            <p className="text-muted">
-              Isi data bahan baru. Saldo awal bersifat opsional — centang bagian saldo awal hanya
-              bila jumlah awal bahan ini benar-benar diketahui. Saldo awal dicatat satu kali
-              bersama bahan baru.
-            </p>
-            <form onSubmit={createMaterial} className="material-form">
-              <div className="form-grid">
-                <div className="field">
-                  <label htmlFor="m-name">Nama Bahan</label>
-                  <input
-                    id="m-name"
-                    value={addForm.name}
-                    onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
-                    placeholder="Contoh: Sapi Segar"
-                    required
-                  />
+      {/* Riwayat penerimaan (Admin & Operator) */}
+      <section className="card section-card">
+        <div className="section-head">
+          <h2 className="card-title">Riwayat Penerimaan</h2>
+          <div className="field filter-field">
+            <label htmlFor="receipt-material">Bahan baku</label>
+            <select
+              id="receipt-material"
+              value={receiptMaterialId}
+              onChange={(e) => { setReceiptMaterialId(e.target.value); loadReceipts(e.target.value) }}
+            >
+              <option value="">Pilih bahan baku</option>
+              {materials.map((m) => (
+                <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="table-wrapper desktop-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Bahan</th>
+                <th>Jumlah</th>
+                <th>Tanggal Terima</th>
+                <th>Dicatat oleh</th>
+                <th>Catatan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!receiptMaterialId ? (
+                <tr><td colSpan={5} className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</td></tr>
+              ) : loadingReceipts ? (
+                <tr><td colSpan={5}>Memuat riwayat...</td></tr>
+              ) : receipts.length === 0 ? (
+                <tr><td colSpan={5} className="text-muted">Belum ada riwayat penerimaan</td></tr>
+              ) : (
+                receipts.slice(0, 20).map(r => (
+                  <tr key={r.id}>
+                    <td>{materials.find(m => m.id === r.materialId)?.name || r.materialId}</td>
+                    <td className="num">
+                      {Number(r.quantity).toLocaleString('id-ID')}{' '}
+                      <span className="text-muted">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
+                    </td>
+                    <td>{r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}</td>
+                    <td>{r.recordedBy?.username || '-'}</td>
+                    <td className="text-muted">{r.note || '-'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile: kartu riwayat penerimaan */}
+        <div className="mobile-list">
+          {!receiptMaterialId ? (
+            <p className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</p>
+          ) : loadingReceipts ? (
+            <p className="text-muted">Memuat riwayat...</p>
+          ) : receipts.length === 0 ? (
+            <p className="text-muted">Belum ada riwayat penerimaan</p>
+          ) : (
+            receipts.slice(0, 20).map(r => (
+              <article className="history-item" key={r.id}>
+                <div className="history-item-top">
+                  <span className="history-item-date">
+                    {r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}
+                  </span>
+                  <span className="history-item-type">
+                    {materials.find(m => m.id === r.materialId)?.name || r.materialId}
+                  </span>
                 </div>
-                <div className="field">
-                  <label htmlFor="m-unit">Satuan Dasar</label>
-                  <input
-                    id="m-unit"
-                    value={addForm.unit}
-                    onChange={e => setAddForm(f => ({ ...f, unit: e.target.value }))}
-                    placeholder="Contoh: kg"
-                    required
-                  />
+                <div className="history-item-delta plus">
+                  <strong>+{Number(r.quantity).toLocaleString('id-ID')}</strong>
+                  <span className="unit">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
                 </div>
-              </div>
+                <div className="history-item-foot">
+                  <span className="by">Dicatat oleh: {r.recordedBy?.username || '-'}</span>
+                  {r.note && <span className="by">{r.note}</span>}
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+      </section>
+
+      {/* Modal tambah bahan (+ saldo awal opsional) — Admin */}
+      <MaterialModal
+        open={activeModal === 'add' && isAdmin}
+        title="Tambah Bahan Baku"
+        description="Isi data bahan baru. Saldo awal bersifat opsional dan hanya dicatat bila jumlah awalnya diketahui."
+        onClose={closeModal}
+      >
+        <div className="material-modal-body">
+          <form onSubmit={createMaterial} className="material-modal-form">
+            <div className="form-grid">
               <div className="field">
-                <label htmlFor="m-desc">Deskripsi (opsional)</label>
-                <textarea
-                  id="m-desc"
-                  rows={2}
-                  value={addForm.description}
-                  onChange={e => setAddForm(f => ({ ...f, description: e.target.value }))}
+                <label htmlFor="m-name">Nama Bahan</label>
+                <input
+                  id="m-name"
+                  value={addForm.name}
+                  onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Contoh: Sapi Segar"
+                  required
                 />
               </div>
+              <div className="field">
+                <label htmlFor="m-unit">Satuan Dasar</label>
+                <input
+                  id="m-unit"
+                  value={addForm.unit}
+                  onChange={e => setAddForm(f => ({ ...f, unit: e.target.value }))}
+                  placeholder="Contoh: kg"
+                  required
+                />
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="m-desc">Deskripsi (opsional)</label>
+              <textarea
+                id="m-desc"
+                rows={2}
+                value={addForm.description}
+                onChange={e => setAddForm(f => ({ ...f, description: e.target.value }))}
+              />
+            </div>
 
-              <div className="optional-block">
-                <div className="checkbox-row">
-                  <input
-                    id="ob-enable"
-                    type="checkbox"
-                    checked={obEnabled}
-                    onChange={e => {
-                      setObEnabled(e.target.checked)
-                      if (!e.target.checked) setAddObForm(EMPTY_ADD_OB)
-                    }}
-                  />
-                  <label htmlFor="ob-enable">Catat saldo awal sekaligus (opsional)</label>
-                </div>
-                {obEnabled ? (
-                  <div className="form-row" style={{ marginTop: '1rem' }}>
-                    <div className="field">
-                      <label htmlFor="ob-qty-new">Jumlah Saldo Awal</label>
-                      <input
-                        id="ob-qty-new"
-                        type="number"
-                        step="0.001"
-                        min="0"
-                        value={addObForm.quantity}
-                        onChange={e => setAddObForm(f => ({ ...f, quantity: e.target.value }))}
-                        required
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="ob-date-new">Tanggal Saldo Awal</label>
-                      <input
-                        id="ob-date-new"
-                        type="date"
-                        value={addObForm.date}
-                        onChange={e => setAddObForm(f => ({ ...f, date: e.target.value }))}
-                        required
-                      />
-                    </div>
-                    <div className="field">
-                      <label htmlFor="ob-reason-new">Alasan</label>
-                      <input
-                        id="ob-reason-new"
-                        value={addObForm.reason}
-                        onChange={e => setAddObForm(f => ({ ...f, reason: e.target.value }))}
-                        required
-                      />
-                    </div>
+            <div className="optional-block">
+              <div className="checkbox-row">
+                <input
+                  id="ob-enable"
+                  type="checkbox"
+                  checked={obEnabled}
+                  onChange={e => {
+                    setObEnabled(e.target.checked)
+                    if (!e.target.checked) setAddObForm(EMPTY_ADD_OB)
+                  }}
+                />
+                <label htmlFor="ob-enable">Catat saldo awal sekaligus (opsional)</label>
+              </div>
+              {obEnabled ? (
+                <div className="form-row" style={{ marginTop: '1rem' }}>
+                  <div className="field">
+                    <label htmlFor="ob-qty-new">Jumlah Saldo Awal</label>
+                    <input
+                      id="ob-qty-new"
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={addObForm.quantity}
+                      onChange={e => setAddObForm(f => ({ ...f, quantity: e.target.value }))}
+                      required
+                    />
                   </div>
-                ) : (
-                  <p className="text-muted optional-hint">
-                    Tanpa saldo awal, bahan tetap dibuat dengan stok 0 dan dapat menerima
-                    penerimaan atau saldo awal susulan.
-                  </p>
-                )}
-              </div>
+                  <div className="field">
+                    <label htmlFor="ob-date-new">Tanggal Saldo Awal</label>
+                    <input
+                      id="ob-date-new"
+                      type="date"
+                      value={addObForm.date}
+                      onChange={e => setAddObForm(f => ({ ...f, date: e.target.value }))}
+                      required
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="ob-reason-new">Alasan</label>
+                    <input
+                      id="ob-reason-new"
+                      value={addObForm.reason}
+                      onChange={e => setAddObForm(f => ({ ...f, reason: e.target.value }))}
+                      required
+                    />
+                  </div>
+                </div>
+              ) : (
+                <p className="text-muted optional-hint">
+                  Tanpa saldo awal, bahan tetap dibuat dengan stok 0 dan dapat menerima
+                  penerimaan atau saldo awal susulan.
+                </p>
+              )}
+            </div>
 
-              <div className="form-actions">
-                <button className="button" disabled={submittingAdd}>
-                  {submittingAdd
-                    ? 'Menyimpan...'
-                    : obEnabled ? 'Simpan Bahan + Saldo Awal' : 'Simpan Bahan'}
-                </button>
-              </div>
-            </form>
-          </section>
+            <div className="modal-actions">
+              <button type="button" className="button secondary" onClick={closeModal}>
+                Batal
+              </button>
+              <button className="button" disabled={submittingAdd}>
+                {submittingAdd
+                  ? 'Menyimpan...'
+                  : obEnabled ? 'Simpan Bahan + Saldo Awal' : 'Simpan Bahan'}
+              </button>
+            </div>
+          </form>
 
-          <section className="card section-card">
-            <h2 className="card-title">Catat Saldo Awal Bahan yang Sudah Ada</h2>
+          <details className="material-ob-details">
+            <summary>Catat saldo awal bahan yang sudah ada</summary>
             <p className="text-muted">
               Untuk bahan yang sudah terdaftar tetapi saldo awalnya belum tercatat. Bahan baru
               cukup dicatat lewat formulir di atas — jangan mencatat saldo awal dua kali untuk
               bahan yang sama. Tanggal, alasan, dan pengguna pencatat tersimpan pada riwayat
               pergerakan.
             </p>
-            <form onSubmit={submitOpeningBalance} className="form-row">
-              <div className="field">
-                <label htmlFor="ob-material">Bahan Baku</label>
-                <select
-                  id="ob-material"
-                  value={obForm.materialId}
-                  onChange={e => setObForm(f => ({ ...f, materialId: e.target.value }))}
-                  required
-                >
-                  <option value="">Pilih bahan baku</option>
-                  {activeMaterials.map(m => (
-                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                  ))}
-                </select>
+            <form onSubmit={submitOpeningBalance} className="material-modal-form">
+              <div className="form-row">
+                <div className="field">
+                  <label htmlFor="ob-material">Bahan Baku</label>
+                  <select
+                    id="ob-material"
+                    value={obForm.materialId}
+                    onChange={e => setObForm(f => ({ ...f, materialId: e.target.value }))}
+                    required
+                  >
+                    <option value="">Pilih bahan baku</option>
+                    {activeMaterials.map(m => (
+                      <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="ob-qty">Jumlah</label>
+                  <input
+                    id="ob-qty"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={obForm.quantity}
+                    onChange={e => setObForm(f => ({ ...f, quantity: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="ob-date">Tanggal Saldo Awal</label>
+                  <input
+                    id="ob-date"
+                    type="date"
+                    value={obForm.date}
+                    onChange={e => setObForm(f => ({ ...f, date: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="ob-reason">Alasan</label>
+                  <input
+                    id="ob-reason"
+                    value={obForm.reason}
+                    onChange={e => setObForm(f => ({ ...f, reason: e.target.value }))}
+                    required
+                  />
+                </div>
               </div>
-              <div className="field">
-                <label htmlFor="ob-qty">Jumlah</label>
-                <input
-                  id="ob-qty"
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  value={obForm.quantity}
-                  onChange={e => setObForm(f => ({ ...f, quantity: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="ob-date">Tanggal Saldo Awal</label>
-                <input
-                  id="ob-date"
-                  type="date"
-                  value={obForm.date}
-                  onChange={e => setObForm(f => ({ ...f, date: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="ob-reason">Alasan</label>
-                <input
-                  id="ob-reason"
-                  value={obForm.reason}
-                  onChange={e => setObForm(f => ({ ...f, reason: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="form-actions">
+              <div className="modal-actions">
+                <button type="button" className="button secondary" onClick={closeModal}>
+                  Tutup
+                </button>
                 <button className="button" disabled={submittingOb}>
                   {submittingOb ? 'Menyimpan...' : 'Catat Saldo Awal'}
                 </button>
               </div>
             </form>
-          </section>
+          </details>
         </div>
-      )}
+      </MaterialModal>
 
-      {/* ---------------------------------------------------------------- */}
-      {/* Tab: Penyesuaian Stok — hanya Admin (backend juga menegakkan)    */}
-      {/* ---------------------------------------------------------------- */}
-      {activeTab === 'adjust' && isAdmin && (
-        <div className="tab-panel" role="tabpanel" id="panel-adjust" aria-labelledby="tab-adjust">
-          <section className="card section-card">
-            <h2 className="card-title">Penyesuaian Stok</h2>
-            <p className="text-muted">
-              Jumlah bernilai tanda: positif menambah stok, negatif mengurangi. Alasan wajib
-              diisi dan tercatat permanen pada riwayat pergerakan stok.
-            </p>
-            <form onSubmit={submitAdjustment} className="form-row">
-              <div className="field">
-                <label htmlFor="adj-material">Bahan Baku</label>
-                <select
-                  id="adj-material"
-                  value={adjForm.materialId}
-                  onChange={e => setAdjForm(f => ({ ...f, materialId: e.target.value }))}
-                  required
-                >
-                  <option value="">Pilih bahan baku</option>
-                  {materials.map(m => (
-                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="adj-quantity">Jumlah (bertanda)</label>
-                <input
-                  id="adj-quantity"
-                  type="number"
-                  step="0.001"
-                  value={adjForm.quantity}
-                  onChange={e => setAdjForm(f => ({ ...f, quantity: e.target.value }))}
-                  placeholder="cth. -2.5"
-                  required
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adj-reason">Alasan</label>
-                <input
-                  id="adj-reason"
-                  value={adjForm.reason}
-                  onChange={e => setAdjForm(f => ({ ...f, reason: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="form-actions">
-                <button className="button" disabled={submittingAdj}>
-                  {submittingAdj ? 'Menyimpan...' : 'Catat Penyesuaian'}
-                </button>
-              </div>
-            </form>
-            {adjMaterial && (
-              <p className="text-muted optional-hint">
-                Stok {adjMaterial.name} saat ini: {Number(adjMaterial.stock ?? 0).toLocaleString('id-ID')} {adjMaterial.unit}
-                {' '}— hasil penyesuaian tidak boleh membuat stok menjadi negatif.
-              </p>
-            )}
-          </section>
-        </div>
-      )}
-
-      {/* ---------------------------------------------------------------- */}
-      {/* Tab: Penerimaan (Admin & Operator)                               */}
-      {/* ---------------------------------------------------------------- */}
-      {activeTab === 'receipt' && (
-        <div className="tab-panel" role="tabpanel" id="panel-receipt" aria-labelledby="tab-receipt">
-          <section className="card section-card">
-            <h2 className="card-title">Catat Penerimaan Bahan Baku</h2>
-            <p className="text-muted">
-              Penerimaan menambah stok bahan dan tercatat pada riwayat pergerakan stok.
-            </p>
-            <form onSubmit={submitReceipt} className="form-row">
-              <div className="field">
-                <label htmlFor="rs-material">Bahan Baku</label>
-                <select
-                  id="rs-material"
-                  value={receiptForm.materialId}
-                  onChange={e => setReceiptForm(f => ({ ...f, materialId: e.target.value }))}
-                  required
-                >
-                  <option value="">Pilih bahan baku</option>
-                  {activeMaterials.map(m => (
-                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                  ))}
-                </select>
-              </div>
+      {/* Modal penerimaan stok (Admin & Operator) */}
+      <MaterialModal
+        open={activeModal === 'receipt'}
+        title="Tambah Stok Bahan Baku"
+        description="Penerimaan menambah stok bahan dan tercatat pada riwayat pergerakan stok."
+        onClose={closeModal}
+      >
+        <div className="material-modal-body">
+          <form onSubmit={submitReceipt} className="material-modal-form">
+            <div className="field">
+              <label htmlFor="rs-material">Bahan Baku</label>
+              <select
+                id="rs-material"
+                value={receiptForm.materialId}
+                onChange={e => setReceiptForm(f => ({ ...f, materialId: e.target.value }))}
+                required
+              >
+                <option value="">Pilih bahan baku</option>
+                {activeMaterials.map(m => (
+                  <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-grid">
               <div className="field">
                 <label htmlFor="rs-qty">Jumlah</label>
                 <input
@@ -1062,110 +1244,90 @@ export function MaterialsPage() {
                   onChange={e => setReceiptForm(f => ({ ...f, receivedAt: e.target.value }))}
                 />
               </div>
+            </div>
+            <div className="field">
+              <label htmlFor="rs-note">Catatan (opsional)</label>
+              <input
+                id="rs-note"
+                value={receiptForm.note}
+                onChange={e => setReceiptForm(f => ({ ...f, note: e.target.value }))}
+              />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="button secondary" onClick={closeModal}>
+                Batal
+              </button>
+              <button className="button" disabled={submittingReceipt}>
+                {submittingReceipt ? 'Menyimpan...' : 'Catat Penerimaan'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </MaterialModal>
+
+      {/* Modal penyesuaian stok — Admin (backend juga menegakkan) */}
+      <MaterialModal
+        open={activeModal === 'adjust' && isAdmin}
+        title="Penyesuaian Stok"
+        description="Jumlah bernilai tanda: positif menambah stok, negatif mengurangi. Alasan wajib diisi."
+        onClose={closeModal}
+      >
+        <div className="material-modal-body">
+          <form onSubmit={submitAdjustment} className="material-modal-form">
+            <div className="field">
+              <label htmlFor="adj-material">Bahan Baku</label>
+              <select
+                id="adj-material"
+                value={adjForm.materialId}
+                onChange={e => setAdjForm(f => ({ ...f, materialId: e.target.value }))}
+                required
+              >
+                <option value="">Pilih bahan baku</option>
+                {materials.map(m => (
+                  <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-grid">
               <div className="field">
-                <label htmlFor="rs-note">Catatan (opsional)</label>
+                <label htmlFor="adj-quantity">Jumlah (bertanda)</label>
                 <input
-                  id="rs-note"
-                  value={receiptForm.note}
-                  onChange={e => setReceiptForm(f => ({ ...f, note: e.target.value }))}
+                  id="adj-quantity"
+                  type="number"
+                  step="0.001"
+                  value={adjForm.quantity}
+                  onChange={e => setAdjForm(f => ({ ...f, quantity: e.target.value }))}
+                  placeholder="cth. -2.5"
+                  required
                 />
               </div>
-              <div className="form-actions">
-                <button className="button" disabled={submittingReceipt}>
-                  {submittingReceipt ? 'Menyimpan...' : 'Catat Penerimaan'}
-                </button>
-              </div>
-            </form>
-          </section>
-
-          {/* Riwayat penerimaan (Admin & Operator) */}
-          <section className="card section-card">
-            <div className="section-head">
-              <h2 className="card-title">Riwayat Penerimaan</h2>
-              <div className="field filter-field">
-                <label htmlFor="receipt-material">Bahan baku</label>
-                <select
-                  id="receipt-material"
-                  value={receiptMaterialId}
-                  onChange={(e) => { setReceiptMaterialId(e.target.value); loadReceipts(e.target.value) }}
-                >
-                  <option value="">Pilih bahan baku</option>
-                  {materials.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                  ))}
-                </select>
+              <div className="field">
+                <label htmlFor="adj-reason">Alasan</label>
+                <input
+                  id="adj-reason"
+                  value={adjForm.reason}
+                  onChange={e => setAdjForm(f => ({ ...f, reason: e.target.value }))}
+                  required
+                />
               </div>
             </div>
-            <div className="table-wrapper desktop-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Bahan</th>
-                    <th>Jumlah</th>
-                    <th>Tanggal Terima</th>
-                    <th>Dicatat oleh</th>
-                    <th>Catatan</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!receiptMaterialId ? (
-                    <tr><td colSpan={5} className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</td></tr>
-                  ) : loadingReceipts ? (
-                    <tr><td colSpan={5}>Memuat riwayat...</td></tr>
-                  ) : receipts.length === 0 ? (
-                    <tr><td colSpan={5} className="text-muted">Belum ada riwayat penerimaan</td></tr>
-                  ) : (
-                    receipts.slice(0, 20).map(r => (
-                      <tr key={r.id}>
-                        <td>{materials.find(m => m.id === r.materialId)?.name || r.materialId}</td>
-                        <td className="num">
-                          {Number(r.quantity).toLocaleString('id-ID')}{' '}
-                          <span className="text-muted">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
-                        </td>
-                        <td>{r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}</td>
-                        <td>{r.recordedBy?.username || '-'}</td>
-                        <td className="text-muted">{r.note || '-'}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+            {adjMaterial && (
+              <p className="text-muted optional-hint">
+                Stok {adjMaterial.name} saat ini: {Number(adjMaterial.stock ?? 0).toLocaleString('id-ID')} {adjMaterial.unit}
+                {' '}— hasil penyesuaian tidak boleh membuat stok menjadi negatif.
+              </p>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="button secondary" onClick={closeModal}>
+                Batal
+              </button>
+              <button className="button" disabled={submittingAdj}>
+                {submittingAdj ? 'Menyimpan...' : 'Catat Penyesuaian'}
+              </button>
             </div>
-
-            {/* Mobile: kartu riwayat penerimaan */}
-            <div className="mobile-list">
-              {!receiptMaterialId ? (
-                <p className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</p>
-              ) : loadingReceipts ? (
-                <p className="text-muted">Memuat riwayat...</p>
-              ) : receipts.length === 0 ? (
-                <p className="text-muted">Belum ada riwayat penerimaan</p>
-              ) : (
-                receipts.slice(0, 20).map(r => (
-                  <article className="history-item" key={r.id}>
-                    <div className="history-item-top">
-                      <span className="history-item-date">
-                        {r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}
-                      </span>
-                      <span className="history-item-type">
-                        {materials.find(m => m.id === r.materialId)?.name || r.materialId}
-                      </span>
-                    </div>
-                    <div className="history-item-delta plus">
-                      <strong>+{Number(r.quantity).toLocaleString('id-ID')}</strong>
-                      <span className="unit">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
-                    </div>
-                    <div className="history-item-foot">
-                      <span className="by">Dicatat oleh: {r.recordedBy?.username || '-'}</span>
-                      {r.note && <span className="by">{r.note}</span>}
-                    </div>
-                  </article>
-                ))
-              )}
-            </div>
-          </section>
+          </form>
         </div>
-      )}
+      </MaterialModal>
 
     </div>
   )

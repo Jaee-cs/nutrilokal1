@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../lib/api'
 import { useNotify } from '../components/NotificationProvider'
+import { PasswordInput } from '../components/PasswordInput'
 
 interface User {
   id: string
@@ -214,14 +215,14 @@ export function UsersPage() {
           </div>
           <div className="field">
             <label htmlFor="u-password">Kata Sandi</label>
-            <input
+            <PasswordInput
               id="u-password"
-              type="password"
               value={form.password}
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
               required
               minLength={8}
               placeholder="Minimal 8 karakter"
+              visibilityLabel="kata sandi operator"
             />
           </div>
           <div className="field">

@@ -218,9 +218,15 @@ model ProductionMaterialUsage {
   productionId String
   material     Material    @relation(fields: [materialId], references: [id])
   materialId   String
-  quantity     Decimal     @db.Decimal(14, 3)
-  createdAt    DateTime    @default(now())
-  movement     MaterialStockMovement?
+  /// Jumlah aktual dalam SATUAN STOK bahan baku (dipakai untuk pengurangan
+  /// stok dan jejak ledger).
+  quantity      Decimal     @db.Decimal(14, 3)
+  /// Jumlah aktual yang diinput pengguna; null untuk data lama.
+  inputQuantity Decimal?    @db.Decimal(14, 3)
+  /// Satuan input aktual pengguna; null untuk data lama.
+  inputUnit     String?
+  createdAt     DateTime    @default(now())
+  movement      MaterialStockMovement?
 
   @@unique([productionId, materialId])
   @@index([materialId])
@@ -566,6 +572,7 @@ model Product {
   batches     Batch[]
   productions Production[]
   saleItems   SaleItem[]
+  recipeItems ProductRecipeItem[]
 
   @@map("products")
 }
@@ -595,6 +602,27 @@ model Material {
   stockMovements   MaterialStockMovement[]
   productionUsages ProductionMaterialUsage[]
   stockAdjustments StockAdjustment[]
+  recipeItems      ProductRecipeItem[]
 
   @@map("materials")
+}
+
+/// Resep standar produk: kebutuhan bahan per 1 satuan produk.
+/// Mengubah resep tidak mengubah riwayat produksi yang sudah tersimpan.
+model ProductRecipeItem {
+  id              String   @id @default(cuid())
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId       String
+  material        Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  materialId      String
+  /// Kebutuhan per 1 satuan produk, dalam satuan resep.
+  quantityPerUnit Decimal  @db.Decimal(14, 3)
+  /// Satuan resep; boleh berbeda dari satuan stok bahan (harus kompatibel).
+  recipeUnit      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([productId, materialId])
+  @@index([materialId])
+  @@map("product_recipe_items")
 }

@@ -65,6 +65,35 @@ export function businessDayRange(fromCode: string, toCode: string): { gte: Date;
   };
 }
 
+/** Pilihan periode ringkasan dashboard operasional. */
+export type DashboardPeriod = 'today' | 'week' | 'month';
+
+/**
+ * Tanggal bisnis awal/akhir untuk periode dashboard (kalender WIB).
+ * - today: tanggal berjalan.
+ * - week : 7 hari terakhir, termasuk hari ini.
+ * - month: 30 hari terakhir, termasuk hari ini.
+ *
+ * `reference` dapat diinjeksi untuk pengujian; default = sekarang.
+ */
+export function dashboardPeriodCodes(
+  period: DashboardPeriod,
+  reference = new Date()
+): { from: string; to: string } {
+  const today = instantBusinessDateCode(reference);
+  if (period === 'today') {
+    return { from: today, to: today };
+  }
+
+  const daysBack = period === 'week' ? 6 : 29;
+  const current = new Date(`${today}T00:00:00.000Z`);
+  const from = new Date(current.getTime() - daysBack * 86_400_000);
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: today,
+  };
+}
+
 /** True bila tanggal bisnis tersebut setelah hari ini (WIB). */
 export function isBusinessDateInFuture(date: Date): boolean {
   return businessDateCode(date) > todayBusinessDateCode();

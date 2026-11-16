@@ -20,7 +20,7 @@
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app';
-import { todayBusinessDateCode } from './lib/date';
+import { businessDayRange, dashboardPeriodCodes, todayBusinessDateCode } from './lib/date';
 import { hashPassword } from './lib/password';
 import { prisma } from './lib/prisma';
 
@@ -422,6 +422,50 @@ describe('dashboard usaha', () => {
     expect(body.sales.recent).toHaveLength(2);
     const statuses = body.sales.recent.map((s: any) => s.status).sort();
     expect(statuses).toEqual(['CANCELLED', 'COMPLETED']);
+  });
+
+  it('memfilter seluruh statistik sesuai periode', async () => {
+    for (const key of ['today', 'week', 'month'] as const) {
+      const codes = dashboardPeriodCodes(key);
+      const range = businessDayRange(codes.from, codes.to);
+      const res = await request(app)
+        .get(`/api/dashboard?period=${key}`)
+        .set(auth(operatorToken));
+      expect(res.status).toBe(200);
+      expect(res.body.period).toEqual({ key, ...codes });
+
+      const productionAgg = await prisma.production.aggregate({
+        where: { productionDate: range },
+        _count: { _all: true },
+      });
+      expect(res.body.production.recordCount).toBe(productionAgg._count._all);
+      expect(res.body.production.recent.length).toBeLessThanOrEqual(5);
+
+      const activeSales = await prisma.saleTransaction.aggregate({
+        where: { recordedAt: range, cancelledAt: null },
+        _count: { _all: true },
+        _sum: { total: true },
+      });
+      expect(res.body.sales.transactionCount).toBe(activeSales._count._all);
+      expect(res.body.sales.omzet).toBe(Number(activeSales._sum.total ?? 0));
+
+      const cancelledSales = await prisma.saleTransaction.count({
+        where: { recordedAt: range, cancelledAt: { not: null } },
+      });
+      expect(res.body.sales.cancelledCount).toBe(cancelledSales);
+
+      expect(res.body.materials.periodCount).toBe(
+        await prisma.material.count({ where: { createdAt: range } })
+      );
+      expect(res.body.products.periodCount).toBe(
+        await prisma.product.count({ where: { createdAt: range } })
+      );
+    }
+
+    const invalid = await request(app)
+      .get('/api/dashboard?period=tahun')
+      .set(auth(operatorToken));
+    expect(invalid.status).toBe(400);
   });
 
   it('menolak akses tanpa autentikasi', async () => {

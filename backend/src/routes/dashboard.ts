@@ -13,32 +13,63 @@
  * - Sales: omzet = jumlah total transaksi yang TIDAK dibatalkan
  *   (README 5.5); total transaksi sudah dihitung backend saat pencatatan.
  *
+ * Filter periode opsional `?period=today|week|month` (kalender WIB) berlaku
+ * untuk statistik produksi, penjualan, pembatalan, omzet, serta jumlah
+ * bahan/produk yang ditambahkan pada periode tersebut. `week` = 7 hari
+ * terakhir dan `month` = 30 hari terakhir, keduanya termasuk hari ini.
+ * Tanpa parameter = seluruh data (kompatibel dengan pemanggil lama).
+ *
  * Dibaca Admin dan Operator (informasi operasional, README 4).
  * Perincian periode tersedia di /api/reports (B9).
  */
 import { Router } from 'express';
-import { instantBusinessDateCode } from '../lib/date';
+import {
+  businessDayRange,
+  dashboardPeriodCodes,
+  instantBusinessDateCode,
+  type DashboardPeriod,
+} from '../lib/date';
 import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth';
 
 export const dashboardRouter = Router();
 
 const RECENT_LIMIT = 5;
+const DASHBOARD_PERIODS: readonly DashboardPeriod[] = ['today', 'week', 'month'];
 
-dashboardRouter.get('/', authenticate, async (_req, res) => {
+function isDashboardPeriod(value: unknown): value is DashboardPeriod {
+  return typeof value === 'string' && DASHBOARD_PERIODS.includes(value as DashboardPeriod);
+}
+
+dashboardRouter.get('/', authenticate, async (req, res) => {
+  const periodParam = req.query.period;
+  let periodInfo: { key: DashboardPeriod; from: string; to: string } | null = null;
+  if (periodParam !== undefined) {
+    if (!isDashboardPeriod(periodParam)) {
+      res.status(400).json({
+        message: 'Parameter period harus salah satu: today, week, month.',
+      });
+      return;
+    }
+    periodInfo = { key: periodParam, ...dashboardPeriodCodes(periodParam) };
+  }
+  const range = periodInfo ? businessDayRange(periodInfo.from, periodInfo.to) : null;
+  const productionWhere = range ? { productionDate: range } : {};
+  const transactionWhere = range ? { recordedAt: range } : {};
   // ---------------------------------------------------------------------
   // Stok bahan baku: total per jenis bahan (README 5.2).
   // ---------------------------------------------------------------------
-  const [materials, materialStocks] = await Promise.all([
+  const [materials, materialStocks, materialPeriodCount] = await Promise.all([
     prisma.material.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, unit: true } }),
     prisma.materialStock.findMany({ select: { materialId: true, quantity: true } }),
+    prisma.material.count({ where: range ? { createdAt: range } : undefined }),
   ]);
   const materialStockBy = new Map(materialStocks.map((s) => [s.materialId, Number(s.quantity)]));
 
   // ---------------------------------------------------------------------
   // Stok produk jadi: total per produk = jumlah stok seluruh batch.
   // ---------------------------------------------------------------------
-  const [products, productTotals, batchesWithStock] = await Promise.all([
+  const [products, productTotals, batchesWithStock, productPeriodCount] = await Promise.all([
     prisma.product.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, unit: true } }),
     prisma.batch.groupBy({
       by: ['productId'],
@@ -57,6 +88,7 @@ dashboardRouter.get('/', authenticate, async (_req, res) => {
         product: { select: { name: true } },
       },
     }),
+    prisma.product.count({ where: range ? { createdAt: range } : undefined }),
   ]);
   const productTotalBy = new Map(
     productTotals.map((t) => [
@@ -69,13 +101,15 @@ dashboardRouter.get('/', authenticate, async (_req, res) => {
   // Ringkasan produksi: agregasi DB + catatan terbaru.
   // ---------------------------------------------------------------------
   const [productionAgg, productionByProduct, recentProductions] = await Promise.all([
-    prisma.production.aggregate({ _count: { _all: true } }),
+    prisma.production.aggregate({ where: productionWhere, _count: { _all: true } }),
     prisma.production.groupBy({
       by: ['productId'],
+      where: productionWhere,
       _sum: { yieldQuantity: true },
       _count: { _all: true },
     }),
     prisma.production.findMany({
+      where: productionWhere,
       orderBy: [{ productionDate: 'desc' }, { recordedAt: 'desc' }],
       take: RECENT_LIMIT,
       select: {
@@ -94,15 +128,16 @@ dashboardRouter.get('/', authenticate, async (_req, res) => {
   // ---------------------------------------------------------------------
   const [completedAgg, cancelledAgg, recentSales] = await Promise.all([
     prisma.saleTransaction.aggregate({
-      where: { cancelledAt: null },
+      where: { ...transactionWhere, cancelledAt: null },
       _count: { _all: true },
       _sum: { total: true },
     }),
     prisma.saleTransaction.aggregate({
-      where: { cancelledAt: { not: null } },
+      where: { ...transactionWhere, cancelledAt: { not: null } },
       _count: { _all: true },
     }),
     prisma.saleTransaction.findMany({
+      where: transactionWhere,
       orderBy: { recordedAt: 'desc' },
       take: RECENT_LIMIT,
       select: { id: true, recordedAt: true, total: true, cancelledAt: true },
@@ -110,8 +145,12 @@ dashboardRouter.get('/', authenticate, async (_req, res) => {
   ]);
 
   res.json({
+    // null = tanpa filter (kompatibel dengan pemanggil lama).
+    period: periodInfo,
     materials: {
       count: materials.length,
+      // Jumlah bahan yang ditambahkan pada periode terpilih.
+      periodCount: materialPeriodCount,
       items: materials.map((m) => ({
         id: m.id,
         name: m.name,
@@ -121,6 +160,8 @@ dashboardRouter.get('/', authenticate, async (_req, res) => {
     },
     products: {
       count: products.length,
+      // Jumlah produk yang ditambahkan pada periode terpilih.
+      periodCount: productPeriodCount,
       items: products.map((p) => ({
         id: p.id,
         name: p.name,

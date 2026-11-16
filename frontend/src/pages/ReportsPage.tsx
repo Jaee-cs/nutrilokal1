@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { CalendarDays, Download, X } from 'lucide-react'
 import api from '../lib/api'
-import { useNotify } from '../components/NotificationProvider'
+import {
+  formatReportRange,
+  presetRange,
+  reportFilePeriod,
+  validateReportRange,
+  type ReportPreset,
+  type ReportRange,
+} from '../utils/report-period'
 
 function csvEscape(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -64,8 +73,176 @@ const REPORT_TABS: Array<{ id: ReportTab; label: string }> = [
   { id: 'stok-saat-ini', label: 'Stok Saat Ini' },
 ]
 
+const PRESET_OPTIONS: Array<{ id: Exclude<ReportPreset, 'custom'>; label: string }> = [
+  { id: 'all', label: 'Semua' },
+  { id: 'today', label: 'Hari Ini' },
+  { id: 'week', label: 'Minggu Ini' },
+  { id: 'month', label: 'Bulan Ini' },
+]
+
+interface PeriodModalProps {
+  open: boolean
+  initialFrom: string
+  initialTo: string
+  onClose: () => void
+  onApply: (from: string, to: string) => void
+}
+
+/** Modal periode kustom, terpusat dan memakai sistem modal NutriLokal. */
+function PeriodModal({ open, initialFrom, initialTo, onClose, onApply }: PeriodModalProps) {
+  const titleId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  const [from, setFrom] = useState(initialFrom)
+  const [to, setTo] = useState(initialTo)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setFrom(initialFrom)
+    setTo(initialTo)
+    setError(null)
+  }, [open, initialFrom, initialTo])
+
+  useEffect(() => {
+    if (!open) return
+
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    const firstInput = panelRef.current?.querySelector<HTMLInputElement>('input')
+    firstInput?.focus()
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      previousFocus?.focus?.()
+    }
+  }, [open])
+
+  if (!open) return null
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault()
+    const message = validateReportRange(from, to)
+    if (message) {
+      setError(message)
+      return
+    }
+    onApply(from, to)
+  }
+
+  return createPortal(
+    <div className="modal-root">
+      <div className="modal-overlay" onClick={onClose} />
+      <div
+        ref={panelRef}
+        className="modal-panel report-period-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <div className="report-period-modal-head">
+          <div>
+            <h2 className="modal-title" id={titleId}>Pilih Periode Laporan</h2>
+            <p className="text-muted report-period-modal-subtitle">
+              Pilih tanggal mulai dan tanggal akhir. Rentang berlaku untuk seluruh kategori laporan.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Tutup dialog periode"
+            title="Tutup"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="report-period-form">
+          <div className="form-row">
+            <div className="field">
+              <label htmlFor="report-period-from">Tanggal Mulai</label>
+              <input
+                id="report-period-from"
+                type="date"
+                value={from}
+                onChange={(event) => {
+                  setFrom(event.target.value)
+                  setError(null)
+                }}
+                required
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="report-period-to">Tanggal Akhir</label>
+              <input
+                id="report-period-to"
+                type="date"
+                value={to}
+                onChange={(event) => {
+                  setTo(event.target.value)
+                  setError(null)
+                }}
+                required
+              />
+            </div>
+          </div>
+
+          {error && <div className="alert error" role="alert">{error}</div>}
+
+          <div className="modal-actions">
+            <button type="button" className="button secondary" onClick={onClose}>
+              Batal
+            </button>
+            <button className="button">Terapkan</button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+interface ExportButtonProps {
+  table: string
+  onClick: () => void
+  disabled?: boolean
+}
+
+/** Tombol ekspor yang selalu berada tepat di bawah tabel terkait. */
+function ExportButton({ table, onClick, disabled }: ExportButtonProps) {
+  return (
+    <div className="table-export-row">
+      <button
+        type="button"
+        className="button secondary report-export-button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={`Export CSV ${table}`}
+        title={`Export CSV ${table}`}
+      >
+        <Download size={16} aria-hidden="true" />
+        Export CSV
+      </button>
+    </div>
+  )
+}
+
 export function ReportsPage() {
-  const notify = useNotify()
   const [stock, setStock] = useState<StockReport | null>(null)
   const [materials, setMaterials] = useState<MaterialsReport | null>(null)
   const [productions, setProductions] = useState<ProductionsReport | null>(null)
@@ -75,152 +252,100 @@ export function ReportsPage() {
   const [loadingProd, setLoadingProd] = useState(true)
   const [loadingMat, setLoadingMat] = useState(true)
   const [loadingStock, setLoadingStock] = useState(true)
-  // Gagal memuat laporan tetap tampil inline (keadaan halaman). Validasi
-  // tanggal dan peringatan ekspor memakai dialog notifikasi.
+  // Gagal memuat laporan tetap tampil inline (keadaan halaman).
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [stockError, setStockError] = useState<string | null>(null)
 
   const [activeTab, setActiveTab] = useState<ReportTab>('penjualan')
 
-  // Per-tab filters
-  const [salesFrom, setSalesFrom] = useState('')
-  const [salesTo, setSalesTo] = useState('')
-  const [prodFrom, setProdFrom] = useState('')
-  const [prodTo, setProdTo] = useState('')
-  const [matFrom, setMatFrom] = useState('')
-  const [matTo, setMatTo] = useState('')
+  // Satu periode untuk semua kategori. Default: Bulan Ini.
+  const [preset, setPreset] = useState<ReportPreset>('month')
+  const [range, setRange] = useState<ReportRange>(() => presetRange('month'))
+  const [customOpen, setCustomOpen] = useState(false)
 
-  const fetchSales = useCallback(async (f = salesFrom, t = salesTo) => {
+  useEffect(() => {
+    let active = true
+    // Tanpa `from`/`to` = seluruh data historis (preset Semua).
+    const params = range.from && range.to ? { from: range.from, to: range.to } : {}
+
     setLoadingSales(true)
-    const params: Record<string, string> = {}
-    if (f) params.from = f
-    if (t) params.to = t
-    try {
-      if (f && t && f > t) {
-        notify.error('Tanggal Dari tidak boleh melebihi tanggal Sampai.')
-        setLoadingSales(false)
-        return
-      }
-      const res = await api.get('/reports/sales', { params })
-      setSales(res.data)
-      setLoadError(null)
-    } catch (err: any) {
-      setLoadError(err.response?.data?.message || 'Gagal memuat laporan penjualan')
-    } finally {
-      setLoadingSales(false)
-    }
-  }, [salesFrom, salesTo])
-
-  const fetchProd = useCallback(async (f = prodFrom, t = prodTo) => {
     setLoadingProd(true)
-    const params: Record<string, string> = {}
-    if (f) params.from = f
-    if (t) params.to = t
-    try {
-      if (f && t && f > t) {
-        notify.error('Tanggal Dari tidak boleh melebihi tanggal Sampai.')
-        setLoadingProd(false)
-        return
-      }
-      const res = await api.get('/reports/productions', { params })
-      setProductions(res.data)
-      setLoadError(null)
-    } catch (err: any) {
-      setLoadError(err.response?.data?.message || 'Gagal memuat laporan produksi')
-    } finally {
-      setLoadingProd(false)
-    }
-  }, [prodFrom, prodTo])
-
-  const fetchMat = useCallback(async (f = matFrom, t = matTo) => {
     setLoadingMat(true)
-    const params: Record<string, string> = {}
-    if (f) params.from = f
-    if (t) params.to = t
-    try {
-      if (f && t && f > t) {
-        notify.error('Tanggal Dari tidak boleh melebihi tanggal Sampai.')
-        setLoadingMat(false)
-        return
-      }
-      const res = await api.get('/reports/materials', { params })
-      setMaterials(res.data)
-      setLoadError(null)
-    } catch (err: any) {
-      setLoadError(err.response?.data?.message || 'Gagal memuat laporan bahan baku')
-    } finally {
-      setLoadingMat(false)
-    }
-  }, [matFrom, matTo])
 
-  const fetchStock = useCallback(async () => {
+    Promise.allSettled([
+      api.get('/reports/sales', { params }),
+      api.get('/reports/productions', { params }),
+      api.get('/reports/materials', { params }),
+    ])
+      .then(([salesResult, prodResult, matResult]) => {
+        if (!active) return
+
+        let error: string | null = null
+
+        if (salesResult.status === 'fulfilled') {
+          setSales(salesResult.value.data)
+        } else {
+          error = salesResult.reason?.response?.data?.message || 'Gagal memuat laporan penjualan'
+        }
+
+        if (prodResult.status === 'fulfilled') {
+          setProductions(prodResult.value.data)
+        } else {
+          error = error || prodResult.reason?.response?.data?.message || 'Gagal memuat laporan produksi'
+        }
+
+        if (matResult.status === 'fulfilled') {
+          setMaterials(matResult.value.data)
+        } else {
+          error = error || matResult.reason?.response?.data?.message || 'Gagal memuat laporan bahan baku'
+        }
+
+        setLoadError(error)
+      })
+      .finally(() => {
+        if (!active) return
+        setLoadingSales(false)
+        setLoadingProd(false)
+        setLoadingMat(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [range.from, range.to])
+
+  useEffect(() => {
+    let active = true
     setLoadingStock(true)
-    try {
-      const res = await api.get('/reports/stock')
-      setStock(res.data)
-      setLoadError(null)
-    } catch (err: any) {
-      setLoadError(err.response?.data?.message || 'Gagal memuat laporan stok')
-    } finally {
-      setLoadingStock(false)
+    api.get('/reports/stock')
+      .then((res) => {
+        if (!active) return
+        setStock(res.data)
+        setStockError(null)
+      })
+      .catch((err: any) => {
+        if (!active) return
+        setStockError(err.response?.data?.message || 'Gagal memuat laporan stok')
+      })
+      .finally(() => {
+        if (active) setLoadingStock(false)
+      })
+    return () => {
+      active = false
     }
   }, [])
 
-  useEffect(() => {
-    fetchSales(salesFrom, salesTo)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const filePeriod = reportFilePeriod(range.from, range.to)
 
-  useEffect(() => {
-    fetchProd(prodFrom, prodTo)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    fetchMat(matFrom, matTo)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    fetchStock()
-  }, [fetchStock])
-
-  const applySales = () => {
-    if (salesFrom && salesTo && salesFrom > salesTo) {
-      notify.error('Tanggal Dari tidak boleh melebihi tanggal Sampai.')
-      return
-    }
-    fetchSales(salesFrom, salesTo)
+  function applyPreset(next: Exclude<ReportPreset, 'custom'>) {
+    setPreset(next)
+    setRange(presetRange(next))
   }
 
-  const resetSales = () => {
-    setSalesFrom('')
-    setSalesTo('')
-    fetchSales('', '')
-  }
-
-  const applyProd = () => {
-    if (prodFrom && prodTo && prodFrom > prodTo) {
-      notify.error('Tanggal Dari tidak boleh melebihi tanggal Sampai.')
-      return
-    }
-    fetchProd(prodFrom, prodTo)
-  }
-
-  const resetProd = () => {
-    setProdFrom('')
-    setProdTo('')
-    fetchProd('', '')
-  }
-
-  const applyMat = () => {
-    if (matFrom && matTo && matFrom > matTo) {
-      notify.error('Tanggal Dari tidak boleh melebihi tanggal Sampai.')
-      return
-    }
-    fetchMat(matFrom, matTo)
-  }
-
-  const resetMat = () => {
-    setMatFrom('')
-    setMatTo('')
-    fetchMat('', '')
+  function applyCustom(from: string, to: string) {
+    setPreset('custom')
+    setRange({ from, to })
+    setCustomOpen(false)
   }
 
   return (
@@ -231,6 +356,7 @@ export function ReportsPage() {
       </div>
 
       {loadError && <div className="alert error">{loadError}</div>}
+      {stockError && <div className="alert error">{stockError}</div>}
 
       {/* Navigasi tab laporan */}
       <div className="reports-tabs" role="tablist" aria-label="Bagian laporan">
@@ -248,73 +374,42 @@ export function ReportsPage() {
         ))}
       </div>
 
+      {/* Satu filter periode untuk seluruh kategori laporan. */}
+      <div className="report-period-filter-block">
+        <div className="report-period-filter" role="group" aria-label="Filter periode laporan">
+          {PRESET_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={`reports-tab ${preset === option.id ? 'active' : ''}`}
+              aria-pressed={preset === option.id}
+              onClick={() => applyPreset(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`icon-button report-period-calendar ${preset === 'custom' ? 'active' : ''}`}
+            aria-label="Pilih periode kustom"
+            title="Pilih periode kustom"
+            onClick={() => setCustomOpen(true)}
+          >
+            <CalendarDays size={18} aria-hidden="true" />
+          </button>
+        </div>
+        {preset === 'custom' && (
+          <p className="report-period-range" aria-live="polite">
+            Periode kustom: <strong>{formatReportRange(range.from, range.to)}</strong>
+          </p>
+        )}
+      </div>
+
       {/* Ringkasan Penjualan */}
       {activeTab === 'penjualan' && (
         <section className="card section-card">
           <div className="section-head">
-            <h2 className="card-title">Ringkasan Penjualan{(sales?.from || sales?.to) ? ' (periode dipilih)' : ''}</h2>
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => {
-                if (!sales) {
-                  notify.error('Laporan penjualan belum tersedia untuk diekspor.')
-                  return
-                }
-                if ((sales.summary.transactionCount === 0 && sales.summary.cancelledCount === 0 && sales.byDay.length === 0 && sales.byProduct.length === 0)) {
-                  notify.error('Tidak ada data penjualan pada periode ini untuk diekspor.')
-                  return
-                }
-                const from = sales.from || salesFrom || 'semua'
-                const to = sales.to || salesTo || 'semua'
-                const rows: string[][] = [
-                  ['Tanggal', 'Transaksi', 'Omzet'],
-                ]
-                sales.byDay.forEach(d => {
-                  rows.push([d.date, String(d.transactionCount), String(d.omzet)])
-                })
-                if (sales.byProduct.length > 0) {
-                  rows.push([])
-                  rows.push(['Produk', 'Qty', 'Satuan', 'Omzet'])
-                  sales.byProduct.forEach(p => {
-                    rows.push([p.name, String(p.quantity), p.unit, String(p.value)])
-                  })
-                }
-                rows.push([])
-                rows.push(['Ringkasan', '', '', ''])
-                rows.push(['Transaksi Aktif', String(sales.summary.transactionCount), '', ''])
-                rows.push(['Dibatalkan', String(sales.summary.cancelledCount), '', ''])
-                rows.push(['Omzet', String(sales.summary.omzet), '', ''])
-                downloadCsv(`laporan-penjualan-${from}-${to}.csv`, rows)
-              }}
-              disabled={loadingSales}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>download</span>
-              Export CSV
-            </button>
-          </div>
-
-          {/* Filter Periode */}
-          <div className="report-filter">
-            <div className="report-filter-title">Filter Periode</div>
-            <div className="report-filter-row">
-              <div className="field report-filter-field">
-                <label htmlFor="sales-from">Dari</label>
-                <input id="sales-from" type="date" value={salesFrom} onChange={(e) => setSalesFrom(e.target.value)} />
-              </div>
-              <div className="field report-filter-field">
-                <label htmlFor="sales-to">Sampai</label>
-                <input id="sales-to" type="date" value={salesTo} onChange={(e) => setSalesTo(e.target.value)} />
-              </div>
-            </div>
-            <div className="report-filter-actions">
-              <button type="button" className="button" onClick={applySales} disabled={loadingSales}>
-                {loadingSales ? 'Memuat...' : 'Terapkan Filter'}
-              </button>
-              <button type="button" className="button secondary" onClick={resetSales} disabled={loadingSales}>
-                Reset
-              </button>
-            </div>
+            <h2 className="card-title">Ringkasan Penjualan</h2>
           </div>
 
           {loadingSales && <p className="text-muted">Memuat laporan...</p>}
@@ -354,6 +449,17 @@ export function ReportsPage() {
                       </tbody>
                     </table>
                   </div>
+                  <ExportButton
+                    table="Omzet per Hari"
+                    disabled={loadingSales}
+                    onClick={() => {
+                      const rows: string[][] = [['Tanggal', 'Transaksi', 'Omzet']]
+                      sales.byDay.forEach(d => {
+                        rows.push([d.date, String(d.transactionCount), String(d.omzet)])
+                      })
+                      downloadCsv(`laporan-penjualan-omzet-per-hari-${filePeriod}.csv`, rows)
+                    }}
+                  />
                 </>
               )}
 
@@ -374,6 +480,17 @@ export function ReportsPage() {
                       </tbody>
                     </table>
                   </div>
+                  <ExportButton
+                    table="Penjualan per Produk"
+                    disabled={loadingSales}
+                    onClick={() => {
+                      const rows: string[][] = [['Produk', 'Qty', 'Satuan', 'Omzet']]
+                      sales.byProduct.forEach(p => {
+                        rows.push([p.name, String(p.quantity), p.unit, String(p.value)])
+                      })
+                      downloadCsv(`laporan-penjualan-per-produk-${filePeriod}.csv`, rows)
+                    }}
+                  />
                 </>
               )}
 
@@ -390,68 +507,7 @@ export function ReportsPage() {
         <section className="card section-card">
           <div className="section-head">
             <h2 className="card-title">Ringkasan Produksi</h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              {productions && <span className="text-muted">{productions.summary.recordCount} catatan</span>}
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => {
-                  if (!productions) {
-                    notify.error('Laporan produksi belum tersedia untuk diekspor.')
-                    return
-                  }
-                  if (productions.summary.recordCount === 0 && productions.records.length === 0 && productions.summary.byProduct.length === 0) {
-                    notify.error('Tidak ada data produksi pada periode ini untuk diekspor.')
-                    return
-                  }
-                  const from = productions.from || prodFrom || 'semua'
-                  const to = productions.to || prodTo || 'semua'
-                  const rows: string[][] = [['Tanggal', 'Produk', 'Jumlah Hasil', 'Satuan']]
-                  productions.records.forEach(r => {
-                    rows.push([
-                      typeof r.productionDate === 'string' && r.productionDate.length >= 10 ? r.productionDate.slice(0, 10) : String(r.productionDate),
-                      r.productName,
-                      String(r.yieldQuantity),
-                      r.unit,
-                    ])
-                  })
-                  if (productions.summary.byProduct.length > 0) {
-                    rows.push([])
-                    rows.push(['Ringkasan per Produk', 'Jumlah Catatan', 'Total Hasil', 'Satuan'])
-                    productions.summary.byProduct.forEach(p => {
-                      rows.push([p.productName || '', String(p.recordCount), String(p.totalYield), p.unit || ''])
-                    })
-                  }
-                  downloadCsv(`laporan-produksi-${from}-${to}.csv`, rows)
-                }}
-                disabled={loadingProd}
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>download</span>
-                Export CSV
-              </button>
-            </div>
-          </div>
-
-          <div className="report-filter">
-            <div className="report-filter-title">Filter Periode</div>
-            <div className="report-filter-row">
-              <div className="field report-filter-field">
-                <label htmlFor="prod-from">Dari</label>
-                <input id="prod-from" type="date" value={prodFrom} onChange={(e) => setProdFrom(e.target.value)} />
-              </div>
-              <div className="field report-filter-field">
-                <label htmlFor="prod-to">Sampai</label>
-                <input id="prod-to" type="date" value={prodTo} onChange={(e) => setProdTo(e.target.value)} />
-              </div>
-            </div>
-            <div className="report-filter-actions">
-              <button type="button" className="button" onClick={applyProd} disabled={loadingProd}>
-                {loadingProd ? 'Memuat...' : 'Terapkan Filter'}
-              </button>
-              <button type="button" className="button secondary" onClick={resetProd} disabled={loadingProd}>
-                Reset
-              </button>
-            </div>
+            {productions && <span className="text-muted">{productions.summary.recordCount} catatan</span>}
           </div>
 
           {loadingProd && <p className="text-muted">Memuat laporan...</p>}
@@ -474,6 +530,17 @@ export function ReportsPage() {
                       </tbody>
                     </table>
                   </div>
+                  <ExportButton
+                    table="Produksi per Produk"
+                    disabled={loadingProd}
+                    onClick={() => {
+                      const rows: string[][] = [['Produk', 'Jumlah Catatan', 'Total Hasil', 'Satuan']]
+                      productions.summary.byProduct.forEach(p => {
+                        rows.push([p.productName || '', String(p.recordCount), String(p.totalYield), p.unit || ''])
+                      })
+                      downloadCsv(`laporan-produksi-per-produk-${filePeriod}.csv`, rows)
+                    }}
+                  />
                 </>
               )}
 
@@ -494,6 +561,27 @@ export function ReportsPage() {
                       </tbody>
                     </table>
                   </div>
+                  {productions.records.length > 20 && (
+                    <p className="text-muted report-table-note">
+                      Menampilkan 20 dari {productions.records.length} catatan. Export CSV memuat seluruh catatan periode ini.
+                    </p>
+                  )}
+                  <ExportButton
+                    table="Catatan Produksi"
+                    disabled={loadingProd}
+                    onClick={() => {
+                      const rows: string[][] = [['Tanggal', 'Produk', 'Jumlah Hasil', 'Satuan']]
+                      productions.records.forEach(r => {
+                        rows.push([
+                          typeof r.productionDate === 'string' && r.productionDate.length >= 10 ? r.productionDate.slice(0, 10) : String(r.productionDate),
+                          r.productName,
+                          String(r.yieldQuantity),
+                          r.unit,
+                        ])
+                      })
+                      downloadCsv(`laporan-produksi-catatan-${filePeriod}.csv`, rows)
+                    }}
+                  />
                 </>
               )}
 
@@ -510,22 +598,41 @@ export function ReportsPage() {
         <section className="card section-card">
           <div className="section-head">
             <h2 className="card-title">Pergerakan Bahan Baku</h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              {materials && (materials.from || materials.to) && <span className="text-muted">periode dipilih</span>}
-              <button
-                type="button"
-                className="button secondary"
+          </div>
+
+          {loadingMat && <p className="text-muted">Memuat laporan...</p>}
+          {!loadingMat && materials && materials.materials.length > 0 && (
+            <>
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Bahan</th>
+                      <th>Diterima</th>
+                      <th>Saldo Awal</th>
+                      <th>Dipakai</th>
+                      <th>Disesuaikan</th>
+                      <th>Stok Saat Ini</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {materials.materials.map((m, i) => (
+                      <tr key={i}>
+                        <td className="cell-primary">{m.name}</td>
+                        <td className="num">{nf(m.received)}</td>
+                        <td className="num">{nf(m.openingBalance)}</td>
+                        <td className="num">{nf(m.used)}</td>
+                        <td className="num">{nf(m.adjusted)}</td>
+                        <td className="num"><strong>{nf(m.currentStock)}</strong> <span className="text-muted">{m.unit}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ExportButton
+                table="Pergerakan Bahan Baku"
+                disabled={loadingMat}
                 onClick={() => {
-                  if (!materials) {
-                    notify.error('Laporan bahan baku belum tersedia untuk diekspor.')
-                    return
-                  }
-                  if (materials.materials.length === 0) {
-                    notify.error('Tidak ada data bahan baku pada periode ini untuk diekspor.')
-                    return
-                  }
-                  const from = materials.from || matFrom || 'semua'
-                  const to = materials.to || matTo || 'semua'
                   const rows: string[][] = [['Bahan', 'Diterima', 'Saldo Awal', 'Dipakai', 'Disesuaikan', 'Stok Saat Ini', 'Satuan']]
                   materials.materials.forEach(m => {
                     rows.push([
@@ -538,66 +645,10 @@ export function ReportsPage() {
                       m.unit,
                     ])
                   })
-                  downloadCsv(`laporan-bahan-baku-${from}-${to}.csv`, rows)
+                  downloadCsv(`laporan-bahan-baku-pergerakan-${filePeriod}.csv`, rows)
                 }}
-                disabled={loadingMat}
-              >
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>download</span>
-                Export CSV
-              </button>
-            </div>
-          </div>
-
-          <div className="report-filter">
-            <div className="report-filter-title">Filter Periode</div>
-            <div className="report-filter-row">
-              <div className="field report-filter-field">
-                <label htmlFor="mat-from">Dari</label>
-                <input id="mat-from" type="date" value={matFrom} onChange={(e) => setMatFrom(e.target.value)} />
-              </div>
-              <div className="field report-filter-field">
-                <label htmlFor="mat-to">Sampai</label>
-                <input id="mat-to" type="date" value={matTo} onChange={(e) => setMatTo(e.target.value)} />
-              </div>
-            </div>
-            <div className="report-filter-actions">
-              <button type="button" className="button" onClick={applyMat} disabled={loadingMat}>
-                {loadingMat ? 'Memuat...' : 'Terapkan Filter'}
-              </button>
-              <button type="button" className="button secondary" onClick={resetMat} disabled={loadingMat}>
-                Reset
-              </button>
-            </div>
-          </div>
-
-          {loadingMat && <p className="text-muted">Memuat laporan...</p>}
-          {!loadingMat && materials && (
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Bahan</th>
-                    <th>Diterima</th>
-                    <th>Saldo Awal</th>
-                    <th>Dipakai</th>
-                    <th>Disesuaikan</th>
-                    <th>Stok Saat Ini</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {materials.materials.map((m, i) => (
-                    <tr key={i}>
-                      <td className="cell-primary">{m.name}</td>
-                      <td className="num">{nf(m.received)}</td>
-                      <td className="num">{nf(m.openingBalance)}</td>
-                      <td className="num">{nf(m.used)}</td>
-                      <td className="num">{nf(m.adjusted)}</td>
-                      <td className="num"><strong>{nf(m.currentStock)}</strong> <span className="text-muted">{m.unit}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+              />
+            </>
           )}
           {!loadingMat && materials && materials.materials.length === 0 && (
             <p className="text-muted">Tidak ada data bahan baku pada periode ini.</p>
@@ -610,72 +661,87 @@ export function ReportsPage() {
         <section className="card section-card">
           <div className="section-head">
             <h2 className="card-title">Snapshot Stok Saat Ini</h2>
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => {
-                if (!stock) {
-                  notify.error('Laporan stok saat ini belum tersedia untuk diekspor.')
-                  return
-                }
-                if (stock.materials.length === 0 && stock.products.length === 0) {
-                  notify.error('Tidak ada data stok saat ini untuk diekspor.')
-                  return
-                }
-                const date = new Date().toISOString().slice(0, 10)
-                const rows: string[][] = [['Kategori', 'Nama', 'Stok', 'Satuan/Batch']]
-                stock.materials.forEach(m => {
-                  rows.push(['Bahan Baku', m.name, String(m.stock), m.unit])
-                })
-                stock.products.forEach(p => {
-                  rows.push(['Produk Jadi', p.name, String(p.stock), p.batches.map(b => b.code).join(' | ')])
-                })
-                downloadCsv(`laporan-stok-saat-ini-${date}.csv`, rows)
-              }}
-              disabled={loadingStock}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>download</span>
-              Export CSV
-            </button>
           </div>
 
           {loadingStock && <p className="text-muted">Memuat laporan...</p>}
           {!loadingStock && stock && (
             <>
-              <h3 className="sub-heading">Bahan Baku</h3>
-              <div className="table-wrapper">
-                <table>
-                  <thead><tr><th>Bahan</th><th>Stok</th></tr></thead>
-                  <tbody>
-                    {stock.materials.map((m, i) => (
-                      <tr key={i}>
-                        <td className="cell-primary">{m.name}</td>
-                        <td className="num"><strong>{nf(m.stock)}</strong> <span className="text-muted">{m.unit}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {stock.materials.length > 0 && (
+                <>
+                  <h3 className="sub-heading">Bahan Baku</h3>
+                  <div className="table-wrapper">
+                    <table>
+                      <thead><tr><th>Bahan</th><th>Stok</th></tr></thead>
+                      <tbody>
+                        {stock.materials.map((m, i) => (
+                          <tr key={i}>
+                            <td className="cell-primary">{m.name}</td>
+                            <td className="num"><strong>{nf(m.stock)}</strong> <span className="text-muted">{m.unit}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ExportButton
+                    table="Stok Bahan Baku"
+                    disabled={loadingStock}
+                    onClick={() => {
+                      const rows: string[][] = [['Bahan', 'Stok', 'Satuan']]
+                      stock.materials.forEach(m => {
+                        rows.push([m.name, String(m.stock), m.unit])
+                      })
+                      downloadCsv(`laporan-stok-saat-ini-bahan-baku-${filePeriod}.csv`, rows)
+                    }}
+                  />
+                </>
+              )}
 
-              <h3 className="sub-heading">Produk Jadi</h3>
-              <div className="table-wrapper">
-                <table>
-                  <thead><tr><th>Produk</th><th>Stok</th><th>Batch</th></tr></thead>
-                  <tbody>
-                    {stock.products.map((p, i) => (
-                      <tr key={i}>
-                        <td className="cell-primary">{p.name}</td>
-                        <td className="num"><strong>{nf(p.stock)}</strong></td>
-                        <td className="text-muted">{p.batches.map((b) => b.code).join(', ') || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {stock.products.length > 0 && (
+                <>
+                  <h3 className="sub-heading">Produk Jadi</h3>
+                  <div className="table-wrapper">
+                    <table>
+                      <thead><tr><th>Produk</th><th>Stok</th><th>Batch</th></tr></thead>
+                      <tbody>
+                        {stock.products.map((p, i) => (
+                          <tr key={i}>
+                            <td className="cell-primary">{p.name}</td>
+                            <td className="num"><strong>{nf(p.stock)}</strong></td>
+                            <td className="text-muted">{p.batches.map((b) => b.code).join(', ') || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ExportButton
+                    table="Stok Produk Jadi"
+                    disabled={loadingStock}
+                    onClick={() => {
+                      const rows: string[][] = [['Produk', 'Stok', 'Satuan', 'Batch']]
+                      stock.products.forEach(p => {
+                        rows.push([p.name, String(p.stock), p.unit, p.batches.map(b => b.code).join(' | ')])
+                      })
+                      downloadCsv(`laporan-stok-saat-ini-produk-jadi-${filePeriod}.csv`, rows)
+                    }}
+                  />
+                </>
+              )}
+
+              {stock.materials.length === 0 && stock.products.length === 0 && (
+                <p className="text-muted">Tidak ada data stok saat ini.</p>
+              )}
             </>
           )}
         </section>
       )}
+
+      <PeriodModal
+        open={customOpen}
+        initialFrom={range.from ?? presetRange('month').from ?? ''}
+        initialTo={range.to ?? presetRange('month').to ?? ''}
+        onClose={() => setCustomOpen(false)}
+        onApply={applyCustom}
+      />
     </div>
   )
 }

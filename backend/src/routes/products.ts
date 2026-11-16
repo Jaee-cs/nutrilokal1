@@ -23,6 +23,8 @@ import { hasOperationalHistory } from '../lib/master-history';
 import { parseReportPeriod } from '../lib/report';
 import { prisma } from '../lib/prisma';
 import { toPublicProduct } from '../lib/product';
+import { PRODUCT_RECIPE_INCLUDE, parseRecipeInput } from '../lib/product-recipe';
+import { validateRecipeUnitCompatibility } from '../lib/unit-conversion';
 import {
   PRODUCT_STOCK_MOVEMENT_INCLUDE,
   buildProductStockHistory,
@@ -174,7 +176,10 @@ productsRouter.delete('/:id/photo', authenticate, requireAdmin, async (req, res)
 // ---------- Melihat (Admin & Operator) ----------
 
 productsRouter.get('/', authenticate, async (_req, res) => {
-  const products = await prisma.product.findMany({ orderBy: { name: 'asc' } });
+  const products = await prisma.product.findMany({
+    orderBy: { name: 'asc' },
+    include: PRODUCT_RECIPE_INCLUDE,
+  });
 
   // Total stok per produk = jumlah stok seluruh batch (README 5.4),
   // diturunkan dari data batch — bukan angka tersimpan terpisah.
@@ -308,7 +313,10 @@ productsRouter.get('/:id/stock-movements', authenticate, async (req, res) => {
 });
 
 productsRouter.get('/:id', authenticate, async (req, res) => {
-  const product = await prisma.product.findUnique({ where: { id: pathId(req) } });
+  const product = await prisma.product.findUnique({
+    where: { id: pathId(req) },
+    include: PRODUCT_RECIPE_INCLUDE,
+  });
 
   if (!product) {
     res.status(404).json({ message: 'Produk tidak ditemukan.' });
@@ -331,8 +339,46 @@ productsRouter.get('/:id', authenticate, async (req, res) => {
 
 // ---------- Mengubah (hanya Admin) ----------
 
+async function validateRecipeItems(items: { materialId: string; quantityPerUnit: number; recipeUnit: string }[]) {
+  if (items.length === 0) return null as
+    | null
+    | { message: string; status: number }
+    | { data: { materialId: string; quantityPerUnit: string; recipeUnit: string }[] };
+
+  const materialIds = items.map((i) => i.materialId);
+  const materials = await prisma.material.findMany({
+    where: { id: { in: materialIds } },
+    select: { id: true, name: true, unit: true, isActive: true },
+  });
+  const byId = new Map(materials.map((m) => [m.id, m]));
+
+  const data: { materialId: string; quantityPerUnit: string; recipeUnit: string }[] = [];
+  for (const item of items) {
+    const material = byId.get(item.materialId);
+    if (!material) {
+      return { message: `Bahan baku resep "${item.materialId}" tidak ditemukan.`, status: 404 };
+    }
+    if (!material.isActive) {
+      return {
+        message: `Bahan baku "${material.name}" tidak aktif dan tidak dapat dipakai pada resep.`,
+        status: 409,
+      };
+    }
+    const compatError = validateRecipeUnitCompatibility(item.recipeUnit, material.unit);
+    if (compatError) {
+      return { message: `${compatError} (Bahan: ${material.name})`, status: 400 };
+    }
+    data.push({
+      materialId: material.id,
+      quantityPerUnit: item.quantityPerUnit.toFixed(3),
+      recipeUnit: item.recipeUnit.trim(),
+    });
+  }
+  return { data, status: 200 as const };
+}
+
 productsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
-  const { name, description, composition, storageInstructions, unit, sellingPrice } = req.body ?? {};
+  const { name, description, composition, storageInstructions, unit, sellingPrice, recipe } = req.body ?? {};
 
   const nameError = validateName(name);
   if (nameError) {
@@ -370,15 +416,38 @@ productsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
-  const product = await prisma.product.create({
-    data: {
-      name: name.trim(),
-      description: normalizeDescription(description),
-      composition: normalizeDescription(composition),
-      storageInstructions: normalizeDescription(storageInstructions),
-      unit: unit.trim(),
-      sellingPrice: sellingPrice.toFixed(2),
-    },
+  const parsedRecipe = parseRecipeInput(recipe);
+  if (!parsedRecipe.ok) {
+    res.status(400).json({ message: parsedRecipe.message });
+    return;
+  }
+
+  const recipeResult = await validateRecipeItems(parsedRecipe.items);
+  if (recipeResult && 'message' in recipeResult) {
+    res.status(recipeResult.status).json({ message: recipeResult.message });
+    return;
+  }
+
+  const product = await prisma.$transaction(async (tx) => {
+    const created = await tx.product.create({
+      data: {
+        name: name.trim(),
+        description: normalizeDescription(description),
+        composition: normalizeDescription(composition),
+        storageInstructions: normalizeDescription(storageInstructions),
+        unit: unit.trim(),
+        sellingPrice: sellingPrice.toFixed(2),
+      },
+    });
+    if (recipeResult && 'data' in recipeResult && recipeResult.data.length > 0) {
+      await tx.productRecipeItem.createMany({
+        data: recipeResult.data.map((item) => ({ ...item, productId: created.id })),
+      });
+    }
+    return tx.product.findUniqueOrThrow({
+      where: { id: created.id },
+      include: PRODUCT_RECIPE_INCLUDE,
+    });
   });
 
   res.status(201).json({ product: toPublicProduct(product) });
@@ -465,12 +534,46 @@ productsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
     data.isActive = body.isActive;
   }
 
-  if (Object.keys(data).length === 0) {
+  const recipeProvided = body.recipe !== undefined;
+  let parsedRecipe: ReturnType<typeof parseRecipeInput> | null = null;
+  let recipeResult: Awaited<ReturnType<typeof validateRecipeItems>> | null = null;
+  if (recipeProvided) {
+    parsedRecipe = parseRecipeInput(body.recipe);
+    if (!parsedRecipe.ok) {
+      res.status(400).json({ message: parsedRecipe.message });
+      return;
+    }
+    recipeResult = await validateRecipeItems(parsedRecipe.items);
+    if (recipeResult && 'message' in recipeResult) {
+      res.status(recipeResult.status).json({ message: recipeResult.message });
+      return;
+    }
+  }
+
+  if (Object.keys(data).length === 0 && !recipeProvided) {
     res.status(400).json({ message: 'Tidak ada perubahan yang diberikan.' });
     return;
   }
 
-  const product = await prisma.product.update({ where: { id: target.id }, data });
+  const product = await prisma.$transaction(async (tx) => {
+    if (Object.keys(data).length > 0) {
+      await tx.product.update({ where: { id: target.id }, data });
+    }
+    if (recipeProvided && parsedRecipe && parsedRecipe.ok) {
+      // Resep standar diganti utuh; riwayat produksi lama tidak diubah.
+      await tx.productRecipeItem.deleteMany({ where: { productId: target.id } });
+      if (recipeResult && 'data' in recipeResult && recipeResult.data.length > 0) {
+        await tx.productRecipeItem.createMany({
+          data: recipeResult.data.map((item) => ({ ...item, productId: target.id })),
+        });
+      }
+    }
+    return tx.product.findUniqueOrThrow({
+      where: { id: target.id },
+      include: PRODUCT_RECIPE_INCLUDE,
+    });
+  });
+
   res.json({ product: toPublicProduct(product) });
 });
 

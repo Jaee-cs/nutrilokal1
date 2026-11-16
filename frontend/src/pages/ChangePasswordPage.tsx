@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
+import { PasswordInput } from '../components/PasswordInput'
 
 const MIN_PASSWORD_LENGTH = 8
 
@@ -22,7 +23,6 @@ export function ChangePasswordPage() {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [showPasswords, setShowPasswords] = useState(false)
   const [saving, setSaving] = useState(false)
 
   async function submit(event: React.FormEvent) {
@@ -60,8 +60,6 @@ export function ChangePasswordPage() {
     }
   }
 
-  const inputType = showPasswords ? 'text' : 'password'
-
   return (
     <div className="container password-page">
       <div className="page-head">
@@ -89,56 +87,44 @@ export function ChangePasswordPage() {
         <form onSubmit={submit} className="password-form">
           <div className="field">
             <label htmlFor="current-password">Password saat ini</label>
-            <input
+            <PasswordInput
               id="current-password"
-              type={inputType}
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
               autoComplete="current-password"
               autoFocus
               required
+              visibilityLabel="password saat ini"
             />
           </div>
 
           <div className="field">
             <label htmlFor="new-password">Password baru</label>
-            <input
+            <PasswordInput
               id="new-password"
-              type={inputType}
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
               autoComplete="new-password"
               minLength={MIN_PASSWORD_LENGTH}
               required
+              visibilityLabel="password baru"
             />
           </div>
 
           <div className="field">
             <label htmlFor="confirm-password">Konfirmasi password baru</label>
-            <input
+            <PasswordInput
               id="confirm-password"
-              type={inputType}
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
               autoComplete="new-password"
               minLength={MIN_PASSWORD_LENGTH}
               required
+              visibilityLabel="konfirmasi password baru"
             />
           </div>
 
           <div className="password-form-foot">
-            <button
-              type="button"
-              className="password-visibility-toggle"
-              onClick={() => setShowPasswords((value) => !value)}
-              aria-pressed={showPasswords}
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">
-                {showPasswords ? 'visibility_off' : 'visibility'}
-              </span>
-              {showPasswords ? 'Sembunyikan password' : 'Tampilkan password'}
-            </button>
-
             <button type="submit" className="button" disabled={saving}>
               {saving ? 'Menyimpan...' : 'Simpan Password Baru'}
             </button>

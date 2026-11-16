@@ -1,10 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { X } from 'lucide-react'
 import api from '../lib/api'
-import { Drawer } from '../components/Drawer'
 import { PhotoField } from '../components/PhotoField'
 import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
 import { productPhotoUrl, uploadProductPhoto } from '../utils/product-photo'
+import { compatibleRecipeUnits } from '../utils/units'
+
+interface RecipeMaterial {
+  id: string
+  name: string
+  unit: string
+  isActive: boolean
+}
+
+interface ProductRecipeItem {
+  materialId: string
+  material?: RecipeMaterial
+  quantityPerUnit: number
+  recipeUnit: string
+}
 
 interface Product {
   id: string
@@ -17,6 +33,14 @@ interface Product {
   photoUrl?: string | null
   stock?: number
   batchCount?: number
+  isActive: boolean
+  recipe?: ProductRecipeItem[]
+}
+
+interface MaterialOption {
+  id: string
+  name: string
+  unit: string
   isActive: boolean
 }
 
@@ -121,6 +145,115 @@ function movementRecorder(row: ProductStockMovement): string {
   return row.recordedBy?.name || row.recordedBy?.username || 'Tidak tercatat'
 }
 
+interface ProductModalProps {
+  open: boolean
+  title: string
+  onClose: () => void
+  children: ReactNode
+}
+
+/**
+ * Modal terpusat untuk form tambah/edit produk. Memakai kelas modal
+ * NutriLokal yang sudah ada, mengunci gulir halaman, menjebak fokus, dan
+ * mendukung Escape serta klik backdrop.
+ */
+function ProductModal({ open, title, onClose, children }: ProductModalProps) {
+  const titleId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  useEffect(() => {
+    if (!open) return
+
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    const panel = panelRef.current
+    const firstField = panel?.querySelector<HTMLElement>(
+      'input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
+    )
+    ;(firstField ?? panel)?.focus()
+
+    function focusables(): HTMLElement[] {
+      if (!panel) return []
+      return Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      )
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !panel) return
+
+      const items = focusables()
+      if (items.length === 0) {
+        event.preventDefault()
+        panel.focus()
+        return
+      }
+
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement
+      const inside = active instanceof Node && panel.contains(active)
+
+      if (event.shiftKey && (active === first || !inside)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (active === last || !inside)) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      previousFocus?.focus?.()
+    }
+  }, [open])
+
+  if (!open) return null
+
+  return createPortal(
+    <div className="modal-root product-modal-root">
+      <div className="modal-overlay" onClick={onClose} />
+      <div
+        ref={panelRef}
+        className="modal-panel product-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <div className="product-modal-head">
+          <h2 className="modal-title" id={titleId}>{title}</h2>
+          <button
+            type="button"
+            className="icon-button product-modal-close"
+            onClick={onClose}
+            aria-label="Tutup dialog produk"
+            title="Tutup"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 export function ProductsPage() {
   const { user } = useAuth()
   const notify = useNotify()
@@ -132,7 +265,7 @@ export function ProductsPage() {
   // tindakan (simpan, ubah status, hapus, unggah foto) memakai dialog.
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [formOpen, setFormOpen] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
 
@@ -140,6 +273,11 @@ export function ProductsPage() {
   // `null` = hapus foto yang tersimpan.
   const [photoFile, setPhotoFile] = useState<File | null | undefined>(undefined)
   const [photoNotice, setPhotoNotice] = useState<string | null>(null)
+
+  // Resep bahan baku (hanya Admin dapat mengubah; disimpan bersama produk).
+  type RecipeFormRow = { materialId: string; quantityPerUnit: string; recipeUnit: string }
+  const [materials, setMaterials] = useState<MaterialOption[]>([])
+  const [recipeRows, setRecipeRows] = useState<RecipeFormRow[]>([])
 
   // Mode edit (hanya Admin): id produk yang sedang diubah + datanya.
   const [editTarget, setEditTarget] = useState<Product | null>(null)
@@ -175,8 +313,19 @@ export function ProductsPage() {
     }
   }
 
+  async function fetchMaterials(): Promise<void> {
+    try {
+      const res = await api.get('/materials')
+      setMaterials(res.data.data || res.data || [])
+    } catch {
+      // Gagal memuat daftar bahan tidak boleh menghalangi pengelolaan produk.
+      setMaterials([])
+    }
+  }
+
   useEffect(() => {
     fetchProducts()
+    fetchMaterials()
   }, [])
 
   async function loadHistoryBatches(productId: string): Promise<void> {
@@ -280,12 +429,13 @@ export function ProductsPage() {
     setHistoryError(null)
   }
 
-  function openDrawer() {
+  function openForm() {
     setEditTarget(null)
     setForm(EMPTY_FORM)
+    setRecipeRows([])
     setPhotoFile(undefined)
     setPhotoNotice(null)
-    setDrawerOpen(true)
+    setFormOpen(true)
   }
 
   function openEdit(product: Product) {
@@ -298,16 +448,59 @@ export function ProductsPage() {
       composition: product.composition ?? '',
       storageInstructions: product.storageInstructions ?? '',
     })
+    setRecipeRows(
+      (product.recipe ?? []).map((item) => ({
+        materialId: item.materialId,
+        quantityPerUnit: String(item.quantityPerUnit),
+        recipeUnit: item.recipeUnit,
+      })),
+    )
     setPhotoFile(undefined)
     setPhotoNotice(null)
-    setDrawerOpen(true)
+    setFormOpen(true)
   }
 
-  function closeDrawer() {
-    setDrawerOpen(false)
+  function closeForm() {
+    setFormOpen(false)
     setEditTarget(null)
+    setRecipeRows([])
     setPhotoFile(undefined)
     setPhotoNotice(null)
+  }
+
+  function addRecipeRow() {
+    setRecipeRows((rows) => [...rows, { materialId: '', quantityPerUnit: '', recipeUnit: '' }])
+  }
+
+  function removeRecipeRow(index: number) {
+    setRecipeRows((rows) => rows.filter((_, i) => i !== index))
+  }
+
+  function updateRecipeRow(index: number, patch: Partial<RecipeFormRow>) {
+    setRecipeRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+  }
+
+  function buildRecipePayload(): { recipe: Array<{ materialId: string; quantityPerUnit: number; recipeUnit: string }> } | { error: string } {
+    const recipe: Array<{ materialId: string; quantityPerUnit: number; recipeUnit: string }> = []
+    const seen = new Set<string>()
+    for (let i = 0; i < recipeRows.length; i++) {
+      const row = recipeRows[i]
+      const filled = row.materialId || row.quantityPerUnit || row.recipeUnit
+      if (!filled) continue
+      if (!row.materialId || !row.quantityPerUnit || !row.recipeUnit) {
+        return { error: `Lengkapi bahan resep baris ${i + 1} (bahan, jumlah, dan satuan).` }
+      }
+      if (seen.has(row.materialId)) {
+        return { error: 'Bahan yang sama tidak boleh dimasukkan berulang dalam satu resep.' }
+      }
+      seen.add(row.materialId)
+      const qty = Number(row.quantityPerUnit)
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return { error: `Jumlah kebutuhan resep baris ${i + 1} harus lebih besar dari nol.` }
+      }
+      recipe.push({ materialId: row.materialId, quantityPerUnit: qty, recipeUnit: row.recipeUnit.trim() })
+    }
+    return { recipe }
   }
 
   /**
@@ -331,6 +524,11 @@ export function ProductsPage() {
 
   async function createProduct(e: React.FormEvent) {
     e.preventDefault()
+    const recipePayload = buildRecipePayload()
+    if ('error' in recipePayload) {
+      notify.error(recipePayload.error)
+      return
+    }
     setSubmitting(true)
     let created: Product | null = null
     try {
@@ -341,6 +539,7 @@ export function ProductsPage() {
         description: form.description || undefined,
         composition: form.composition || undefined,
         storageInstructions: form.storageInstructions || undefined,
+        recipe: recipePayload.recipe,
       })
       created = res.data.product as Product
     } catch (err: any) {
@@ -350,7 +549,7 @@ export function ProductsPage() {
     }
 
     const photoError = created ? await syncPhoto(created.id) : null
-    closeDrawer()
+    closeForm()
     const refreshed = await fetchProducts()
     if (refreshed) {
       if (photoError) {
@@ -367,6 +566,11 @@ export function ProductsPage() {
   async function updateProduct(e: React.FormEvent) {
     e.preventDefault()
     if (!editTarget) return
+    const recipePayload = buildRecipePayload()
+    if ('error' in recipePayload) {
+      notify.error(recipePayload.error)
+      return
+    }
 
     setSubmitting(true)
     try {
@@ -377,6 +581,7 @@ export function ProductsPage() {
         description: form.description,
         composition: form.composition,
         storageInstructions: form.storageInstructions,
+        recipe: recipePayload.recipe,
       })
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal menyimpan perubahan produk')
@@ -385,7 +590,7 @@ export function ProductsPage() {
     }
 
     const photoError = await syncPhoto(editTarget.id)
-    closeDrawer()
+    closeForm()
     const refreshed = await fetchProducts()
     if (refreshed) {
       if (photoError) {
@@ -474,7 +679,7 @@ export function ProductsPage() {
         </p>
       </div>
 
-      {loadError && !drawerOpen && <div className="alert error">{loadError}</div>}
+      {loadError && !formOpen && <div className="alert error">{loadError}</div>}
 
       {/* Ringkasan singkat */}
       <div className="summary-row">
@@ -495,7 +700,7 @@ export function ProductsPage() {
       {/* Toolbar */}
       <div className="toolbar">
         <h2 className="card-title">Daftar Produk</h2>
-        <button className="button" onClick={openDrawer}>
+        <button className="button" onClick={openForm}>
           <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
           Tambah Produk
         </button>
@@ -890,89 +1095,213 @@ export function ProductsPage() {
         ) : null}
       </section>
 
-      {/* Drawer tambah/edit produk (Admin) */}
-      <Drawer
-        open={drawerOpen}
+      {/* Modal tambah/edit produk (Admin) */}
+      <ProductModal
+        open={formOpen}
         title={editTarget ? 'Edit Produk' : 'Tambah Produk'}
-        onClose={closeDrawer}
+        onClose={closeForm}
       >
-        <form onSubmit={editTarget ? updateProduct : createProduct} className="drawer-form">
-          <div className="field">
-            <label htmlFor="p-name">Nama Produk</label>
-            <input
-              id="p-name"
-              value={form.name}
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              placeholder="Contoh: Keripik Singkong Balado"
-              required
-            />
-          </div>
-          <div className="form-row">
+        <form onSubmit={editTarget ? updateProduct : createProduct} className="product-modal-form">
+          <div className="product-modal-body">
             <div className="field">
-              <label htmlFor="p-unit">Satuan Dasar</label>
+              <label htmlFor="p-name">Nama Produk</label>
               <input
-                id="p-unit"
-                value={form.unit}
-                onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
-                placeholder="Contoh: pcs"
+                id="p-name"
+                value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="Contoh: Keripik Singkong Balado"
                 required
               />
-              {editTarget && (
-                <span className="text-muted">
-                  Satuan tidak dapat diubah bila produk sudah memiliki riwayat operasional.
-                </span>
+            </div>
+            <div className="form-row">
+              <div className="field">
+                <label htmlFor="p-unit">Satuan Dasar</label>
+                <input
+                  id="p-unit"
+                  value={form.unit}
+                  onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
+                  placeholder="Contoh: pcs"
+                  required
+                />
+                {editTarget && (
+                  <span className="text-muted">
+                    Satuan tidak dapat diubah bila produk sudah memiliki riwayat operasional.
+                  </span>
+                )}
+              </div>
+              <div className="field">
+                <label htmlFor="p-price">Harga Jual (Rp)</label>
+                <input
+                  id="p-price"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.sellingPrice}
+                  onChange={e => setForm(f => ({ ...f, sellingPrice: e.target.value }))}
+                  required
+                />
+              </div>
+            </div>
+
+            <PhotoField
+              currentUrl={editTarget?.photoUrl ?? null}
+              file={photoFile}
+              onChange={setPhotoFile}
+              savedMessage={photoNotice}
+            />
+
+            <div className="field">
+              <label htmlFor="p-desc">Deskripsi (opsional)</label>
+              <textarea
+                id="p-desc"
+                rows={2}
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="p-comp">Komposisi (opsional)</label>
+              <textarea
+                id="p-comp"
+                rows={2}
+                value={form.composition}
+                onChange={e => setForm(f => ({ ...f, composition: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="p-storage">Petunjuk Penyimpanan (opsional)</label>
+              <textarea
+                id="p-storage"
+                rows={2}
+                value={form.storageInstructions}
+                onChange={e => setForm(f => ({ ...f, storageInstructions: e.target.value }))}
+              />
+            </div>
+
+            <div className="field">
+              <label>Resep Bahan Baku</label>
+              <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
+                Kebutuhan bahan untuk menghasilkan 1 {form.unit || 'satuan'} produk. Kosongkan jika
+                produk belum memiliki resep standar.
+              </p>
+              {!isAdmin ? (
+                recipeRows.length === 0 ? (
+                  <p className="text-muted">Belum ada resep.</p>
+                ) : (
+                  <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
+                    {recipeRows.map((row, idx) => {
+                      const mat = materials.find((m) => m.id === row.materialId)
+                      return (
+                        <li key={idx}>
+                          {(mat?.name || 'Bahan')} — {row.quantityPerUnit} {row.recipeUnit}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )
+              ) : (
+                <div className="stack-form" style={{ gap: '0.75rem' }}>
+                  {recipeRows.length === 0 && (
+                    <p className="text-muted">Belum ada bahan resep. Tambahkan bahan jika diperlukan.</p>
+                  )}
+                  {recipeRows.map((row, idx) => {
+                    const selectedMaterial = materials.find((m) => m.id === row.materialId)
+                    const unitOptions = selectedMaterial
+                      ? compatibleRecipeUnits(selectedMaterial.unit)
+                      : row.recipeUnit
+                        ? [row.recipeUnit]
+                        : []
+                    return (
+                      <div key={idx} className="form-row" style={{ alignItems: 'flex-end' }}>
+                        <div className="field" style={{ flex: 2, minWidth: 140 }}>
+                          <label htmlFor={`recipe-material-${idx}`}>Bahan Baku</label>
+                          <select
+                            id={`recipe-material-${idx}`}
+                            value={row.materialId}
+                            onChange={(e) => {
+                              const materialId = e.target.value
+                              const mat = materials.find((m) => m.id === materialId)
+                              const compatible = mat ? compatibleRecipeUnits(mat.unit) : []
+                              updateRecipeRow(idx, {
+                                materialId,
+                                recipeUnit:
+                                  row.recipeUnit && compatible.includes(row.recipeUnit)
+                                    ? row.recipeUnit
+                                    : compatible[0] || mat?.unit || row.recipeUnit,
+                              })
+                            }}
+                          >
+                            <option value="">Pilih bahan</option>
+                            {materials
+                              .filter((m) => m.isActive || m.id === row.materialId)
+                              .filter((m) => !recipeRows.some((r, i) => i !== idx && r.materialId === m.id))
+                              .map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.name} ({m.unit}){!m.isActive ? ' — nonaktif' : ''}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                        <div className="field" style={{ flex: 1, minWidth: 100 }}>
+                          <label htmlFor={`recipe-qty-${idx}`}>Jumlah</label>
+                          <input
+                            id={`recipe-qty-${idx}`}
+                            type="number"
+                            step="0.001"
+                            min="0"
+                            value={row.quantityPerUnit}
+                            onChange={(e) => updateRecipeRow(idx, { quantityPerUnit: e.target.value })}
+                            disabled={!row.materialId}
+                          />
+                        </div>
+                        <div className="field" style={{ flex: 1, minWidth: 100 }}>
+                          <label htmlFor={`recipe-unit-${idx}`}>Satuan Resep</label>
+                          {unitOptions.length > 1 ? (
+                            <select
+                              id={`recipe-unit-${idx}`}
+                              value={row.recipeUnit}
+                              onChange={(e) => updateRecipeRow(idx, { recipeUnit: e.target.value })}
+                              disabled={!row.materialId}
+                            >
+                              <option value="">Pilih satuan</option>
+                              {unitOptions.map((u) => (
+                                <option key={u} value={u}>{u}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              id={`recipe-unit-${idx}`}
+                              value={row.recipeUnit || selectedMaterial?.unit || ''}
+                              onChange={(e) => updateRecipeRow(idx, { recipeUnit: e.target.value })}
+                              disabled={!row.materialId}
+                            />
+                          )}
+                        </div>
+                        <div className="form-actions" style={{ margin: 0 }}>
+                          <button
+                            type="button"
+                            className="button secondary production-usage-remove"
+                            onClick={() => removeRecipeRow(idx)}
+                            aria-label={`Hapus bahan resep ${idx + 1}`}
+                            title="Hapus bahan resep"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <div className="form-actions" style={{ marginTop: 0 }}>
+                    <button type="button" className="button secondary" onClick={addRecipeRow}>
+                      Tambah Bahan
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
-            <div className="field">
-              <label htmlFor="p-price">Harga Jual (Rp)</label>
-              <input
-                id="p-price"
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.sellingPrice}
-                onChange={e => setForm(f => ({ ...f, sellingPrice: e.target.value }))}
-                required
-              />
-            </div>
           </div>
-
-          <PhotoField
-            currentUrl={editTarget?.photoUrl ?? null}
-            file={photoFile}
-            onChange={setPhotoFile}
-            savedMessage={photoNotice}
-          />
-
-          <div className="field">
-            <label htmlFor="p-desc">Deskripsi (opsional)</label>
-            <textarea
-              id="p-desc"
-              rows={2}
-              value={form.description}
-              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="p-comp">Komposisi (opsional)</label>
-            <textarea
-              id="p-comp"
-              rows={2}
-              value={form.composition}
-              onChange={e => setForm(f => ({ ...f, composition: e.target.value }))}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="p-storage">Petunjuk Penyimpanan (opsional)</label>
-            <textarea
-              id="p-storage"
-              rows={2}
-              value={form.storageInstructions}
-              onChange={e => setForm(f => ({ ...f, storageInstructions: e.target.value }))}
-            />
-          </div>
-          <div className="drawer-actions">
-            <button type="button" className="button secondary" onClick={closeDrawer}>
+          <div className="modal-actions product-modal-actions">
+            <button type="button" className="button secondary" onClick={closeForm}>
               Batal
             </button>
             <button className="button" disabled={submitting}>
@@ -984,7 +1313,7 @@ export function ProductsPage() {
             </button>
           </div>
         </form>
-      </Drawer>
+      </ProductModal>
 
     </div>
   )

@@ -105,18 +105,27 @@ describe('ChangePasswordPage', () => {
     expect(await screen.findByText('Dashboard tujuan')).toBeInTheDocument()
   })
 
-  it('tombol Tampilkan/Sembunyikan mengubah tipe seluruh input kata sandi', async () => {
+  it('setiap input kata sandi punya kontrol tampil/sembunyi sendiri', async () => {
     renderPage()
     const user = userEvent.setup()
+    const current = screen.getByLabelText('Password saat ini')
+    const next = screen.getByLabelText('Password baru')
+    const confirmation = screen.getByLabelText('Konfirmasi password baru')
 
-    expect(screen.getByLabelText('Password saat ini')).toHaveAttribute('type', 'password')
-    await user.click(screen.getByRole('button', { name: 'Tampilkan password' }))
+    expect(current).toHaveAttribute('type', 'password')
+    expect(next).toHaveAttribute('type', 'password')
+    expect(confirmation).toHaveAttribute('type', 'password')
 
-    expect(screen.getByLabelText('Password saat ini')).toHaveAttribute('type', 'text')
-    expect(screen.getByLabelText('Password baru')).toHaveAttribute('type', 'text')
-    expect(screen.getByLabelText('Konfirmasi password baru')).toHaveAttribute('type', 'text')
+    await user.type(next, 'rahasia-baru')
+    await user.click(screen.getByRole('button', { name: 'Tampilkan password baru' }))
 
-    await user.click(screen.getByRole('button', { name: 'Sembunyikan password' }))
-    expect(screen.getByLabelText('Password baru')).toHaveAttribute('type', 'password')
+    expect(next).toHaveAttribute('type', 'text')
+    expect(next).toHaveValue('rahasia-baru')
+    expect(current).toHaveAttribute('type', 'password')
+    expect(confirmation).toHaveAttribute('type', 'password')
+
+    await user.click(screen.getByRole('button', { name: 'Sembunyikan password baru' }))
+    expect(next).toHaveAttribute('type', 'password')
+    expect(next).toHaveValue('rahasia-baru')
   })
 })

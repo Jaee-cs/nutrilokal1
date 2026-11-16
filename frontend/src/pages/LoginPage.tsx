@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
+import { PasswordInput } from '../components/PasswordInput'
 import './LoginPage.css'
 
 export function LoginPage() {
@@ -77,13 +78,13 @@ export function LoginPage() {
               </div>
               <div className="field">
                 <label htmlFor="login-password">Kata sandi</label>
-                <input
+                <PasswordInput
                   id="login-password"
-                  type="password"
                   value={p}
                   onChange={ev => setP(ev.target.value)}
                   placeholder="Masukkan kata sandi"
                   autoComplete="current-password"
+                  visibilityLabel="kata sandi"
                 />
               </div>
               <button className="button login-submit" disabled={l}>

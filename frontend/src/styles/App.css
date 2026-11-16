@@ -1422,61 +1422,128 @@ table tbody tr:hover { background: var(--surface-low); }
   .reports-tab { height: 2.125rem; padding: 0 0.75rem; font-size: 12.5px; }
 }
 
-/* Filter periode per laporan */
-.report-filter {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-  padding: 0.875rem 1rem;
-  background: var(--surface-low);
-  border: 1px solid var(--outline-variant);
-  border-radius: var(--radius-md);
-}
-
-.report-filter-title {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 14px;
-  line-height: 20px;
-  color: var(--on-surface);
-}
-
-.report-filter-row {
+/* Filter periode dashboard: tiga pilihan, tanpa scroll horizontal. */
+.dashboard-period-filter {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-  align-items: end;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.375rem;
+  width: min(100%, 30rem);
+  margin-bottom: 1rem;
 }
 
-.report-filter-field {
+.dashboard-period-filter .reports-tab {
+  flex: 1 1 0;
+  width: 100%;
   min-width: 0;
+  padding: 0 0.5rem;
 }
 
-.report-filter-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+@media (max-width: 360px) {
+  .dashboard-period-filter .reports-tab {
+    padding: 0 0.375rem;
+    font-size: 12px;
+  }
+}
+
+/* Filter periode tunggal untuk seluruh kategori laporan. */
+.report-period-filter-block { margin-bottom: 1rem; }
+
+.report-period-filter {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  align-items: center;
+  gap: 0.375rem;
+  width: min(100%, 34rem);
+}
+
+.report-period-filter .reports-tab {
+  width: 100%;
+  min-width: 0;
+  padding: 0 0.5rem;
+}
+
+.report-period-calendar { flex-shrink: 0; }
+.report-period-calendar.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.report-period-range {
+  margin-top: 0.375rem;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--on-surface-variant);
 }
 
 @media (max-width: 639px) {
-  .report-filter {
-    padding: 0.75rem;
-    gap: 0.625rem;
+  .report-period-filter { width: 100%; }
+  .report-period-filter .reports-tab {
+    padding: 0 0.375rem;
+    font-size: 12px;
   }
-  .report-filter-row {
-    gap: 0.5rem;
+  .report-period-range { font-size: 12px; }
+}
+
+@media (max-width: 359px) {
+  .report-period-filter {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   }
-  .report-filter-actions {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
+  .report-period-filter .reports-tab {
+    padding: 0 0.375rem;
+    font-size: 12px;
   }
-  .report-filter-actions .button {
-    width: 100%;
-    justify-content: center;
+  .report-period-calendar {
+    grid-column: 3;
+    grid-row: 2;
+    justify-self: end;
   }
 }
+
+/* Tombol ekspor per tabel. */
+.table-export-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+.report-export-button {
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  font-size: 12px;
+}
+
+.report-export-button svg { flex-shrink: 0; }
+.report-table-note { margin-top: 0.375rem; font-size: 12px; }
+
+/* Modal periode kustom. */
+.report-period-modal {
+  max-width: 30rem;
+  overflow-y: auto;
+}
+
+.report-period-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.report-period-modal-head .modal-title { margin-bottom: 0; }
+
+.report-period-modal-subtitle {
+  margin-top: 0.25rem;
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+.report-period-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .button.danger-outline:disabled { opacity: 0.55; }
 
 /* Modal ---------------------------------------------------------------------- */
@@ -1555,6 +1622,70 @@ table tbody tr:hover { background: var(--surface-low); }
   .modal-actions {
     margin-top: 1.25rem;
     padding-top: 1rem;
+  }
+}
+
+/* Modal form produk (tambah/edit) ------------------------------------------- */
+.product-modal {
+  max-width: 34rem;
+  padding: 0;
+}
+
+.product-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-shrink: 0;
+  padding: 1rem;
+  border-bottom: 1px solid var(--surface-container);
+}
+
+@media (min-width: 640px) {
+  .product-modal-head {
+    padding: 1.25rem 1.5rem;
+  }
+}
+
+.product-modal-head .modal-title { margin-bottom: 0; }
+
+.product-modal-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.product-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+  padding: 1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (min-width: 640px) {
+  .product-modal-body {
+    padding: 1.25rem 1.5rem;
+  }
+}
+
+.product-modal-actions {
+  flex-shrink: 0;
+  margin-top: 0;
+  padding: 0.875rem 1rem;
+  background: var(--surface-lowest);
+  border-top: 1px solid var(--surface-container);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+@media (min-width: 640px) {
+  .product-modal-actions {
+    margin-top: 0;
+    padding: 1rem 1.5rem;
   }
 }
 
@@ -2178,6 +2309,137 @@ table tbody tr:hover { background: var(--surface-low); }
 .materials-page .form-actions { padding-top: 0.25rem; }
 .materials-page .optional-hint { margin-top: 1rem; }
 
+/* Aksi bahan baku: grid dua kolom (teks + ikon) dan dua baris. */
+.material-row-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.material-action-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+}
+
+.material-row-actions .material-action-grid {
+  width: auto;
+}
+
+.material-action-grid .button {
+  width: 100%;
+  height: 2.25rem;
+  padding: 0 0.625rem;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.material-action-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.material-action-icon svg { display: block; }
+.material-action-icon:disabled { opacity: 0.5; cursor: not-allowed; }
+.material-action-danger { color: var(--error); }
+.material-action-danger:hover {
+  background: var(--error-container);
+  border-color: var(--error);
+  color: var(--error);
+}
+
+/* Modal form bahan baku: terpusat, header tetap, isi dapat digulir. */
+.material-modal {
+  max-width: 34rem;
+  max-height: calc(100vh - 1.5rem);
+  max-height: calc(100dvh - 1.5rem);
+}
+
+@media (min-width: 640px) {
+  .material-modal {
+    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem);
+  }
+}
+
+.material-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-shrink: 0;
+  margin-bottom: 0.875rem;
+}
+
+.material-modal-heading { min-width: 0; }
+.material-modal-head .modal-title { margin-bottom: 0; }
+
+.material-modal-subtitle {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--on-surface-variant);
+  margin-top: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.material-modal-close { flex-shrink: 0; }
+
+.material-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 0.25rem;
+}
+
+.material-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.material-modal .modal-actions { margin-top: 1.25rem; }
+.material-modal .optional-hint { margin-top: 0.75rem; }
+
+.material-ob-details {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--surface-container);
+}
+
+.material-ob-details summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+.material-ob-details summary:hover { color: var(--primary-container); }
+.material-ob-details[open] summary { margin-bottom: 0.5rem; }
+
+.material-ob-details > p {
+  margin-bottom: 1rem;
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+@media (max-width: 479px) {
+  .material-modal .modal-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .material-modal .modal-actions .button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 /* Filter bahan baku pada judul bagian (mis. Riwayat Pergerakan Stok). */
 .filter-field { min-width: 240px; }
 
@@ -2288,7 +2550,13 @@ table tbody tr:hover { background: var(--surface-low); }
     border-radius: var(--radius-md);
     background: var(--surface-lowest);
   }
-  .material-item-main { min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+  .material-item-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
   .material-item-name {
     font-family: var(--font-display);
     font-size: 14px;
@@ -2314,16 +2582,23 @@ table tbody tr:hover { background: var(--surface-low); }
   }
   .material-item-stock strong { font-size: 15px; line-height: 20px; font-variant-numeric: tabular-nums; }
   .material-item-stock .unit { font-size: 11px; color: var(--outline); }
-  .material-item-action { flex-shrink: 0; display: flex; align-items: center; gap: 0.375rem; }
-  .material-item-action .button { height: 2.25rem; padding: 0 0.75rem; font-size: 12px; }
-  /* Hapus: ikon tempat sampah, destructive tapi tetap ringkas. */
-  .material-item-action .material-item-delete {
-    width: 2.25rem;
-    padding: 0;
-    justify-content: center;
-    color: var(--error);
+  /* Aksi sisi kanan: grid dua kolom dan dua baris agar kartu tetap ringkas. */
+  .material-item-side {
+    flex: 0 0 8rem;
+    width: 8rem;
+    display: flex;
+    align-items: center;
   }
-  .material-item-action .material-item-delete .material-symbols-outlined { font-size: 18px; }
+  .material-item-side .material-action-grid { gap: 0.25rem; }
+  .material-item-side .material-action-grid .button {
+    height: 2rem;
+    padding: 0 0.375rem;
+    font-size: 11.5px;
+  }
+  .material-item-side .material-action-icon {
+    width: 2rem;
+    height: 2rem;
+  }
 
   /* Kartu riwayat (dasar): kolom, dipakai riwayat penerimaan. */
   .history-item {
@@ -2837,33 +3112,10 @@ table tbody tr:hover { background: var(--surface-low); }
 .password-form-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 0.25rem;
-}
-
-.password-visibility-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.25rem 0;
-  border: none;
-  background: transparent;
-  color: var(--primary);
-  font-family: var(--font-display);
-  font-size: 13px;
-  line-height: 18px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.password-visibility-toggle:hover {
-  text-decoration: underline;
-}
-
-.password-visibility-toggle .material-symbols-outlined {
-  font-size: 18px;
 }
 
 @media (max-width: 479px) {

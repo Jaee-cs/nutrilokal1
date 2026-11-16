@@ -10,6 +10,8 @@ export type ProductionWithRelations = Production & {
   batch: (Batch & { aliases: BatchAlias[] }) | null;
   usages: (ProductionMaterialUsage & {
     material: { id: string; name: string; unit: string };
+    inputQuantity?: any;
+    inputUnit?: string | null;
   })[];
 };
 
@@ -46,7 +48,12 @@ export interface PublicProduction {
   usages: {
     materialId: string;
     material: { id: string; name: string; unit: string };
+    /** Jumlah dalam satuan stok bahan (untuk jejak/pengurangan stok). */
     quantity: number;
+    /** Jumlah aktual yang diinput pengguna (satuan input), bila tersedia. */
+    inputQuantity: number | null;
+    /** Satuan input aktual pengguna, bila tersedia. */
+    inputUnit: string | null;
   }[];
 }
 
@@ -75,6 +82,8 @@ export function toPublicProduction(p: ProductionWithRelations): PublicProduction
       materialId: usage.materialId,
       material: usage.material,
       quantity: Number(usage.quantity),
+      inputQuantity: usage.inputQuantity == null ? null : Number(usage.inputQuantity),
+      inputUnit: usage.inputUnit ?? null,
     })),
   };
 }

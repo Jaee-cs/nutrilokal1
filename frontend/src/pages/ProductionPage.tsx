@@ -1,16 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import api from '../lib/api'
 import { Drawer } from '../components/Drawer'
 import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
 import { wibDateCode, wibDateLabel, isBatchExpired, nextDateCode } from '../utils/batch-expiry'
 import { productPhotoUrl } from '../utils/product-photo'
+import { areUnitsCompatible, compatibleRecipeUnits, convertQuantityValue, formatQty, multiplyRecipeQty } from '../utils/units'
+
+interface RecipeItem {
+  materialId: string
+  material: { id: string; name: string; unit: string; isActive: boolean }
+  quantityPerUnit: number
+  recipeUnit: string
+}
 
 interface Product {
   id: string
   name: string
   unit: string
   isActive: boolean
+  recipe?: RecipeItem[]
 }
 
 interface Material {
@@ -42,7 +51,13 @@ interface Production {
   recordedBy: { username: string; name?: string | null }
   recordedAt: string
   batch: ProductionBatch | null
-  usages: Array<{ materialId: string; material: { name: string; unit: string }; quantity: number }>
+  usages: Array<{
+    materialId: string
+    material: { name: string; unit: string }
+    quantity: number
+    inputQuantity?: number | null
+    inputUnit?: string | null
+  }>
 }
 
 /** Ringkasan batch dari GET /batches (toPublicBatch). */
@@ -155,14 +170,26 @@ export function ProductionPage() {
   const [loading, setLoading] = useState(true)
   // Gagal memuat data halaman tetap tampil inline; hasil tindakan memakai dialog.
   const [loadError, setLoadError] = useState<string | null>(null)
-  type UsageRow = { materialId: string; materialQty: string }
+  type UsageRow = {
+    rowId: string
+    materialId: string
+    materialQty: string
+    unit: string
+    fromRecipe: boolean
+    recipeQtyPerUnit?: number
+  }
+
   const [form, setForm] = useState({
     productId: '',
     productionDate: '',
     expiryDate: '',
     yieldQuantity: '',
   })
-  const [usageRows, setUsageRows] = useState<UsageRow[]>([{ materialId: '', materialQty: '' }])
+  const [usageRows, setUsageRows] = useState<UsageRow[]>([
+    { rowId: 'row-0', materialId: '', materialQty: '', unit: '', fromRecipe: false },
+  ])
+  const [manualEdited, setManualEdited] = useState(false)
+  const [recalcNotice, setRecalcNotice] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   // Detail batch (Admin & Operator boleh melihat; mengubah kedaluwarsa: Admin)
@@ -230,6 +257,72 @@ export function ProductionPage() {
     fetchData()
   }, [])
 
+  function newRowId() {
+    return `row-${Math.random().toString(36).slice(2, 10)}`
+  }
+
+  function emptyUsageRow(): UsageRow {
+    return { rowId: newRowId(), materialId: '', materialQty: '', unit: '', fromRecipe: false }
+  }
+
+  function buildRecipeRows(product: Product | undefined, yieldValue: string): UsageRow[] {
+    const recipe = (product?.recipe ?? []).filter((item) => item.material?.isActive !== false)
+    if (recipe.length === 0) return [emptyUsageRow()]
+    const yieldNum = Number(yieldValue)
+    return recipe.map((item) => ({
+      rowId: newRowId(),
+      materialId: item.materialId,
+      materialQty:
+        yieldValue && Number.isFinite(yieldNum) && yieldNum > 0
+          ? multiplyRecipeQty(item.quantityPerUnit, yieldNum)
+          : formatQty(item.quantityPerUnit),
+      unit: item.recipeUnit,
+      fromRecipe: true,
+      recipeQtyPerUnit: item.quantityPerUnit,
+    }))
+  }
+
+  const selectedProduct = products.find((p) => p.id === form.productId)
+  const hasRecipe = (selectedProduct?.recipe?.length ?? 0) > 0
+
+  function applyRecipeForProduct(productId: string, yieldValue: string, markManual = false) {
+    const product = products.find((p) => p.id === productId)
+    const recipe = product?.recipe ?? []
+    if (recipe.length > 0) {
+      setUsageRows(buildRecipeRows(product, yieldValue))
+      setManualEdited(markManual)
+      setRecalcNotice(false)
+    } else {
+      setUsageRows([emptyUsageRow()])
+      setManualEdited(false)
+      setRecalcNotice(false)
+    }
+  }
+
+  function handleProductChange(productId: string) {
+    setForm((f) => ({ ...f, productId }))
+    applyRecipeForProduct(productId, form.yieldQuantity)
+  }
+
+  function handleYieldChange(value: string) {
+    setForm((f) => ({ ...f, yieldQuantity: value }))
+    if (!hasRecipe) return
+    if (manualEdited) {
+      setRecalcNotice(true)
+      return
+    }
+    const product = products.find((p) => p.id === form.productId)
+    setUsageRows(buildRecipeRows(product, value))
+    setRecalcNotice(false)
+  }
+
+  function recalculateFromRecipe() {
+    const product = products.find((p) => p.id === form.productId)
+    setUsageRows(buildRecipeRows(product, form.yieldQuantity))
+    setManualEdited(false)
+    setRecalcNotice(false)
+  }
+
   async function submitProduction(e: React.FormEvent) {
     e.preventDefault()
     if (!form.productId || !form.productionDate || !form.expiryDate || !form.yieldQuantity) {
@@ -242,20 +335,29 @@ export function ProductionPage() {
     }
     setSubmitting(true)
     try {
-      const materials = usageRows
-        .filter(r => r.materialId && r.materialQty)
-        .map(r => ({ materialId: r.materialId, quantity: Number(r.materialQty) }))
+      const materialsPayload = usageRows
+        .filter((r) => r.materialId && r.materialQty)
+        .map((r) => {
+          const material = materials.find((m) => m.id === r.materialId)
+          return {
+            materialId: r.materialId,
+            quantity: Number(r.materialQty),
+            unit: r.unit || material?.unit || undefined,
+          }
+        })
 
       const payload: any = {
         productId: form.productId,
         productionDate: form.productionDate,
         expiryDate: form.expiryDate,
         yieldQuantity: Number(form.yieldQuantity),
-        materials,
+        materials: materialsPayload,
       }
       const res = await api.post('/productions', payload)
       setForm({ productId: '', productionDate: '', expiryDate: '', yieldQuantity: '' })
-      setUsageRows([{ materialId: '', materialQty: '' }])
+      setUsageRows([emptyUsageRow()])
+      setManualEdited(false)
+      setRecalcNotice(false)
       await fetchData()
       notify.success(`Produksi berhasil. Kode batch: ${res.data.production.batch?.code || '-'}`)
     } catch (err: any) {
@@ -265,16 +367,26 @@ export function ProductionPage() {
     }
   }
 
+  function markManual() {
+    setManualEdited(true)
+  }
+
   function addUsageRow() {
-    setUsageRows(rows => [...rows, { materialId: '', materialQty: '' }])
+    markManual()
+    setUsageRows((rows) => [...rows, emptyUsageRow()])
   }
 
   function removeUsageRow(index: number) {
-    setUsageRows(rows => rows.filter((_, i) => i !== index))
+    markManual()
+    setUsageRows((rows) => {
+      const next = rows.filter((_, i) => i !== index)
+      return next.length > 0 ? next : [emptyUsageRow()]
+    })
   }
 
   function updateUsageRow(index: number, patch: Partial<UsageRow>) {
-    setUsageRows(rows => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+    markManual()
+    setUsageRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }
 
   /** Menyimpan tanggal kedaluwarsa sekaligus memvalidasinya (khusus Admin). */
@@ -340,7 +452,7 @@ export function ProductionPage() {
   }
 
   const activeProducts = products.filter(p => p.isActive)
-  const activeMaterials = materials.filter(m => m.isActive)
+  const activeMaterials = useMemo(() => materials.filter(m => m.isActive), [materials])
   const batchById = new Map(batches.map(b => [b.id, b]))
   const minProductionExpiry = form.productionDate ? nextDateCode(form.productionDate) : undefined
   const minDetailExpiry =
@@ -378,7 +490,7 @@ export function ProductionPage() {
               <select
                 id="pr-product"
                 value={form.productId}
-                onChange={e => setForm(f => ({ ...f, productId: e.target.value }))}
+                onChange={e => handleProductChange(e.target.value)}
                 required
               >
                 <option value="">Pilih produk</option>
@@ -422,46 +534,126 @@ export function ProductionPage() {
                 step="0.001"
                 min="0"
                 value={form.yieldQuantity}
-                onChange={e => setForm(f => ({ ...f, yieldQuantity: e.target.value }))}
+                onChange={e => handleYieldChange(e.target.value)}
                 required
               />
             </div>
             <div className="field">
               <label>Bahan yang Digunakan</label>
               <div className="stack-form" style={{ gap: '0.75rem' }}>
-                {usageRows.map((row, idx) => (
-                  <div key={idx} className="form-row" style={{ alignItems: 'flex-end' }}>
-                    <div className="field">
-                      <label htmlFor={`pr-material-${idx}`}>Bahan Baku</label>
-                      <select
-                        id={`pr-material-${idx}`}
-                        value={row.materialId}
-                        onChange={e => updateUsageRow(idx, { materialId: e.target.value })}
-                      >
-                        <option value="">Pilih bahan</option>
-                        {activeMaterials
-                          .filter(m => !usageRows.some((r, i) => i !== idx && r.materialId === m.id))
-                          .map(m => (
-                            <option key={m.id} value={m.id}>
-                              {m.name} ({m.unit}){m.stock !== undefined ? ` — stok ${m.stock}` : ''}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-                    <div className="field">
-                      <label htmlFor={`pr-mqty-${idx}`}>Jumlah Digunakan</label>
-                      <input
-                        id={`pr-mqty-${idx}`}
-                        type="number"
-                        step="0.001"
-                        min="0"
-                        value={row.materialQty}
-                        onChange={e => updateUsageRow(idx, { materialQty: e.target.value })}
-                        disabled={!row.materialId}
-                      />
+                {hasRecipe && (
+                  <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
+                    Resep produk dimuat otomatis untuk 1 {selectedProduct?.unit || 'satuan'}. Jumlah
+                    dihitung dari hasil produksi dan ditampilkan dalam satuan resep. Anda tetap dapat
+                    menyesuaikan, menambah, atau menghapus bahan sesuai kebutuhan aktual.
+                  </p>
+                )}
+                {recalcNotice && hasRecipe && (
+                  <div className="alert info" style={{ margin: 0 }}>
+                    <span>Jumlah produksi berubah. Perhitungan bahan disesuaikan manual dan tidak ditimpa otomatis.</span>
+                    <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+                      <button type="button" className="button secondary" onClick={recalculateFromRecipe}>
+                        Hitung Ulang dari Resep
+                      </button>
                     </div>
                   </div>
-                ))}
+                )}
+                {!hasRecipe && form.productId && (
+                  <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
+                    Produk ini belum memiliki resep. Masukkan bahan dan jumlah yang digunakan secara
+                    manual.
+                  </p>
+                )}
+                {usageRows.map((row, idx) => {
+                  const material = materials.find((m) => m.id === row.materialId)
+                  const unitOptions = material
+                    ? compatibleRecipeUnits(material.unit)
+                    : row.unit
+                      ? [row.unit]
+                      : []
+                  return (
+                    <div key={row.rowId} className="form-row" style={{ alignItems: 'flex-end' }}>
+                      <div className="field" style={{ flex: 2, minWidth: 160 }}>
+                        <label htmlFor={`pr-material-${idx}`}>Bahan Baku</label>
+                        <select
+                          id={`pr-material-${idx}`}
+                          value={row.materialId}
+                          onChange={e => {
+                            const materialId = e.target.value
+                            const nextMaterial = materials.find((m) => m.id === materialId)
+                            const nextUnit = nextMaterial?.unit || ''
+                            updateUsageRow(idx, {
+                              materialId,
+                              unit: row.fromRecipe ? row.unit : nextUnit || row.unit,
+                              materialQty: row.materialId === materialId ? row.materialQty : row.materialQty,
+                            })
+                          }}
+                        >
+                          <option value="">Pilih bahan</option>
+                          {activeMaterials
+                            .filter(m => !usageRows.some((r, i) => i !== idx && r.materialId === m.id))
+                            .map(m => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({m.unit}){m.stock !== undefined ? ` — stok ${m.stock}` : ''}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                      <div className="field" style={{ flex: 1, minWidth: 120 }}>
+                        <label htmlFor={`pr-mqty-${idx}`}>Jumlah Digunakan</label>
+                        <input
+                          id={`pr-mqty-${idx}`}
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          value={row.materialQty}
+                          onChange={e => updateUsageRow(idx, { materialQty: e.target.value })}
+                          disabled={!row.materialId}
+                        />
+                      </div>
+                      <div className="field" style={{ flex: 1, minWidth: 110 }}>
+                        <label htmlFor={`pr-unit-${idx}`}>Satuan</label>
+                        {row.fromRecipe || unitOptions.length <= 1 ? (
+                          <input
+                            id={`pr-unit-${idx}`}
+                            value={row.unit || material?.unit || ''}
+                            readOnly
+                            disabled={!row.materialId}
+                            title={row.fromRecipe ? 'Satuan mengikuti resep' : undefined}
+                          />
+                        ) : (
+                          <select
+                            id={`pr-unit-${idx}`}
+                            value={row.unit || material?.unit || ''}
+                            onChange={e => updateUsageRow(idx, { unit: e.target.value })}
+                            disabled={!row.materialId}
+                          >
+                            {unitOptions.map((u) => (
+                              <option key={u} value={u}>{u}</option>
+                            ))}
+                          </select>
+                        )}
+                        {material && row.unit && row.unit !== material.unit && areUnitsCompatible(row.unit, material.unit) && (
+                          <span className="text-muted" style={{ fontSize: 11 }}>
+                            ≈ {formatQty(convertQuantityValue(Number(row.materialQty || 0), row.unit, material.unit) ?? 0)} {material.unit}
+                          </span>
+                        )}
+                      </div>
+                      <div className="form-actions" style={{ margin: 0 }}>
+                        <button
+                          type="button"
+                          className="button secondary production-usage-remove"
+                          onClick={() => removeUsageRow(idx)}
+                          disabled={usageRows.length === 1}
+                          aria-label={`Hapus bahan ${idx + 1}`}
+                          title="Hapus bahan"
+                        >
+                          Hapus
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
                 <div className="form-actions production-usage-actions" style={{ marginTop: 0 }}>
                   <button type="button" className="button secondary" onClick={addUsageRow}>
                     Tambah Bahan
@@ -560,7 +752,13 @@ export function ProductionPage() {
                         )}
                       </td>
                       <td className="text-muted">
-                        {p.usages.map(u => `${u.material.name} ${u.quantity} ${u.material.unit}`).join(', ') || '-'}
+                        {p.usages
+                          .map(u => {
+                            const qty = u.inputQuantity ?? u.quantity
+                            const unit = u.inputUnit || u.material.unit
+                            return `${u.material.name} ${formatQty(Number(qty))} ${unit}`
+                          })
+                          .join(', ') || '-'}
                       </td>
                       <td>
                         {p.batch ? (
@@ -635,7 +833,13 @@ export function ProductionPage() {
                       <div className="production-item-field">
                         <span className="production-item-label">Bahan Digunakan</span>
                         <span className="production-item-usage">
-                          {p.usages.map(u => `${u.material.name} ${u.quantity} ${u.material.unit}`).join(', ') || '-'}
+                          {p.usages
+                            .map(u => {
+                              const qty = u.inputQuantity ?? u.quantity
+                              const unit = u.inputUnit || u.material.unit
+                              return `${u.material.name} ${formatQty(Number(qty))} ${unit}`
+                            })
+                            .join(', ') || '-'}
                         </span>
                       </div>
                     </div>
