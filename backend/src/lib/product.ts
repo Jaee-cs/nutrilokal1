@@ -5,6 +5,10 @@
  * bukan angka tersimpan terpisah.
  */
 import type { Prisma, Product } from '@prisma/client';
+import {
+  toPublicProductNutrition,
+  type ProductNutrition,
+} from './product-nutrition';
 import { toPublicRecipeItem, type PublicRecipeItem } from './product-recipe';
 
 export interface PublicProduct {
@@ -25,6 +29,8 @@ export interface PublicProduct {
   batchCount?: number;
   /** Resep standar bahan per 1 satuan produk (kosong bila belum diatur). */
   recipe: PublicRecipeItem[];
+  /** Informasi nilai gizi opsional (null bila belum diisi). */
+  nutrition: ProductNutrition | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -56,6 +62,7 @@ export function toPublicProduct(
     isActive: product.isActive,
     ...(stockSummary ? { stock: stockSummary.stock, batchCount: stockSummary.batchCount } : {}),
     recipe: (product.recipeItems ?? []).map(toPublicRecipeItem),
+    nutrition: toPublicProductNutrition((product as Product).nutrition),
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };

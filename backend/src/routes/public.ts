@@ -94,6 +94,7 @@ publicRouter.get('/products/:id', async (req, res) => {
       composition: true,
       storageInstructions: true,
       photoUrl: true,
+      nutrition: true,
       isActive: true,
     },
   });

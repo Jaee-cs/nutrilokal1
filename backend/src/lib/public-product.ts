@@ -18,6 +18,7 @@
  */
 import { Prisma } from '@prisma/client';
 import { businessDateCode, todayBusinessDateCode } from './date';
+import { toPublicNutritionView, type ProductNutrition } from './product-nutrition';
 
 /** Informasi produsen yang memang untuk publik. */
 export const PUBLIC_PRODUCER = {
@@ -47,6 +48,8 @@ export interface PublicProductInfo {
   composition?: string;
   storageInstructions?: string;
   photoUrl?: string;
+  /** Informasi nilai gizi; hanya bila tersedia dan memiliki nilai. */
+  nutrition?: ProductNutrition;
 }
 
 export interface PublicProductPage {
@@ -64,6 +67,7 @@ interface ProductFacts {
   composition: string | null;
   storageInstructions: string | null;
   photoUrl: string | null;
+  nutrition: unknown;
 }
 
 interface BatchFacts {
@@ -145,6 +149,8 @@ export function buildPublicProductResponse(
   if (product.composition) info.composition = product.composition;
   if (product.storageInstructions) info.storageInstructions = product.storageInstructions;
   if (product.photoUrl) info.photoUrl = product.photoUrl;
+  const nutrition = toPublicNutritionView(product.nutrition);
+  if (nutrition) info.nutrition = nutrition;
 
   const publicBatches = sortPublicBatchesNewestFirst(batches).map((batch) => ({
     code: batch.code,

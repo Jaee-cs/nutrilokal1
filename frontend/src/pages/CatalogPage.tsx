@@ -1,109 +1,63 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../lib/api'
-import { productPhotoUrl } from '../utils/product-photo'
-import { productPublicPath } from '../utils/public-product'
+import {
+  PublicCatalogView,
+  type PublicCatalogProduct,
+} from '../components/PublicCatalogView'
+import './LandingPage.css'
 
-interface PublicProduct {
-  id: string
-  name: string
-  unit: string
-  sellingPrice: number
-  description?: string
-  photoUrl?: string
-}
-
+/** Rute "/catalog" memakai tampilan katalog referensi yang sama dengan "/". */
 export function CatalogPage() {
-  const [products, setProducts] = useState<PublicProduct[]>([])
+  const [products, setProducts] = useState<PublicCatalogProduct[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  async function fetchCatalog() {
-    try {
-      setLoading(true)
-      const res = await api.get('/public/catalog')
-      setProducts(res.data.products || [])
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal memuat katalog')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   useEffect(() => {
-    fetchCatalog()
+    let active = true
+
+    setLoading(true)
+    setError(null)
+    api
+      .get('/public/catalog')
+      .then((res) => {
+        if (active) setProducts(res.data?.products ?? [])
+      })
+      .catch((err: any) => {
+        if (!active) return
+        setProducts([])
+        setError(err.response?.data?.message || 'Gagal memuat katalog')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
   }, [])
 
   return (
-    <div className="container">
-      <div className="page-head">
-        <h1 className="page-title">Katalog Publik</h1>
-        <p className="page-subtitle">
-          Produk aktif KWT Gogor yang tersedia untuk umum.
-        </p>
-      </div>
-
-      {error && <div className="alert error">{error}</div>}
-
-      {loading ? (
-        <p className="text-muted">Memuat katalog...</p>
-      ) : products.length === 0 ? (
-        <div className="card">
-          <p className="text-muted">Belum ada produk aktif.</p>
+    <div className="landing">
+      <header className="landing-nav">
+        <div className="landing-nav-inner">
+          <Link to="/" className="landing-brand">
+            <img src="/logo.png" alt="NutriLokal" />
+            <span className="landing-brand-text">
+              <strong>NutriLokal</strong>
+              <small>KWT Gogor</small>
+            </span>
+          </Link>
+          <Link to="/login" className="landing-login">
+            <span className="material-symbols-outlined" aria-hidden="true">
+              login
+            </span>
+            Masuk
+          </Link>
         </div>
-      ) : (
-        <div className="product-grid">
-          {products.map((p) => {
-            const photo = productPhotoUrl(p.photoUrl)
-            return (
-              <div key={p.id} className="card product-card">
-                <div className="product-card-head">
-                  <div className="product-info">
-                    <h3 className="product-name">
-                      <Link to={productPublicPath(p.id)} className="product-name-link">
-                        {p.name}
-                      </Link>
-                    </h3>
-                    <p className="product-unit">Per {p.unit}</p>
-                  </div>
-                  <span className="badge success">Aktif</span>
-                </div>
+      </header>
 
-                {photo && (
-                  <div className="product-photo">
-                    <img src={photo} alt={`Foto ${p.name}`} loading="lazy" />
-                  </div>
-                )}
-
-                <div className="product-price">
-                  <span className="card-label">Harga Jual</span>
-                  <span className="price-value">
-                    Rp {Number(p.sellingPrice).toLocaleString('id-ID')}
-                  </span>
-                </div>
-
-                {p.description && <p className="product-desc">{p.description}</p>}
-
-                <div className="product-card-foot">
-                  <Link to={productPublicPath(p.id)} className="button secondary">
-                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                      info
-                    </span>
-                    Informasi Produk
-                  </Link>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      <div className="catalog-foot">
-        <Link to="/qr-trace" className="button secondary">
-          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>qr_code_2</span>
-          Cek Traceability QR
-        </Link>
-      </div>
+      <PublicCatalogView products={products} loading={loading} error={error} />
     </div>
   )
 }

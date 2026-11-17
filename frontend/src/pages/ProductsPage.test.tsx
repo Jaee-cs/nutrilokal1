@@ -213,7 +213,7 @@ describe('ProductsPage — modal tambah produk', () => {
 
     await user.click(within(dialog).getByRole('button', { name: 'Tambah Bahan' }))
     await user.selectOptions(within(dialog).getByLabelText('Bahan Baku'), 'm1')
-    await user.type(within(dialog).getByLabelText('Jumlah'), '150')
+    await user.type(document.getElementById('recipe-qty-0') as HTMLElement, '150')
     await user.selectOptions(within(dialog).getByLabelText('Satuan Resep'), 'gram')
 
     await user.click(within(dialog).getByRole('button', { name: 'Simpan Produk' }))

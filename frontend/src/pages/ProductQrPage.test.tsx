@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { ProductQrPage } from './ProductQrPage'
@@ -77,21 +77,30 @@ describe('ProductQrPage', () => {
     )
   })
 
-  it('menampilkan pratinjau label cetak untuk produk', async () => {
+  it('mencetak satu QR melalui dokumen cetak terpisah tanpa elemen halaman', async () => {
     mocks.get.mockResolvedValue({ data: { data: [activeProduct] } })
     renderPage()
 
     await screen.findByAltText('Kode QR produk Keripik Uji')
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: /Label/ }))
+    await user.click(screen.getByRole('button', { name: /Cetak QR/ }))
 
-    const dialog = await screen.findByRole('dialog', { name: 'Pratinjau label produk' })
-    expect(within(dialog).getByText('Keripik Uji')).toBeInTheDocument()
-    expect(within(dialog).getByAltText('Kode QR produk Keripik Uji')).toHaveAttribute(
-      'src',
-      'data:image/png;base64,qr-produk',
-    )
-    expect(within(dialog).getByRole('button', { name: /Cetak Label/ })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.toDataURL).toHaveBeenCalledWith(
+        expect.stringMatching(/\/produk\/p1$/),
+        expect.objectContaining({ width: 1024, margin: 4 }),
+      )
+    })
+
+    const frame = document.querySelector('iframe') as HTMLIFrameElement | null
+    expect(frame).not.toBeNull()
+    const printedHtml = frame?.contentDocument?.documentElement.innerHTML ?? ''
+    expect(printedHtml).toContain('src="data:image/png;base64,qr-produk"')
+    expect(printedHtml).toContain('@page')
+    expect(printedHtml).toContain('width: 60mm')
+    expect(printedHtml).not.toContain('Keripik Uji')
+    expect(printedHtml).not.toContain('product-qr-card')
+    expect(document.querySelector('.qr-print-sheet')).toBeNull()
   })
 
   it('mengunduh QR resolusi tinggi saat tombol unduh ditekan', async () => {
@@ -103,7 +112,7 @@ describe('ProductQrPage', () => {
 
     await screen.findByAltText('Kode QR produk Keripik Uji')
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: /Unduh PNG/ }))
+    await user.click(screen.getByRole('button', { name: /Unduh QR/ }))
 
     await waitFor(() => {
       expect(mocks.toDataURL).toHaveBeenCalledWith(
@@ -126,7 +135,7 @@ describe('ProductQrPage', () => {
     expect(await screen.findByAltText('Kode QR produk Produk Arsip')).toBeInTheDocument()
     expect(screen.getByText('Nonaktif')).toBeInTheDocument()
     expect(
-      screen.getByText(/Halaman publik tidak aktif selama produk dinonaktifkan/),
+      screen.getByText(/Halaman publik nonaktif/),
     ).toBeInTheDocument()
     // QR tetap dapat diunduh/dicetak; URL-nya tidak berubah.
     expect(screen.getByText('/produk/p2')).toBeInTheDocument()

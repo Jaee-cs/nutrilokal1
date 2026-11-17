@@ -24,6 +24,20 @@ interface ProductRecipeItem {
   recipeUnit: string
 }
 
+interface ProductNutritionComponent {
+  name: string
+  amount?: number
+  unit?: string
+  akgPercent?: number
+}
+
+interface ProductNutrition {
+  servingSizeAmount?: number
+  servingSizeUnit?: string
+  servingsPerPackage?: number
+  components?: ProductNutritionComponent[]
+}
+
 interface Product {
   id: string
   name: string
@@ -37,6 +51,7 @@ interface Product {
   batchCount?: number
   isActive: boolean
   recipe?: ProductRecipeItem[]
+  nutrition?: ProductNutrition | null
 }
 
 interface MaterialOption {
@@ -96,6 +111,84 @@ const EMPTY_FORM = {
   description: '',
   composition: '',
   storageInstructions: '',
+}
+
+const STANDARD_NUTRITION_COMPONENTS = [
+  'Energi Total',
+  'Lemak Total',
+  'Lemak Jenuh',
+  'Protein',
+  'Karbohidrat Total',
+  'Serat Pangan',
+  'Gula Total',
+  'Natrium',
+]
+
+type NutritionComponentForm = {
+  name: string
+  amount: string
+  unit: string
+  akgPercent: string
+}
+
+type NutritionForm = {
+  servingSizeAmount: string
+  servingSizeUnit: string
+  servingsPerPackage: string
+  components: NutritionComponentForm[]
+}
+
+function emptyNutritionForm(): NutritionForm {
+  return {
+    servingSizeAmount: '',
+    servingSizeUnit: '',
+    servingsPerPackage: '',
+    components: STANDARD_NUTRITION_COMPONENTS.map((name) => ({
+      name,
+      amount: '',
+      unit: '',
+      akgPercent: '',
+    })),
+  }
+}
+
+function nutritionToForm(nutrition?: ProductNutrition | null): NutritionForm {
+  if (!nutrition) return emptyNutritionForm()
+  const existing = (nutrition.components ?? []).map((c) => ({
+    name: c.name ?? '',
+    amount: c.amount === undefined || c.amount === null ? '' : String(c.amount),
+    unit: c.unit ?? '',
+    akgPercent: c.akgPercent === undefined || c.akgPercent === null ? '' : String(c.akgPercent),
+  }))
+  const byLower = new Map(existing.map((c) => [c.name.trim().toLowerCase(), c]))
+  const ordered: NutritionComponentForm[] = []
+  for (const name of STANDARD_NUTRITION_COMPONENTS) {
+    const found = byLower.get(name.toLowerCase())
+    if (found) {
+      ordered.push(found)
+      byLower.delete(name.toLowerCase())
+    } else {
+      ordered.push({ name, amount: '', unit: '', akgPercent: '' })
+    }
+  }
+  for (const item of existing) {
+    if (byLower.has(item.name.trim().toLowerCase())) {
+      ordered.push(item)
+      byLower.delete(item.name.trim().toLowerCase())
+    }
+  }
+  return {
+    servingSizeAmount:
+      nutrition.servingSizeAmount === undefined || nutrition.servingSizeAmount === null
+        ? ''
+        : String(nutrition.servingSizeAmount),
+    servingSizeUnit: nutrition.servingSizeUnit ?? '',
+    servingsPerPackage:
+      nutrition.servingsPerPackage === undefined || nutrition.servingsPerPackage === null
+        ? ''
+        : String(nutrition.servingsPerPackage),
+    components: ordered.length > 0 ? ordered : emptyNutritionForm().components,
+  }
 }
 
 const MOVEMENT_LABELS: Record<MovementType, string> = {
@@ -266,6 +359,8 @@ export function ProductsPage() {
   type RecipeFormRow = { materialId: string; quantityPerUnit: string; recipeUnit: string }
   const [materials, setMaterials] = useState<MaterialOption[]>([])
   const [recipeRows, setRecipeRows] = useState<RecipeFormRow[]>([])
+  const [nutritionForm, setNutritionForm] = useState<NutritionForm>(emptyNutritionForm())
+  const [nutritionOpen, setNutritionOpen] = useState(false)
 
   // Mode edit (hanya Admin): id produk yang sedang diubah + datanya.
   const [editTarget, setEditTarget] = useState<Product | null>(null)
@@ -421,6 +516,8 @@ export function ProductsPage() {
     setEditTarget(null)
     setForm(EMPTY_FORM)
     setRecipeRows([])
+    setNutritionForm(emptyNutritionForm())
+    setNutritionOpen(false)
     setPhotoFile(undefined)
     setPhotoNotice(null)
     setFormOpen(true)
@@ -443,6 +540,8 @@ export function ProductsPage() {
         recipeUnit: item.recipeUnit,
       })),
     )
+    setNutritionForm(nutritionToForm(product.nutrition))
+    setNutritionOpen(false)
     setPhotoFile(undefined)
     setPhotoNotice(null)
     setFormOpen(true)
@@ -452,6 +551,8 @@ export function ProductsPage() {
     setFormOpen(false)
     setEditTarget(null)
     setRecipeRows([])
+    setNutritionForm(emptyNutritionForm())
+    setNutritionOpen(false)
     setPhotoFile(undefined)
     setPhotoNotice(null)
   }
@@ -468,7 +569,114 @@ export function ProductsPage() {
     setRecipeRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }
 
-  function buildRecipePayload(): { recipe: Array<{ materialId: string; quantityPerUnit: number; recipeUnit: string }> } | { error: string } {
+  function nutritionStatus(): { label: string; filled: boolean } {
+    const hasServing =
+      nutritionForm.servingSizeAmount.trim() !== '' ||
+      nutritionForm.servingSizeUnit.trim() !== '' ||
+      nutritionForm.servingsPerPackage.trim() !== ''
+    const filledComponents = nutritionForm.components.filter(
+      (c) =>
+        c.amount.trim() !== '' ||
+        c.unit.trim() !== '' ||
+        c.akgPercent.trim() !== '',
+    ).length
+    if (!hasServing && filledComponents === 0) {
+      return { label: 'Belum diisi', filled: false }
+    }
+    const parts: string[] = []
+    if (filledComponents > 0) parts.push(`${filledComponents} komponen terisi`)
+    if (hasServing) parts.push('takaran/sajian terisi')
+    return { label: parts.join(' · '), filled: true }
+  }
+
+  function addNutritionComponent() {
+    setNutritionForm((f) => ({
+      ...f,
+      components: [...f.components, { name: '', amount: '', unit: '', akgPercent: '' }],
+    }))
+  }
+
+  function removeNutritionComponent(index: number) {
+    setNutritionForm((f) => ({
+      ...f,
+      components: f.components.filter((_, i) => i !== index),
+    }))
+  }
+
+  function updateNutritionComponent(index: number, patch: Partial<NutritionComponentForm>) {
+    setNutritionForm((f) => ({
+      ...f,
+      components: f.components.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    }))
+  }
+
+  function parseOptionalNumberInput(
+    raw: string,
+    label: string,
+    maxDecimals: number,
+  ): { value?: number; error?: string } {
+    const text = raw.trim()
+    if (!text) return {}
+    const value = Number(text)
+    if (!Number.isFinite(value)) return { error: `${label} harus berupa angka.` }
+    if (value < 0) return { error: `${label} tidak boleh kurang dari 0.` }
+    if (String(text).includes('e') || String(text).includes('E')) return { error: `${label} tidak valid.` }
+    const [, dec] = text.split('.')
+    if (dec && dec.length > maxDecimals) {
+      return { error: `${label} maksimal ${maxDecimals} angka di belakang koma.` }
+    }
+    return { value }
+  }
+
+  function buildNutritionPayload(): { nutrition: ProductNutrition | null } | { error: string } {
+    const servingAmount = parseOptionalNumberInput(
+      nutritionForm.servingSizeAmount,
+      'Takaran saji',
+      3,
+    )
+    if (servingAmount.error) return { error: servingAmount.error }
+    const servingsPerPackage = parseOptionalNumberInput(
+      nutritionForm.servingsPerPackage,
+      'Jumlah sajian per kemasan',
+      3,
+    )
+    if (servingsPerPackage.error) return { error: servingsPerPackage.error }
+
+    const components: ProductNutritionComponent[] = []
+    for (let i = 0; i < nutritionForm.components.length; i++) {
+      const row = nutritionForm.components[i]
+      const name = row.name.trim()
+      const unit = row.unit.trim()
+      const amount = parseOptionalNumberInput(row.amount, `Jumlah komponen gizi baris ${i + 1}`, 3)
+      if (amount.error) return { error: amount.error }
+      const akg = parseOptionalNumberInput(row.akgPercent, `%AKG komponen gizi baris ${i + 1}`, 2)
+      if (akg.error) return { error: akg.error }
+      const hasAny = !!name || amount.value !== undefined || !!unit || akg.value !== undefined
+      if (!hasAny) continue
+      if (!name) return { error: `Nama komponen gizi baris ${i + 1} wajib diisi.` }
+      const item: ProductNutritionComponent = { name }
+      if (amount.value !== undefined) item.amount = amount.value
+      if (unit) item.unit = unit
+      if (akg.value !== undefined) item.akgPercent = akg.value
+      components.push(item)
+    }
+
+    const nutrition: ProductNutrition = {}
+    if (servingAmount.value !== undefined) nutrition.servingSizeAmount = servingAmount.value
+    const servingUnit = nutritionForm.servingSizeUnit.trim()
+    if (servingUnit) nutrition.servingSizeUnit = servingUnit
+    if (servingsPerPackage.value !== undefined) nutrition.servingsPerPackage = servingsPerPackage.value
+    if (components.length > 0) nutrition.components = components
+
+    const hasData =
+      nutrition.servingSizeAmount !== undefined ||
+      !!nutrition.servingSizeUnit ||
+      nutrition.servingsPerPackage !== undefined ||
+      (nutrition.components?.length ?? 0) > 0
+    return { nutrition: hasData ? nutrition : null }
+  }
+
+    function buildRecipePayload(): { recipe: Array<{ materialId: string; quantityPerUnit: number; recipeUnit: string }> } | { error: string } {
     const recipe: Array<{ materialId: string; quantityPerUnit: number; recipeUnit: string }> = []
     const seen = new Set<string>()
     for (let i = 0; i < recipeRows.length; i++) {
@@ -517,6 +725,11 @@ export function ProductsPage() {
       notify.error(recipePayload.error)
       return
     }
+    const nutritionPayload = buildNutritionPayload()
+    if ('error' in nutritionPayload) {
+      notify.error(nutritionPayload.error)
+      return
+    }
     setSubmitting(true)
     let created: Product | null = null
     try {
@@ -528,6 +741,7 @@ export function ProductsPage() {
         composition: form.composition || undefined,
         storageInstructions: form.storageInstructions || undefined,
         recipe: recipePayload.recipe,
+        nutrition: nutritionPayload.nutrition,
       })
       created = res.data.product as Product
     } catch (err: any) {
@@ -559,6 +773,11 @@ export function ProductsPage() {
       notify.error(recipePayload.error)
       return
     }
+    const nutritionPayload = buildNutritionPayload()
+    if ('error' in nutritionPayload) {
+      notify.error(nutritionPayload.error)
+      return
+    }
 
     setSubmitting(true)
     try {
@@ -570,6 +789,7 @@ export function ProductsPage() {
         composition: form.composition,
         storageInstructions: form.storageInstructions,
         recipe: recipePayload.recipe,
+        nutrition: nutritionPayload.nutrition,
       })
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal menyimpan perubahan produk')
@@ -1162,6 +1382,174 @@ export function ProductsPage() {
                 value={form.storageInstructions}
                 onChange={e => setForm(f => ({ ...f, storageInstructions: e.target.value }))}
               />
+            </div>
+
+            <div className="field product-nutrition-field">
+              <div className={`product-nutrition-accordion${nutritionOpen ? ' is-open' : ''}`}>
+                <button
+                  type="button"
+                  id="nutrition-toggle"
+                  className="product-nutrition-toggle"
+                  onClick={() => setNutritionOpen((v) => !v)}
+                  aria-expanded={nutritionOpen}
+                  aria-controls="nutrition-panel"
+                >
+                  <span className="product-nutrition-toggle-main">
+                    <span className="product-nutrition-toggle-title">Informasi Nilai Gizi</span>
+                    <span className="badge neutral product-nutrition-optional">Opsional</span>
+                    <span
+                      className={`product-nutrition-status${nutritionStatus().filled ? ' is-filled' : ''}`}
+                    >
+                      {nutritionStatus().label}
+                    </span>
+                  </span>
+                  <span className="material-symbols-outlined product-nutrition-chevron" aria-hidden="true">
+                    {nutritionOpen ? 'expand_less' : 'expand_more'}
+                  </span>
+                </button>
+
+                {nutritionOpen && (
+                  <div
+                    id="nutrition-panel"
+                    className="product-nutrition-panel"
+                    role="region"
+                    aria-labelledby="nutrition-toggle"
+                  >
+                    <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
+                      Isi hanya data yang sudah diketahui. Kolom kosong tidak dianggap nol dan tidak
+                      dihitung otomatis. {isAdmin ? '' : 'Hanya Admin yang dapat mengubah nilai gizi.'}
+                    </p>
+
+                    <div className="form-row product-nutrition-serving">
+                      <div className="field">
+                        <label htmlFor="nutrition-serving-amount">Takaran Saji</label>
+                        <div className="product-nutrition-inline">
+                          <input
+                            id="nutrition-serving-amount"
+                            type="number"
+                            step="0.001"
+                            min="0"
+                            value={nutritionForm.servingSizeAmount}
+                            onChange={(e) =>
+                              setNutritionForm((f) => ({ ...f, servingSizeAmount: e.target.value }))
+                            }
+                            placeholder="Jumlah"
+                            disabled={!isAdmin}
+                          />
+                          <input
+                            id="nutrition-serving-unit"
+                            value={nutritionForm.servingSizeUnit}
+                            onChange={(e) =>
+                              setNutritionForm((f) => ({ ...f, servingSizeUnit: e.target.value }))
+                            }
+                            placeholder="Satuan (g, ml, sajian)"
+                            disabled={!isAdmin}
+                            aria-label="Satuan takaran saji"
+                          />
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="nutrition-servings-per-package">Jumlah Sajian per Kemasan</label>
+                        <input
+                          id="nutrition-servings-per-package"
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          value={nutritionForm.servingsPerPackage}
+                          onChange={(e) =>
+                            setNutritionForm((f) => ({ ...f, servingsPerPackage: e.target.value }))
+                          }
+                          placeholder="Contoh: 4"
+                          disabled={!isAdmin}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="product-nutrition-components">
+                      <div className="product-nutrition-components-head">
+                        <span className="card-label">Kandungan Gizi</span>
+                        <span className="card-label">%AKG (opsional)</span>
+                      </div>
+                      {nutritionForm.components.length === 0 ? (
+                        <p className="text-muted">Belum ada komponen gizi.</p>
+                      ) : (
+                        <div className="stack-form product-nutrition-list">
+                          {nutritionForm.components.map((row, idx) => (
+                            <div key={`${idx}-${row.name}`} className="product-nutrition-row">
+                              <div className="field">
+                                <label htmlFor={`nutrition-name-${idx}`}>Nama Komponen</label>
+                                <input
+                                  id={`nutrition-name-${idx}`}
+                                  value={row.name}
+                                  onChange={(e) => updateNutritionComponent(idx, { name: e.target.value })}
+                                  placeholder="Contoh: Vitamin C"
+                                  disabled={!isAdmin}
+                                />
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`nutrition-amount-${idx}`}>Jumlah</label>
+                                <input
+                                  id={`nutrition-amount-${idx}`}
+                                  type="number"
+                                  step="0.001"
+                                  min="0"
+                                  value={row.amount}
+                                  onChange={(e) => updateNutritionComponent(idx, { amount: e.target.value })}
+                                  placeholder="—"
+                                  disabled={!isAdmin}
+                                />
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`nutrition-unit-${idx}`}>Satuan</label>
+                                <input
+                                  id={`nutrition-unit-${idx}`}
+                                  value={row.unit}
+                                  onChange={(e) => updateNutritionComponent(idx, { unit: e.target.value })}
+                                  placeholder="g, mg, kkal"
+                                  disabled={!isAdmin}
+                                />
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`nutrition-akg-${idx}`}>%AKG</label>
+                                <input
+                                  id={`nutrition-akg-${idx}`}
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={row.akgPercent}
+                                  onChange={(e) => updateNutritionComponent(idx, { akgPercent: e.target.value })}
+                                  placeholder="—"
+                                  disabled={!isAdmin}
+                                />
+                              </div>
+                              {isAdmin && (
+                                <div className="form-actions product-nutrition-remove">
+                                  <button
+                                    type="button"
+                                    className="button secondary production-usage-remove"
+                                    onClick={() => removeNutritionComponent(idx)}
+                                    aria-label={`Hapus komponen gizi ${idx + 1}`}
+                                    title="Hapus komponen"
+                                  >
+                                    Hapus
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {isAdmin && (
+                        <div className="form-actions" style={{ marginTop: 0 }}>
+                          <button type="button" className="button secondary" onClick={addNutritionComponent}>
+                            Tambah Komponen
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="field">

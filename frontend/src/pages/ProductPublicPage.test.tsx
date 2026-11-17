@@ -77,8 +77,18 @@ describe('ProductPublicPage', () => {
     expect(screen.getByText('Singkong, garam, minyak kelapa.')).toBeInTheDocument()
     expect(screen.getByText('Simpan di tempat kering dan sejuk.')).toBeInTheDocument()
     expect(screen.getByText('4 batch')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Informasi Nilai Gizi' })).not.toBeInTheDocument()
 
     expect(mocks.get).toHaveBeenCalledWith('/public/products/p1')
+
+    expect(screen.getByRole('link', { name: /Pesan via WhatsApp/ })).toHaveAttribute(
+      'href',
+      expect.stringContaining(encodeURIComponent('Keripik Uji')),
+    )
+    expect(screen.getByRole('link', { name: /Kembali ke Katalog/ })).toHaveAttribute(
+      'href',
+      '/catalog',
+    )
 
     // Urutan mengikuti respons backend: produksi terbaru lebih dulu.
     const rows = screen.getAllByRole('row').slice(1)
@@ -108,6 +118,55 @@ describe('ProductPublicPage', () => {
 
     const withdrawnRow = rows.find((row) => row.textContent?.includes('NL-20261015-001'))!
     expect(within(withdrawnRow).queryByText('Tersedia')).not.toBeInTheDocument()
+  })
+
+  it('menampilkan nilai gizi hanya bila datanya tersedia dari API', async () => {
+    mocks.get.mockResolvedValue({
+      data: {
+        ...published,
+        product: {
+          ...published.product,
+          nutrition: {
+            servingSizeAmount: 250,
+            servingSizeUnit: 'ml',
+            servingsPerPackage: 4,
+            components: [
+              { name: 'Protein', amount: 0.5, unit: 'g', akgPercent: 1 },
+              { name: 'Vitamin C', akgPercent: 15 },
+            ],
+          },
+        },
+      },
+    })
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'Keripik Uji' })
+    expect(screen.getByRole('heading', { name: 'Informasi Nilai Gizi' })).toBeInTheDocument()
+    expect(screen.getByText('Takaran Saji')).toBeInTheDocument()
+    expect(screen.getByText('250 ml')).toBeInTheDocument()
+    expect(screen.getByText('Jumlah Sajian per Kemasan')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(screen.getByText('Protein')).toBeInTheDocument()
+    expect(screen.getByText('0,5 g')).toBeInTheDocument()
+    expect(screen.getByText('1% AKG')).toBeInTheDocument()
+    expect(screen.getByText('Vitamin C')).toBeInTheDocument()
+    expect(screen.getByText('15% AKG')).toBeInTheDocument()
+  })
+
+  it('tidak menampilkan tabel nutrisi kosong atau komponen tanpa nilai', async () => {
+    mocks.get.mockResolvedValue({
+      data: {
+        ...published,
+        product: {
+          ...published.product,
+          nutrition: { components: [{ name: 'Protein' }, { name: ' ', amount: undefined }] },
+        },
+      },
+    })
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'Keripik Uji' })
+    expect(screen.queryByRole('heading', { name: 'Informasi Nilai Gizi' })).not.toBeInTheDocument()
   })
 
   it('menampilkan pesan yang jelas untuk produk tanpa batch', async () => {

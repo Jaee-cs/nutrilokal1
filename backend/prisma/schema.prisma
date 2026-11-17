@@ -558,6 +558,10 @@ model Product {
   /// menghapus foto lama dengan aman saat diganti/dihapus. Kosong untuk foto
   /// lama yang masih tersimpan lokal.
   photoPublicId String?
+  /// Informasi nilai gizi (opsional, dikelola Admin). Disimpan apa adanya
+  /// sebagai data produk; kolom kosong tidak dianggap nol dan tidak diisi
+  /// otomatis. Null = belum ada informasi nilai gizi.
+  nutrition   Json?
   /// Satuan dasar produk (mis. "pcs", "botol", "kg").
   unit        String
   /// Harga jual per satuan dasar; ditetapkan di master dan dipakai

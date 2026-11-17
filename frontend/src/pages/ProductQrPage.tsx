@@ -17,14 +17,11 @@ interface Product {
   photoUrl?: string | null
 }
 
-interface LabelState {
-  productName: string
-  photoUrl: string | null
-  dataUrl: string
-}
-
 // QR dibuat di klien (tanpa layanan eksternal), koreksi galat M.
+// Pratinjau 320px cukup untuk 80px di kartu; unduhan/cetak memakai 1024px.
+// Cetak memakai quiet zone 4 modul sesuai spesifikasi QR.
 const QR_OPTIONS = { width: 320, margin: 1, errorCorrectionLevel: 'M' as const } as const
+const PRINT_QR_OPTIONS = { ...QR_OPTIONS, width: 1024, margin: 4 } as const
 
 function downloadFileName(name: string): string {
   const slug = name
@@ -41,7 +38,6 @@ export function ProductQrPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [qrById, setQrById] = useState<Record<string, string>>({})
-  const [label, setLabel] = useState<LabelState | null>(null)
 
   async function fetchProducts() {
     try {
@@ -115,19 +111,65 @@ export function ProductQrPage() {
     }
   }
 
-  async function openLabel(product: Product) {
-    const dataUrl =
-      qrById[product.id] ??
-      (await QRCode.toDataURL(productPublicUrl(product.id), QR_OPTIONS).catch(() => null))
-    if (!dataUrl) {
-      notify.error('Gagal membuat gambar QR untuk label')
-      return
+  /**
+   * Cetak memakai iframe tersembunyi yang berisi SATU QR saja. Dokumen cetak
+   * ini terpisah dari halaman daftar produk sehingga tidak ada kartu, foto,
+   * tombol, header, maupun QR produk lain yang ikut tercetak.
+   */
+  async function printQrOnly(product: Product) {
+    try {
+      const dataUrl = await QRCode.toDataURL(
+        productPublicUrl(product.id),
+        PRINT_QR_OPTIONS,
+      )
+
+      const frame = document.createElement('iframe')
+      frame.setAttribute('aria-hidden', 'true')
+      frame.style.position = 'fixed'
+      frame.style.right = '0'
+      frame.style.bottom = '0'
+      frame.style.width = '0'
+      frame.style.height = '0'
+      frame.style.border = '0'
+      document.body.appendChild(frame)
+
+      const doc = frame.contentDocument
+      if (!doc) throw new Error('Dokumen cetak tidak tersedia')
+
+      doc.open()
+      doc.write(`<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>QR Produk</title>
+  <style>
+    @page { size: A4 portrait; margin: 18mm; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #fff; }
+    body { display: flex; align-items: center; justify-content: center; }
+    img {
+      display: block;
+      width: 60mm;
+      height: 60mm;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
     }
-    setLabel({
-      productName: product.name,
-      photoUrl: productPhotoUrl(product.photoUrl),
-      dataUrl,
-    })
+  </style>
+</head>
+<body><img src="${dataUrl}" alt="Kode QR produk" /></body>
+</html>`)
+      doc.close()
+
+      const printWindow = frame.contentWindow
+      printWindow?.focus()
+      printWindow?.print()
+      // Bersihkan iframe setelah dialog cetak ditutup; fallback timeout
+      // untuk browser yang tidak memicu afterprint.
+      printWindow?.addEventListener('afterprint', () => frame.remove(), { once: true })
+      window.setTimeout(() => frame.remove(), 60_000)
+    } catch {
+      notify.error('Gagal membuat gambar QR untuk cetak')
+    }
   }
 
   return (
@@ -158,67 +200,79 @@ export function ProductQrPage() {
             {products.map((product) => {
               const qr = qrById[product.id]
               const url = productPublicUrl(product.id)
+              const photo = productPhotoUrl(product.photoUrl)
               return (
                 <article className="product-qr-card" key={product.id}>
-                  <div className="product-qr-preview">
-                    {qr ? (
-                      <img src={qr} alt={`Kode QR produk ${product.name}`} />
-                    ) : (
-                      <div className="qr-placeholder text-muted">Membuat QR…</div>
-                    )}
+                  <div className="product-qr-main">
+                    <div className="product-qr-photo">
+                      {photo ? (
+                        <img src={photo} alt={`Foto ${product.name}`} loading="lazy" />
+                      ) : (
+                        <span className="material-symbols-outlined" aria-hidden="true">
+                          inventory_2
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="product-qr-body">
+                      <div className="product-qr-head">
+                        <h3 className="product-name" title={product.name}>{product.name}</h3>
+                        <span className={`badge ${product.isActive ? 'success' : 'neutral'}`}>
+                          {product.isActive ? 'Aktif' : 'Nonaktif'}
+                        </span>
+                      </div>
+                      <p className="product-unit">Per {product.unit}</p>
+                      <p className="product-qr-url">{productPublicPath(product.id)}</p>
+                    </div>
+
+                    <div className="product-qr-preview">
+                      {qr ? (
+                        <img src={qr} alt={`Kode QR produk ${product.name}`} />
+                      ) : (
+                        <div className="qr-placeholder text-muted">QR</div>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="product-qr-body">
-                    <div className="product-qr-head">
-                      <h3 className="product-name">{product.name}</h3>
-                      <span className={`badge ${product.isActive ? 'success' : 'neutral'}`}>
-                        {product.isActive ? 'Aktif' : 'Nonaktif'}
+                  {!product.isActive && (
+                    <p className="product-qr-note text-muted">
+                      Halaman publik nonaktif. QR tetap berlaku saat produk diaktifkan.
+                    </p>
+                  )}
+
+                  <div className="product-qr-actions">
+                    <button
+                      className="button"
+                      onClick={() => downloadQr(product)}
+                      disabled={!qr}
+                    >
+                      <span className="material-symbols-outlined" aria-hidden="true">
+                        download
                       </span>
-                    </div>
-                    <p className="product-unit">Per {product.unit}</p>
-                    <p className="product-qr-url">{productPublicPath(product.id)}</p>
-
-                    {!product.isActive && (
-                      <p className="product-qr-note text-muted">
-                        Halaman publik tidak aktif selama produk dinonaktifkan.
-                        QR tetap sama dan berlaku kembali bila produk diaktifkan.
-                      </p>
-                    )}
-
-                    <div className="product-qr-actions">
-                      <button
-                        className="button"
-                        onClick={() => downloadQr(product)}
-                        disabled={!qr}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                          download
-                        </span>
-                        Unduh PNG
-                      </button>
-                      <button
-                        className="button secondary"
-                        onClick={() => openLabel(product)}
-                        disabled={!qr}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                          print
-                        </span>
-                        Label
-                      </button>
-                      <Link
-                        to={productPublicPath(product.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="button secondary"
-                        title={url}
-                      >
-                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                          open_in_new
-                        </span>
-                        Buka Halaman
-                      </Link>
-                    </div>
+                      Unduh QR
+                    </button>
+                    <button
+                      className="button secondary"
+                      onClick={() => printQrOnly(product)}
+                      disabled={!qr}
+                    >
+                      <span className="material-symbols-outlined" aria-hidden="true">
+                        print
+                      </span>
+                      Cetak QR
+                    </button>
+                    <Link
+                      to={productPublicPath(product.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="button secondary"
+                      title={url}
+                    >
+                      <span className="material-symbols-outlined" aria-hidden="true">
+                        open_in_new
+                      </span>
+                      Buka Halaman
+                    </Link>
                   </div>
                 </article>
               )
@@ -227,59 +281,6 @@ export function ProductQrPage() {
         )}
       </section>
 
-      {/* Pratinjau label cetak. Kelas label yang sama dipakai QR batch agar
-          hasil cetak tetap konsisten (70mm x 50mm). */}
-      {label && (
-        <div className="modal-root">
-          <div className="modal-overlay" onClick={() => setLabel(null)} />
-          <div
-            className="modal-panel label-modal-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Pratinjau label produk"
-          >
-            <h3 className="modal-title">Pratinjau Label Produk</h3>
-            <div className="label-sheet">
-              <div className="label-brand">NutriLokal · KWT Gogor</div>
-              <div className={`label-top-row${label.photoUrl ? '' : ' qr-only'}`}>
-                {label.photoUrl && (
-                  <div className="label-visuals">
-                    <img
-                      className="label-photo"
-                      src={label.photoUrl}
-                      alt={`Foto ${label.productName}`}
-                    />
-                  </div>
-                )}
-                <div className="label-qr-col">
-                  <img
-                    className="label-qr"
-                    src={label.dataUrl}
-                    alt={`Kode QR produk ${label.productName}`}
-                  />
-                </div>
-              </div>
-              <div className="label-info">
-                <div className="label-product">{label.productName}</div>
-              </div>
-              <div className="label-foot">
-                Pindai QR untuk informasi produk &amp; riwayat batch.
-              </div>
-            </div>
-            <div className="modal-actions">
-              <button className="button secondary" onClick={() => setLabel(null)}>
-                Tutup
-              </button>
-              <button className="button" onClick={() => window.print()}>
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                  print
-                </span>
-                Cetak Label
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

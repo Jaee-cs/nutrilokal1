@@ -1,100 +1,69 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import api from '../lib/api'
+import {
+  PublicCatalogView,
+  type PublicCatalogProduct,
+} from '../components/PublicCatalogView'
 import './LandingPage.css'
 
 /**
- * Landing page publik NutriLokal.
+ * Halaman awal publik (rute "/").
  *
- * Titik masuk aplikasi (rute "/") untuk pengunjung tanpa login:
- * - "Lihat Katalog" menuju halaman katalog publik yang sudah ada (/catalog),
- *   yang memang dapat dibuka tanpa token.
- * - "Login" menuju halaman login yang sekarang (/login) tanpa mengubah
- *   alur autentikasinya.
- *
- * Halaman ini murni tampilan frontend: tidak memanggil API dan tidak
- * mengubah aturan bisnis apa pun.
+ * Mengikuti referensi `halaman awal/`: header ringkas dengan logo + Masuk,
+ * judul Katalog Publik, kartu produk dari data backend, dan aksi WhatsApp/
+ * Info. Rute "/catalog" tetap tersedia dan memakai tampilan yang sama.
  */
 export function LandingPage() {
+  const [products, setProducts] = useState<PublicCatalogProduct[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+
+    setLoading(true)
+    setError(null)
+    api
+      .get('/public/catalog')
+      .then((res) => {
+        if (active) setProducts(res.data?.products ?? [])
+      })
+      .catch((err: any) => {
+        if (!active) return
+        setProducts([])
+        setError(err.response?.data?.message || 'Gagal memuat katalog')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   return (
     <div className="landing">
       <header className="landing-nav">
         <div className="landing-nav-inner">
-          <div className="landing-brand">
-            <span className="material-symbols-outlined landing-brand-icon">eco</span>
-            <span className="landing-brand-name">NutriLokal</span>
-          </div>
-          <Link to="/login" className="button secondary landing-nav-login">
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+          <Link to="/" className="landing-brand">
+            <img src="/logo.png" alt="NutriLokal" />
+            <span className="landing-brand-text">
+              <strong>NutriLokal</strong>
+              <small>KWT Gogor</small>
+            </span>
+          </Link>
+          <Link to="/login" className="landing-login">
+            <span className="material-symbols-outlined" aria-hidden="true">
               login
             </span>
-            Login
+            Masuk
           </Link>
         </div>
       </header>
 
-      <main className="landing-main">
-        <section className="landing-hero">
-          <span className="landing-eyebrow">
-            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-              location_on
-            </span>
-            KWT Gogor · Kalurahan Salam, Patuk, Gunungkidul
-          </span>
-
-          <h1 className="landing-title">
-            Ketahanan pangan lokal,
-            <br />
-            terlacak hingga batch.
-          </h1>
-
-          <p className="landing-lead">
-            NutriLokal membantu KWT Gogor mengelola produksi, bahan baku, dan penjualan
-            sekaligus menjaga setiap produk dapat ditelusuri asalnya. Lihat katalog produk
-            kami, atau masuk untuk mengelola sistem.
-          </p>
-
-          <div className="landing-actions">
-            <Link to="/catalog" className="button landing-cta">
-              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
-                storefront
-              </span>
-              Lihat Katalog
-            </Link>
-            <Link to="/login" className="button secondary landing-cta">
-              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>
-                login
-              </span>
-              Login Admin / Operator
-            </Link>
-          </div>
-
-          <ul className="landing-points">
-            <li>
-              <span className="material-symbols-outlined landing-point-icon">inventory_2</span>
-              Produk olahan lokal dari bahan segar
-            </li>
-            <li>
-              <span className="material-symbols-outlined landing-point-icon">qr_code_2</span>
-              Traceability batch lewat kode QR
-            </li>
-            <li>
-              <span className="material-symbols-outlined landing-point-icon">verified</span>
-              Proses produksi tercatat dan transparan
-            </li>
-          </ul>
-        </section>
-
-        <aside className="landing-aside" aria-hidden="true">
-          <div className="landing-card">
-            <span className="material-symbols-outlined landing-card-icon">eco</span>
-            <div className="landing-card-title">Produk Segar, Terlacak</div>
-            <p className="landing-card-text">
-              Setiap batch tercatat sejak produksi hingga sampai ke pelanggan.
-            </p>
-          </div>
-        </aside>
-      </main>
-
-      <footer className="landing-foot">© 2026 NutriLokal · KWT Gogor, Kalurahan Salam</footer>
+      <PublicCatalogView products={products} loading={loading} error={error} />
     </div>
   )
 }

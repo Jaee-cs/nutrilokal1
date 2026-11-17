@@ -46,5 +46,14 @@ describe('CatalogPage', () => {
       'href',
       '/produk/p1',
     )
+    expect(screen.getByRole('link', { name: /Masuk/ })).toHaveAttribute('href', '/login')
+    expect(screen.getByRole('link', { name: /Cek Traceability QR/ })).toHaveAttribute(
+      'href',
+      '/qr-trace',
+    )
+    expect(screen.getByRole('link', { name: /Pesan WhatsApp/ })).toHaveAttribute(
+      'href',
+      expect.stringContaining(encodeURIComponent('Keripik Uji')),
+    )
   })
 })

@@ -23,6 +23,7 @@ import { hasOperationalHistory } from '../lib/master-history';
 import { parseReportPeriod } from '../lib/report';
 import { prisma } from '../lib/prisma';
 import { toPublicProduct } from '../lib/product';
+import { parseNutritionInput } from '../lib/product-nutrition';
 import { PRODUCT_RECIPE_INCLUDE, parseRecipeInput } from '../lib/product-recipe';
 import { validateRecipeUnitCompatibility } from '../lib/unit-conversion';
 import {
@@ -378,7 +379,8 @@ async function validateRecipeItems(items: { materialId: string; quantityPerUnit:
 }
 
 productsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
-  const { name, description, composition, storageInstructions, unit, sellingPrice, recipe } = req.body ?? {};
+  const { name, description, composition, storageInstructions, unit, sellingPrice, recipe, nutrition } =
+    req.body ?? {};
 
   const nameError = validateName(name);
   if (nameError) {
@@ -422,6 +424,13 @@ productsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
+  const parsedNutrition =
+    nutrition === undefined ? { ok: true as const, value: null } : parseNutritionInput(nutrition);
+  if (!parsedNutrition.ok) {
+    res.status(400).json({ message: parsedNutrition.message });
+    return;
+  }
+
   const recipeResult = await validateRecipeItems(parsedRecipe.items);
   if (recipeResult && 'message' in recipeResult) {
     res.status(recipeResult.status).json({ message: recipeResult.message });
@@ -437,6 +446,7 @@ productsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
         storageInstructions: normalizeDescription(storageInstructions),
         unit: unit.trim(),
         sellingPrice: sellingPrice.toFixed(2),
+        nutrition: (parsedNutrition.value ?? Prisma.JsonNull) as Prisma.InputJsonValue | Prisma.NullTypes.JsonNull,
       },
     });
     if (recipeResult && 'data' in recipeResult && recipeResult.data.length > 0) {
@@ -532,6 +542,17 @@ productsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
       return;
     }
     data.isActive = body.isActive;
+  }
+
+  const nutritionProvided = body.nutrition !== undefined;
+  if (nutritionProvided) {
+    const parsedNutrition = parseNutritionInput(body.nutrition);
+    if (!parsedNutrition.ok) {
+      res.status(400).json({ message: parsedNutrition.message });
+      return;
+    }
+    data.nutrition =
+      (parsedNutrition.value ?? Prisma.JsonNull) as Prisma.InputJsonValue | Prisma.NullTypes.JsonNull;
   }
 
   const recipeProvided = body.recipe !== undefined;
