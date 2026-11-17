@@ -5,6 +5,8 @@ import { ProductsPage } from './ProductsPage'
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
+  post: vi.fn(),
+  patch: vi.fn(),
   notify: {
     success: vi.fn(),
     error: vi.fn(),
@@ -25,7 +27,7 @@ vi.mock('../components/NotificationProvider', () => ({
 }))
 
 vi.mock('../lib/api', () => ({
-  default: { get: mocks.get },
+  default: { get: mocks.get, post: mocks.post, patch: mocks.patch },
   UNAUTHORIZED_EVENT: 'nutrilokal:unauthorized',
 }))
 
@@ -108,6 +110,9 @@ function mockApi() {
     if (url === '/products') {
       return Promise.resolve({ data: { data: [product] } })
     }
+    if (url === '/materials') {
+      return Promise.resolve({ data: { data: [] } })
+    }
     if (url === '/batches') {
       return Promise.resolve({ data: { data: batches } })
     }
@@ -132,8 +137,12 @@ async function selectProduct() {
 describe('ProductsPage — modal tambah produk', () => {
   beforeEach(() => {
     mocks.get.mockReset()
+    mocks.post.mockReset()
+    mocks.patch.mockReset()
     Object.values(mocks.notify).forEach((fn) => fn.mockReset())
     mockApi()
+    mocks.post.mockResolvedValue({ data: { product: { ...product, id: 'p-new' } } })
+    mocks.patch.mockResolvedValue({ data: { product } })
   })
 
   it('menampilkan form tambah produk sebagai dialog terpusat dengan seluruh isian', async () => {
@@ -181,13 +190,55 @@ describe('ProductsPage — modal tambah produk', () => {
     fireEvent.click(document.querySelector('.modal-overlay') as HTMLElement)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+
+  it('Admin menambahkan resep bahan baku dan mengirimkannya bersama produk baru', async () => {
+    const original = mocks.get.getMockImplementation()!
+    mocks.get.mockImplementation((url: string, config?: { params?: Record<string, string> }) => {
+      if (url === '/materials') {
+        return Promise.resolve({
+          data: { data: [{ id: 'm1', name: 'Tepung', unit: 'kg', isActive: true }] },
+        })
+      }
+      return original(url, config)
+    })
+
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: /Tambah Produk/ }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Tambah Produk' })
+    await user.type(within(dialog).getByLabelText('Nama Produk'), 'Produk Resep')
+    await user.type(within(dialog).getByLabelText('Satuan Dasar'), 'pcs')
+    await user.type(within(dialog).getByLabelText('Harga Jual (Rp)'), '10000')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Tambah Bahan' }))
+    await user.selectOptions(within(dialog).getByLabelText('Bahan Baku'), 'm1')
+    await user.type(within(dialog).getByLabelText('Jumlah'), '150')
+    await user.selectOptions(within(dialog).getByLabelText('Satuan Resep'), 'gram')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Produk' }))
+
+    await waitFor(() => {
+      expect(mocks.post).toHaveBeenCalledWith(
+        '/products',
+        expect.objectContaining({
+          name: 'Produk Resep',
+          recipe: [{ materialId: 'm1', quantityPerUnit: 150, recipeUnit: 'gram' }],
+        })
+      )
+    })
+  })
 })
 
 describe('ProductsPage — riwayat pergerakan stok produk', () => {
   beforeEach(() => {
     mocks.get.mockReset()
+    mocks.post.mockReset()
+    mocks.patch.mockReset()
     Object.values(mocks.notify).forEach((fn) => fn.mockReset())
     mockApi()
+    mocks.post.mockResolvedValue({ data: { product: { ...product, id: 'p-new' } } })
+    mocks.patch.mockResolvedValue({ data: { product } })
   })
 
   it('memuat riwayat dari backend setelah produk dipilih dan menandai saldo historis', async () => {

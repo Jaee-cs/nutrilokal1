@@ -14,9 +14,17 @@ export interface PublicUser {
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Hanya diisi pada daftar pengguna Admin: true bila akun sudah memiliki
+   * riwayat aktivitas sehingga tidak boleh dihapus permanen.
+   */
+  hasActivityHistory?: boolean;
 }
 
-export function toPublicUser(user: User): PublicUser {
+export function toPublicUser(
+  user: User,
+  extras?: { hasActivityHistory?: boolean }
+): PublicUser {
   return {
     id: user.id,
     username: user.username,
@@ -27,5 +35,8 @@ export function toPublicUser(user: User): PublicUser {
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
+    ...(extras?.hasActivityHistory !== undefined
+      ? { hasActivityHistory: extras.hasActivityHistory }
+      : {}),
   };
 }

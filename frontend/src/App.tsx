@@ -13,8 +13,10 @@ import { MaterialsPage } from './pages/MaterialsPage'
 import { ProductionPage } from './pages/ProductionPage'
 import { SalesPage } from './pages/SalesPage'
 import { CatalogPage } from './pages/CatalogPage'
+import { ProductPublicPage } from './pages/ProductPublicPage'
 import { QrTracePage } from './pages/QrTracePage'
 import { QrManagementPage } from './pages/QrManagementPage'
+import { ProductQrPage } from './pages/ProductQrPage'
 import { ReportsPage } from './pages/ReportsPage'
 
 export default function App() {
@@ -23,10 +25,12 @@ export default function App() {
       <NotificationProvider>
         <BrowserRouter>
           <Routes>
-            {/* Halaman publik: landing, katalog, dan traceability QR —
-                semuanya dapat dibuka tanpa token (README 5.6). */}
+            {/* Halaman publik: landing, katalog, halaman produk (QR permanen),
+                dan traceability QR batch — semuanya dapat dibuka tanpa token
+                (README 5.6). */}
             <Route path="/" element={<LandingPage />} />
             <Route path="catalog" element={<CatalogPage />} />
+            <Route path="produk/:id" element={<ProductPublicPage />} />
             <Route path="qr/:code" element={<QrTracePage />} />
             <Route path="qr-trace" element={<QrTracePage />} />
             <Route path="login" element={<LoginPage />} />
@@ -49,6 +53,7 @@ export default function App() {
               </Route>
               <Route element={<AdminRoute />}>
                 <Route path="users" element={<UsersPage />} />
+                <Route path="product-qr" element={<ProductQrPage />} />
                 <Route path="qr-management" element={<QrManagementPage />} />
               </Route>
             </Route>

@@ -10,7 +10,11 @@
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { randomBytes } from 'node:crypto';
-import { userHasActivityHistory } from '../lib/account-history';
+import {
+  ACTIVITY_RELATION_COUNTS,
+  countsIndicateActivity,
+  userHasActivityHistory,
+} from '../lib/account-history';
 import { hashPassword, validateNewPassword } from '../lib/password';
 import { prisma } from '../lib/prisma';
 import { toPublicUser } from '../lib/user';
@@ -31,8 +35,32 @@ function validateUsername(value: unknown): string | null {
 }
 
 usersRouter.get('/', async (_req, res) => {
-  const users = await prisma.user.findMany({ orderBy: { createdAt: 'asc' } });
-  res.json({ data: users.map(toPublicUser) });
+  // Hitung riwayat lewat _count agar daftar pengguna tidak memicu N+1 query.
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: 'asc' },
+    include: { _count: { select: ACTIVITY_RELATION_COUNTS } },
+  });
+
+  // Kunci idempotensi tidak memiliki relasi FK ke User; hitung terpisah
+  // supaya penanda riwayat di UI sama dengan pemeriksaan saat penghapusan.
+  const idempotencyCounts = await prisma.idempotencyKey.groupBy({
+    by: ['userId'],
+    where: { userId: { in: users.map((user) => user.id) } },
+    _count: { _all: true },
+  });
+  const idempotencyByUser = new Map(
+    idempotencyCounts.map((row) => [row.userId, row._count._all])
+  );
+
+  res.json({
+    data: users.map((user) =>
+      toPublicUser(user, {
+        hasActivityHistory:
+          countsIndicateActivity(user._count) ||
+          (idempotencyByUser.get(user.id) ?? 0) > 0,
+      })
+    ),
+  });
 });
 
 usersRouter.post('/', async (req, res) => {
@@ -108,32 +136,81 @@ usersRouter.patch('/:id', async (req, res) => {
 });
 
 usersRouter.delete('/:id', async (req, res) => {
-  const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+  try {
+    // Pemeriksaan riwayat dan penghapusan berjalan dalam satu transaksi
+    // Serializable: bila riwayat baru tercatat bersamaan, transaksi gagal
+    // dan akun tidak jadi terhapus (tidak ada penghapusan sebagian).
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const target = await tx.user.findUnique({ where: { id: req.params.id } });
 
-  if (!target) {
-    res.status(404).json({ message: 'Akun tidak ditemukan.' });
-    return;
+        if (!target) {
+          return { status: 404, body: { message: 'Akun tidak ditemukan.' } };
+        }
+
+        if (target.id === req.user!.id) {
+          return {
+            status: 400,
+            body: { message: 'Akun Anda sendiri tidak dapat dihapus.' },
+          };
+        }
+
+        if (target.role === 'ADMIN') {
+          return {
+            status: 403,
+            body: { message: 'Akun Admin tidak dapat dihapus.' },
+          };
+        }
+
+        if (await userHasActivityHistory(target.id, tx)) {
+          return {
+            status: 409,
+            body: {
+              message:
+                'Akun memiliki riwayat aktivitas dan tidak boleh dihapus permanen. Nonaktifkan akun sebagai gantinya.',
+            },
+          };
+        }
+
+        // Tanpa cascade delete: seluruh relasi historis tetap utuh. Bila
+        // masih ada baris yang mereferensikan akun ini, foreign key database
+        // menolak penghapusan dan ditangani sebagai 409 di bawah.
+        await tx.user.delete({ where: { id: target.id } });
+        return {
+          status: 200,
+          body: { message: `Akun "${target.username}" berhasil dihapus.` },
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
+
+    res.status(result.status).json(result.body);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      // Foreign key masih mereferensikan akun: riwayat muncul di antara
+      // pemeriksaan dan penghapusan.
+      if (error.code === 'P2003') {
+        res.status(409).json({
+          message:
+            'Akun memiliki riwayat aktivitas dan tidak boleh dihapus permanen. Nonaktifkan akun sebagai gantinya.',
+        });
+        return;
+      }
+      if (error.code === 'P2025') {
+        res.status(404).json({ message: 'Akun tidak ditemukan.' });
+        return;
+      }
+      // Konflik serialisasi/deadlock: data berubah saat proses berjalan.
+      if (error.code === 'P2034') {
+        res.status(409).json({
+          message:
+            'Data akun berubah saat proses penghapusan. Muat ulang daftar dan coba lagi.',
+        });
+        return;
+      }
+    }
+    throw error;
   }
-
-  if (target.id === req.user!.id) {
-    res.status(400).json({ message: 'Akun Anda sendiri tidak dapat dihapus.' });
-    return;
-  }
-
-  if (target.role === 'ADMIN') {
-    res.status(403).json({ message: 'Akun Admin tidak dapat dihapus.' });
-    return;
-  }
-
-  if (await userHasActivityHistory(target.id)) {
-    res.status(409).json({
-      message: 'Akun memiliki riwayat aktivitas dan tidak boleh dihapus permanen. Nonaktifkan akun sebagai gantinya.',
-    });
-    return;
-  }
-
-  await prisma.user.delete({ where: { id: target.id } });
-  res.json({ message: `Akun "${target.username}" berhasil dihapus.` });
 });
 
 usersRouter.post('/:id/password-reset', async (req, res) => {

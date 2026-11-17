@@ -86,6 +86,7 @@ const ROUTES: Array<{ method: 'get' | 'post' | 'patch' | 'delete'; path: string;
   { method: 'get', path: '/api/health', access: 'public' },
   { method: 'post', path: '/api/auth/login', access: 'public' },
   { method: 'get', path: '/api/public/catalog', access: 'public' },
+  { method: 'get', path: '/api/public/products/id-tidak-ada', access: 'public' },
   { method: 'get', path: '/api/public/qr/kode-tidak-ada', access: 'public' },
 
   // Login & pengguna

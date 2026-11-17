@@ -10,8 +10,6 @@ export type ProductionWithRelations = Production & {
   batch: (Batch & { aliases: BatchAlias[] }) | null;
   usages: (ProductionMaterialUsage & {
     material: { id: string; name: string; unit: string };
-    inputQuantity?: any;
-    inputUnit?: string | null;
   })[];
 };
 

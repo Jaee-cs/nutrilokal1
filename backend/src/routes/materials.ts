@@ -19,6 +19,7 @@ import {
 import { MATERIAL_MOVEMENT_INCLUDE, toPublicMaterialMovement } from '../lib/material-records';
 import { prisma } from '../lib/prisma';
 import { getMaterialStock } from '../lib/stock';
+import { areUnitsCompatible } from '../lib/unit-conversion';
 import { validateName, validateUnit } from '../lib/validate';
 import { authenticate, requireAdmin } from '../middleware/auth';
 import { materialOpeningBalancesRouter, materialReceiptsRouter } from './material-records';
@@ -27,6 +28,9 @@ export const materialsRouter = Router();
 
 /** Penanda internal: bahan memiliki histori sehingga penghapusan ditolak. */
 class MaterialHasHistoryError extends Error {}
+
+/** Penanda internal: bahan masih dipakai pada resep produk. */
+class MaterialInUseError extends Error {}
 
 /**
  * Pelanggaran constraint unik `materials.name_key`. Dipakai sebagai jaring
@@ -181,6 +185,27 @@ materialsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
       });
       return;
     }
+    // Resep standar menyimpan satuan per bahan. Perubahan satuan dasar yang
+    // membuat satuan resep tidak lagi kompatibel akan merusak perhitungan
+    // produksi, jadi ditolak hingga Admin memperbarui resep terkait.
+    if (body.unit.trim() !== target.unit) {
+      const nextUnit = body.unit.trim();
+      const recipeItems = await prisma.productRecipeItem.findMany({
+        where: { materialId: target.id },
+        include: { product: { select: { name: true } } },
+      });
+      const incompatible = recipeItems.find(
+        (item) => !areUnitsCompatible(item.recipeUnit, nextUnit)
+      );
+      if (incompatible) {
+        res.status(409).json({
+          message:
+            `Satuan dasar tidak dapat diubah karena resep produk "${incompatible.product.name}" ` +
+            `memakai satuan "${incompatible.recipeUnit}". Perbarui resep terlebih dahulu.`,
+        });
+        return;
+      }
+    }
     data.unit = body.unit.trim();
   }
 
@@ -251,13 +276,18 @@ materialsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
     await prisma.$transaction(async (tx) => {
       // Validasi akhir: pastikan tidak ada relasi yang muncul sejak pemeriksaan
       // awal. Relasi ini checked di dalam transaksi agar konsisten.
-      const [movements, receipts, openingBalances, productionUsages, adjustments] = await Promise.all([
+      const [movements, receipts, openingBalances, productionUsages, adjustments, recipeItems] = await Promise.all([
         tx.materialStockMovement.count({ where: { materialId: target.id } }),
         tx.materialReceipt.count({ where: { materialId: target.id } }),
         tx.materialOpeningBalance.count({ where: { materialId: target.id } }),
         tx.productionMaterialUsage.count({ where: { materialId: target.id } }),
         tx.stockAdjustment.count({ where: { materialId: target.id } }),
+        tx.productRecipeItem.count({ where: { materialId: target.id } }),
       ]);
+
+      if (recipeItems > 0) {
+        throw new MaterialInUseError();
+      }
 
       if (movements > 0 || receipts > 0 || openingBalances > 0 || productionUsages > 0 || adjustments > 0) {
         throw new MaterialHasHistoryError();
@@ -268,6 +298,14 @@ materialsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
       await tx.material.delete({ where: { id: target.id } });
     });
   } catch (err) {
+    if (err instanceof MaterialInUseError) {
+      res.status(409).json({
+        message:
+          'Bahan baku masih digunakan pada resep produk dan tidak boleh dihapus. ' +
+          'Hapus bahan dari resep terkait terlebih dahulu, atau nonaktifkan bahan baku.',
+      });
+      return;
+    }
     if (err instanceof MaterialHasHistoryError) {
       res.status(409).json({
         message:

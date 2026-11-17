@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MaterialsPage } from './MaterialsPage'
+import { dateCodeToDisplay, todayDateCode } from '../utils/dates'
 
 const mocks = vi.hoisted(() => ({
   role: 'ADMIN' as 'ADMIN' | 'OPERATOR',
@@ -124,6 +125,60 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     expect(within(dialog).getByLabelText('Jumlah (bertanda)')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Alasan')).toBeInTheDocument()
     expect(within(dialog).getByText(/Stok Sapi Segar saat ini: 12 kg/)).toBeInTheDocument()
+  })
+
+  it('mengisi tanggal penerimaan dan penyesuaian dengan hari ini secara default', async () => {
+    const user = userEvent.setup()
+    render(<MaterialsPage />)
+
+    const [stockButton] = await screen.findAllByRole('button', { name: 'Tambah Stok' })
+    await user.click(stockButton)
+    const receiptDialog = screen.getByRole('dialog', { name: 'Tambah Stok Bahan Baku' })
+    expect(within(receiptDialog).getByLabelText('Tanggal Penerimaan (opsional)')).toHaveValue(
+      dateCodeToDisplay(todayDateCode()),
+    )
+    await user.click(within(receiptDialog).getByRole('button', { name: 'Batal' }))
+
+    const [adjustButton] = await screen.findAllByRole('button', { name: 'Penyesuaian stok Sapi Segar' })
+    await user.click(adjustButton)
+    const adjustDialog = screen.getByRole('dialog', { name: 'Penyesuaian Stok' })
+    expect(within(adjustDialog).getByLabelText('Tanggal Penyesuaian')).toHaveValue(
+      dateCodeToDisplay(todayDateCode()),
+    )
+  })
+
+  it('mengirim tanggal penyesuaian yang dapat diubah ke backend', async () => {
+    const user = userEvent.setup()
+    mocks.get.mockImplementation((url: string) => {
+      if (url === '/materials') return Promise.resolve({ data: { data: [material] } })
+      if (url === '/materials/m1/movements') return Promise.resolve({ data: { data: [] } })
+      return Promise.reject(new Error(`URL tidak di-mock: ${url}`))
+    })
+    mocks.post.mockResolvedValue({ data: {} })
+
+    render(<MaterialsPage />)
+
+    const [adjustButton] = await screen.findAllByRole('button', { name: 'Penyesuaian stok Sapi Segar' })
+    await user.click(adjustButton)
+    const dialog = screen.getByRole('dialog', { name: 'Penyesuaian Stok' })
+
+    await user.type(within(dialog).getByLabelText('Jumlah (bertanda)'), '2')
+    fireEvent.change(within(dialog).getByLabelText('Tanggal Penyesuaian'), {
+      target: { value: '2026-10-05' },
+    })
+    await user.type(within(dialog).getByLabelText('Alasan'), 'Koreksi stok opname')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Catat Penyesuaian' }))
+
+    await waitFor(() =>
+      expect(mocks.post).toHaveBeenCalledWith('/stock-adjustments', {
+        targetType: 'MATERIAL',
+        targetId: 'm1',
+        quantity: 2,
+        date: '2026-10-05',
+        reason: 'Koreksi stok opname',
+      }),
+    )
   })
 
   it('tetap memakai konfirmasi terpusat sebelum menghapus bahan', async () => {

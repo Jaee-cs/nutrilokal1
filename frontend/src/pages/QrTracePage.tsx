@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import api from '../lib/api'
 import { useNotify } from '../components/NotificationProvider'
+import { dateCodeToDisplay } from '../utils/dates'
 import { productPhotoUrl } from '../utils/product-photo'
 
 // Respons backend: GET /api/public/qr/:code
@@ -117,11 +118,11 @@ export function QrTracePage() {
           <div className="qr-meta">
             <div className="qr-meta-item">
               <span className="card-label">Tanggal Produksi</span>
-              <span className="qr-meta-value">{published.batch.productionDate || '-'}</span>
+              <span className="qr-meta-value">{dateCodeToDisplay(published.batch.productionDate) || '-'}</span>
             </div>
             <div className="qr-meta-item">
               <span className="card-label">Kedaluwarsa</span>
-              <span className="qr-meta-value">{published.batch.expiryDate || '-'}</span>
+              <span className="qr-meta-value">{dateCodeToDisplay(published.batch.expiryDate) || '-'}</span>
             </div>
             <div className="qr-meta-item">
               <span className="card-label">Satuan</span>

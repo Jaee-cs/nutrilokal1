@@ -104,12 +104,25 @@ export function validateQuantity(value: unknown, label = 'Jumlah'): string | nul
   return null;
 }
 
-/** Tanggal bisnis wajib berupa tanggal valid (format YYYY-MM-DD atau ISO). */
+/** Validasi tanggal bisnis: wajib `YYYY-MM-DD` dan harus ada di kalender. */
 export function validateDateOnly(value: unknown): string | null {
   if (typeof value !== 'string' || value.trim() === '') {
     return 'Tanggal wajib diisi.';
   }
-  if (Number.isNaN(Date.parse(value))) {
+  const text = value.trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) {
+    return 'Tanggal tidak valid. Gunakan format YYYY-MM-DD.';
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
     return 'Tanggal tidak valid. Gunakan format YYYY-MM-DD.';
   }
   return null;

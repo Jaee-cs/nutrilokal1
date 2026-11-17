@@ -5,6 +5,10 @@
  *   katalog digital: nama, deskripsi (bila diisi), satuan, dan harga jual
  *   dari master produk. Produk nonaktif tidak muncul. Tidak ada data
  *   internal (stok, batch, akun) di endpoint ini.
+ * - GET /api/public/products/:id — halaman publik produk untuk QR permanen
+ *   per produk. Menampilkan informasi produk yang memang untuk publik dan
+ *   seluruh riwayat batch produksi terkini (kode, tanggal produksi, tanggal
+ *   kedaluwarsa tervalidasi, status). Hanya produk aktif yang dapat diakses.
  * - GET /api/public/qr/:code — informasi traceability per batch berdasarkan
  *   kode batch (termasuk kode lama/alias — QR lama tetap mengarah ke batch
  *   yang sama). Hanya menampilkan informasi yang SUDAH divalidasi dan
@@ -17,6 +21,7 @@
  */
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
+import { buildPublicProductResponse } from '../lib/public-product';
 import { buildPublicQrResponse } from '../lib/qr';
 
 export const publicRouter = Router();
@@ -35,12 +40,14 @@ publicRouter.get('/catalog', async (req, res) => {
     products: products.map((product) => {
       // Hanya kolom yang memang untuk publik; kolom kosong disembunyikan.
       const entry: {
+        id: string;
         name: string;
         unit: string;
         sellingPrice: number;
         description?: string;
         photoUrl?: string;
       } = {
+        id: product.id,
         name: product.name,
         unit: product.unit,
         sellingPrice: Number(product.sellingPrice),
@@ -55,6 +62,59 @@ publicRouter.get('/catalog', async (req, res) => {
       return entry;
     }),
   });
+});
+
+// ---------------------------------------------------------------------------
+// Halaman publik produk (QR permanen per produk)
+// ---------------------------------------------------------------------------
+
+const PUBLIC_PRODUCT_BATCH_SELECT = {
+  code: true,
+  productionDate: true,
+  expiryDate: true,
+  expiryValidatedAt: true,
+  stockQuantity: true,
+  createdAt: true,
+  qrPublication: { select: { withdrawnAt: true } },
+} as const;
+
+publicRouter.get('/products/:id', async (req, res) => {
+  const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
+  if (!id) {
+    res.status(404).json({ message: 'Informasi produk tidak tersedia.' });
+    return;
+  }
+
+  const product = await prisma.product.findUnique({
+    where: { id },
+    select: {
+      name: true,
+      unit: true,
+      description: true,
+      composition: true,
+      storageInstructions: true,
+      photoUrl: true,
+      isActive: true,
+    },
+  });
+
+  // Produk nonaktif/arsip tidak memiliki halaman publik (README 5.1).
+  if (!product || !product.isActive) {
+    res.status(404).json({
+      message: 'Informasi produk tidak tersedia atau produk belum dipublikasikan.',
+    });
+    return;
+  }
+
+  const batches = await prisma.batch.findMany({
+    where: { productId: id },
+    select: PUBLIC_PRODUCT_BATCH_SELECT,
+  });
+
+  // Data selalu dibaca ulang dari database agar batch baru, perubahan
+  // kedaluwarsa, dan perubahan status langsung tercermin di halaman publik.
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(buildPublicProductResponse(product, batches));
 });
 
 // ---------------------------------------------------------------------------

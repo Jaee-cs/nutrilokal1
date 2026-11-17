@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import api from '../lib/api'
+import { isoToDateDisplay, isoToDateTimeDisplay } from '../utils/dates'
 
 function rupiah(n: number | string) {
   return `Rp ${Number(n).toLocaleString('id-ID')}`
@@ -7,9 +8,14 @@ function rupiah(n: number | string) {
 
 function formatDate(iso: string) {
   if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+  return isoToDateDisplay(iso) || iso
+}
+
+/** Waktu pencatatan sistem, dibedakan dari tanggal aktivitas bisnis. */
+function formatRecordedAt(iso: string) {
+  if (!iso) return '—'
+  const label = isoToDateTimeDisplay(iso)
+  return label ? `${label} WIB` : iso
 }
 
 interface Stat {
@@ -218,7 +224,7 @@ export function DashboardPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>Tanggal</th>
+                    <th>Waktu Pencatatan</th>
                     <th>Total</th>
                     <th>Status</th>
                   </tr>
@@ -226,7 +232,7 @@ export function DashboardPage() {
                 <tbody>
                   {recentSales.map(s => (
                     <tr key={s.id}>
-                      <td>{formatDate(s.recordedAt)}</td>
+                      <td>{formatRecordedAt(s.recordedAt)}</td>
                       <td>{rupiah(s.total)}</td>
                       <td>
                         {s.status === 'COMPLETED' ? (
@@ -248,7 +254,7 @@ export function DashboardPage() {
                   <div className="sales-item-main">
                     <span className="sales-item-date">
                       <span className="material-symbols-outlined sales-date-icon">event</span>
-                      {formatDate(s.recordedAt)}
+                      {formatRecordedAt(s.recordedAt)}
                     </span>
                     <div className="sales-item-total">{rupiah(s.total)}</div>
                   </div>

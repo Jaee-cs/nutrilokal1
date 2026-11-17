@@ -4,6 +4,8 @@ import { Pencil, Plus, Trash2, X } from 'lucide-react'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
+import { DateField } from '../components/DateField'
+import { isoToDateDisplay, isoToDateTimeDisplay, todayDateCode } from '../utils/dates'
 
 interface Material {
   id: string
@@ -53,12 +55,18 @@ const MOVEMENT_LABELS: Record<MovementType, string> = {
 const EMPTY_ADD = { name: '', unit: '', description: '' }
 const EMPTY_ADD_OB = { quantity: '', date: '', reason: '' }
 const EMPTY_OB = { materialId: '', quantity: '', date: '', reason: '' }
-const EMPTY_ADJ = { materialId: '', quantity: '', reason: '' }
+const EMPTY_ADJ = { materialId: '', quantity: '', date: '', reason: '' }
 const EMPTY_RECEIPT = { materialId: '', quantity: '', receivedAt: '', note: '' }
 
-/** Tanggal bisnis (YYYY-MM-DD) pada kalender WIB. */
-function businessDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
+/** Nilai awal formulir: tanggal aktivitas default hari ini (WIB). */
+function todayForms() {
+  const today = todayDateCode()
+  return {
+    addOb: { ...EMPTY_ADD_OB, date: today },
+    ob: { ...EMPTY_OB, date: today },
+    adj: { ...EMPTY_ADJ, date: today },
+    receipt: { ...EMPTY_RECEIPT, receivedAt: today },
+  }
 }
 
 /** Angka bertanda untuk menampilkan perubahan stok. */
@@ -311,16 +319,21 @@ export function MaterialsPage() {
   }, [])
 
   function openAddModal() {
+    const forms = todayForms()
+    setAddForm(EMPTY_ADD)
+    setAddObForm(forms.addOb)
+    setObForm(forms.ob)
+    setObEnabled(false)
     setActiveModal('add')
   }
 
   function openReceiptModal(material: Material) {
-    setReceiptForm({ ...EMPTY_RECEIPT, materialId: material.id })
+    setReceiptForm({ ...todayForms().receipt, materialId: material.id })
     setActiveModal('receipt')
   }
 
   function openAdjustModal(material: Material) {
-    setAdjForm({ ...EMPTY_ADJ, materialId: material.id })
+    setAdjForm({ ...todayForms().adj, materialId: material.id })
     setActiveModal('adjust')
   }
 
@@ -407,7 +420,7 @@ export function MaterialsPage() {
 
       // Kosongkan formulir, termasuk centang saldo awal, agar tidak tercatat dua kali.
       setAddForm(EMPTY_ADD)
-      setAddObForm(EMPTY_ADD_OB)
+      setAddObForm({ ...EMPTY_ADD_OB, date: todayDateCode() })
       setObEnabled(false)
       setActiveModal(null)
     } catch (err: any) {
@@ -464,13 +477,13 @@ export function MaterialsPage() {
         setReceipts([])
       }
       if (adjForm.materialId === m.id) {
-        setAdjForm(EMPTY_ADJ)
+        setAdjForm({ ...EMPTY_ADJ, date: todayDateCode() })
       }
       if (receiptForm.materialId === m.id) {
-        setReceiptForm(EMPTY_RECEIPT)
+        setReceiptForm({ ...EMPTY_RECEIPT, receivedAt: todayDateCode() })
       }
       if (obForm.materialId === m.id) {
-        setObForm(EMPTY_OB)
+        setObForm({ ...EMPTY_OB, date: todayDateCode() })
       }
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal menghapus bahan baku')
@@ -485,6 +498,7 @@ export function MaterialsPage() {
     const targetId = adjForm.materialId
     const quantity = Number(adjForm.quantity)
     const reason = adjForm.reason.trim()
+    const date = adjForm.date
 
     if (!targetId) {
       notify.error('Pilih bahan baku yang akan disesuaikan.')
@@ -492,6 +506,10 @@ export function MaterialsPage() {
     }
     if (!Number.isFinite(quantity) || quantity === 0) {
       notify.error('Jumlah penyesuaian tidak boleh nol.')
+      return
+    }
+    if (!date) {
+      notify.error('Tanggal penyesuaian wajib diisi.')
       return
     }
     if (!reason) {
@@ -505,9 +523,10 @@ export function MaterialsPage() {
         targetType: 'MATERIAL',
         targetId,
         quantity,
+        date,
         reason,
       })
-      setAdjForm(EMPTY_ADJ)
+      setAdjForm({ ...EMPTY_ADJ, date: todayDateCode() })
 
       // Muat ulang DULU (stok + riwayat), lalu tampilkan pesan sukses agar
       // pesan tidak langsung terhapus oleh pemuatan ulang.
@@ -549,7 +568,7 @@ export function MaterialsPage() {
         receivedAt: receiptForm.receivedAt || undefined,
         note: receiptForm.note || undefined,
       })
-      setReceiptForm(EMPTY_RECEIPT)
+      setReceiptForm({ ...EMPTY_RECEIPT, receivedAt: todayDateCode() })
 
       // Segarkan stok dan riwayat penerimaan, baru tampilkan pesan sukses.
       const stockRefreshed = await fetchMaterials()
@@ -595,7 +614,7 @@ export function MaterialsPage() {
     setSubmittingOb(true)
     try {
       await api.post(`/materials/${materialId}/opening-balances`, { quantity, date, reason })
-      setObForm(EMPTY_OB)
+      setObForm({ ...EMPTY_OB, date: todayDateCode() })
 
       // Saldo awal menambah stok DAN membuat pergerakan baru — segarkan
       // keduanya dulu, baru tampilkan pesan sukses.
@@ -864,25 +883,26 @@ export function MaterialsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>Tanggal</th>
+                    <th>Tanggal Aktivitas</th>
                     <th>Jenis</th>
                     <th>Perubahan</th>
                     <th>Saldo</th>
                     <th>Alasan</th>
                     <th>Dicatat oleh</th>
+                    <th>Waktu Pencatatan</th>
                   </tr>
                 </thead>
                 <tbody>
                   {!movementMaterialId ? (
-                    <tr><td colSpan={6} className="text-muted">Pilih bahan baku untuk melihat riwayat pergerakan stok</td></tr>
+                    <tr><td colSpan={7} className="text-muted">Pilih bahan baku untuk melihat riwayat pergerakan stok</td></tr>
                   ) : loadingMovements ? (
-                    <tr><td colSpan={6}>Memuat riwayat...</td></tr>
+                    <tr><td colSpan={7}>Memuat riwayat...</td></tr>
                   ) : movementRows.length === 0 ? (
-                    <tr><td colSpan={6} className="text-muted">Belum ada pergerakan stok</td></tr>
+                    <tr><td colSpan={7} className="text-muted">Belum ada pergerakan stok</td></tr>
                   ) : (
                     movementRows.map(({ movement, balance }) => (
                       <tr key={movement.id}>
-                        <td>{businessDate(movement.occurredAt)}</td>
+                        <td>{isoToDateDisplay(movement.occurredAt)}</td>
                         <td>{MOVEMENT_LABELS[movement.type] || movement.type}</td>
                         <td className="num">
                           <strong>{signed(movement.delta)}</strong>{' '}
@@ -894,6 +914,7 @@ export function MaterialsPage() {
                         </td>
                         <td className="text-muted">{movement.reason || '-'}</td>
                         <td>{movement.recordedBy?.username || '-'}</td>
+                        <td className="text-muted">{isoToDateTimeDisplay(movement.recordedAt)} WIB</td>
                       </tr>
                     ))
                   )}
@@ -914,9 +935,11 @@ export function MaterialsPage() {
                   <article className="history-item history-item-split" key={movement.id}>
                     <div className="history-item-main">
                       <div className="history-item-type">{MOVEMENT_LABELS[movement.type] || movement.type}</div>
-                      <div className="history-item-date">{businessDate(movement.occurredAt)}</div>
+                      <div className="history-item-date">{isoToDateDisplay(movement.occurredAt)}</div>
                       {movement.reason && <div className="history-item-note">{movement.reason}</div>}
-                      <div className="history-item-note">Dicatat oleh: {movement.recordedBy?.username || '-'}</div>
+                      <div className="history-item-note">
+                        Dicatat oleh: {movement.recordedBy?.username || '-'} · {isoToDateTimeDisplay(movement.recordedAt)} WIB
+                      </div>
                     </div>
                     {/* Kanan: jumlah perubahan (numerik utama) + saldo setelahnya */}
                     <div className="history-item-amount">
@@ -959,18 +982,19 @@ export function MaterialsPage() {
               <tr>
                 <th>Bahan</th>
                 <th>Jumlah</th>
-                <th>Tanggal Terima</th>
+                <th>Tanggal Penerimaan</th>
                 <th>Dicatat oleh</th>
+                <th>Waktu Pencatatan</th>
                 <th>Catatan</th>
               </tr>
             </thead>
             <tbody>
               {!receiptMaterialId ? (
-                <tr><td colSpan={5} className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</td></tr>
+                <tr><td colSpan={6} className="text-muted">Pilih bahan baku untuk melihat riwayat penerimaan</td></tr>
               ) : loadingReceipts ? (
-                <tr><td colSpan={5}>Memuat riwayat...</td></tr>
+                <tr><td colSpan={6}>Memuat riwayat...</td></tr>
               ) : receipts.length === 0 ? (
-                <tr><td colSpan={5} className="text-muted">Belum ada riwayat penerimaan</td></tr>
+                <tr><td colSpan={6} className="text-muted">Belum ada riwayat penerimaan</td></tr>
               ) : (
                 receipts.slice(0, 20).map(r => (
                   <tr key={r.id}>
@@ -979,8 +1003,9 @@ export function MaterialsPage() {
                       {Number(r.quantity).toLocaleString('id-ID')}{' '}
                       <span className="text-muted">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
                     </td>
-                    <td>{r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}</td>
+                    <td>{isoToDateDisplay(r.receivedAt || r.createdAt)}</td>
                     <td>{r.recordedBy?.username || '-'}</td>
+                    <td className="text-muted">{isoToDateTimeDisplay(r.createdAt)} WIB</td>
                     <td className="text-muted">{r.note || '-'}</td>
                   </tr>
                 ))
@@ -1002,7 +1027,7 @@ export function MaterialsPage() {
               <article className="history-item" key={r.id}>
                 <div className="history-item-top">
                   <span className="history-item-date">
-                    {r.receivedAt || new Date(r.createdAt).toISOString().slice(0, 10)}
+                    {isoToDateDisplay(r.receivedAt || r.createdAt)}
                   </span>
                   <span className="history-item-type">
                     {materials.find(m => m.id === r.materialId)?.name || r.materialId}
@@ -1013,7 +1038,7 @@ export function MaterialsPage() {
                   <span className="unit">{materials.find(m => m.id === r.materialId)?.unit || ''}</span>
                 </div>
                 <div className="history-item-foot">
-                  <span className="by">Dicatat oleh: {r.recordedBy?.username || '-'}</span>
+                  <span className="by">Dicatat oleh: {r.recordedBy?.username || '-'} · {isoToDateTimeDisplay(r.createdAt)} WIB</span>
                   {r.note && <span className="by">{r.note}</span>}
                 </div>
               </article>
@@ -1071,7 +1096,11 @@ export function MaterialsPage() {
                   checked={obEnabled}
                   onChange={e => {
                     setObEnabled(e.target.checked)
-                    if (!e.target.checked) setAddObForm(EMPTY_ADD_OB)
+                    if (!e.target.checked) {
+                      setAddObForm({ ...EMPTY_ADD_OB, date: todayDateCode() })
+                    } else if (!addObForm.date) {
+                      setAddObForm(f => ({ ...f, date: todayDateCode() }))
+                    }
                   }}
                 />
                 <label htmlFor="ob-enable">Catat saldo awal sekaligus (opsional)</label>
@@ -1092,11 +1121,10 @@ export function MaterialsPage() {
                   </div>
                   <div className="field">
                     <label htmlFor="ob-date-new">Tanggal Saldo Awal</label>
-                    <input
+                    <DateField
                       id="ob-date-new"
-                      type="date"
                       value={addObForm.date}
-                      onChange={e => setAddObForm(f => ({ ...f, date: e.target.value }))}
+                      onChange={(date) => setAddObForm(f => ({ ...f, date }))}
                       required
                     />
                   </div>
@@ -1168,11 +1196,10 @@ export function MaterialsPage() {
                 </div>
                 <div className="field">
                   <label htmlFor="ob-date">Tanggal Saldo Awal</label>
-                  <input
+                  <DateField
                     id="ob-date"
-                    type="date"
                     value={obForm.date}
-                    onChange={e => setObForm(f => ({ ...f, date: e.target.value }))}
+                    onChange={(date) => setObForm(f => ({ ...f, date }))}
                     required
                   />
                 </div>
@@ -1237,11 +1264,10 @@ export function MaterialsPage() {
               </div>
               <div className="field">
                 <label htmlFor="rs-date">Tanggal Penerimaan (opsional)</label>
-                <input
+                <DateField
                   id="rs-date"
-                  type="date"
                   value={receiptForm.receivedAt}
-                  onChange={e => setReceiptForm(f => ({ ...f, receivedAt: e.target.value }))}
+                  onChange={(receivedAt) => setReceiptForm(f => ({ ...f, receivedAt }))}
                 />
               </div>
             </div>
@@ -1302,14 +1328,23 @@ export function MaterialsPage() {
                 />
               </div>
               <div className="field">
-                <label htmlFor="adj-reason">Alasan</label>
-                <input
-                  id="adj-reason"
-                  value={adjForm.reason}
-                  onChange={e => setAdjForm(f => ({ ...f, reason: e.target.value }))}
+                <label htmlFor="adj-date">Tanggal Penyesuaian</label>
+                <DateField
+                  id="adj-date"
+                  value={adjForm.date}
+                  onChange={(date) => setAdjForm(f => ({ ...f, date }))}
                   required
                 />
               </div>
+            </div>
+            <div className="field">
+              <label htmlFor="adj-reason">Alasan</label>
+              <input
+                id="adj-reason"
+                value={adjForm.reason}
+                onChange={e => setAdjForm(f => ({ ...f, reason: e.target.value }))}
+                required
+              />
             </div>
             {adjMaterial && (
               <p className="text-muted optional-hint">

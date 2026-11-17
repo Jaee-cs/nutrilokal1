@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import api from '../lib/api'
 import { Drawer } from '../components/Drawer'
+import { DateField } from '../components/DateField'
 import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
 import { wibDateCode, wibDateLabel, isBatchExpired, nextDateCode } from '../utils/batch-expiry'
+import { isoToDateTimeDisplay, todayDateCode } from '../utils/dates'
 import { productPhotoUrl } from '../utils/product-photo'
-import { areUnitsCompatible, compatibleRecipeUnits, convertQuantityValue, formatQty, multiplyRecipeQty } from '../utils/units'
+import { areUnitsCompatible, convertQuantityValue, formatQty, multiplyRecipeQty, recipeUnitOptions } from '../utils/units'
 
 interface RecipeItem {
   materialId: string
@@ -129,16 +131,8 @@ function formatNumber(value: number): string {
 
 /** Waktu pencatatan (tanggal + jam) menurut kalender WIB. */
 function wibDateTime(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('id-ID', {
-    timeZone: 'Asia/Jakarta',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  const label = isoToDateTimeDisplay(iso)
+  return label ? `${label} WIB` : iso
 }
 
 /** Angka bertanda untuk menampilkan perubahan stok. */
@@ -181,7 +175,7 @@ export function ProductionPage() {
 
   const [form, setForm] = useState({
     productId: '',
-    productionDate: '',
+    productionDate: todayDateCode(),
     expiryDate: '',
     yieldQuantity: '',
   })
@@ -283,7 +277,9 @@ export function ProductionPage() {
   }
 
   const selectedProduct = products.find((p) => p.id === form.productId)
-  const hasRecipe = (selectedProduct?.recipe?.length ?? 0) > 0
+  const hasRecipe = (selectedProduct?.recipe ?? []).some(
+    (item) => item.material?.isActive !== false
+  )
 
   function applyRecipeForProduct(productId: string, yieldValue: string, markManual = false) {
     const product = products.find((p) => p.id === productId)
@@ -354,7 +350,7 @@ export function ProductionPage() {
         materials: materialsPayload,
       }
       const res = await api.post('/productions', payload)
-      setForm({ productId: '', productionDate: '', expiryDate: '', yieldQuantity: '' })
+      setForm({ productId: '', productionDate: todayDateCode(), expiryDate: '', yieldQuantity: '' })
       setUsageRows([emptyUsageRow()])
       setManualEdited(false)
       setRecalcNotice(false)
@@ -502,23 +498,21 @@ export function ProductionPage() {
             <div className="form-row">
               <div className="field">
                 <label htmlFor="pr-date">Tanggal Produksi</label>
-                <input
+                <DateField
                   id="pr-date"
-                  type="date"
                   value={form.productionDate}
-                  max={wibDateCode(new Date())}
-                  onChange={e => setForm(f => ({ ...f, productionDate: e.target.value }))}
+                  max={todayDateCode()}
+                  onChange={(productionDate) => setForm(f => ({ ...f, productionDate }))}
                   required
                 />
               </div>
               <div className="field">
                 <label htmlFor="pr-expiry">Tanggal Kedaluwarsa</label>
-                <input
+                <DateField
                   id="pr-expiry"
-                  type="date"
                   value={form.expiryDate}
                   min={minProductionExpiry}
-                  onChange={e => setForm(f => ({ ...f, expiryDate: e.target.value }))}
+                  onChange={(expiryDate) => setForm(f => ({ ...f, expiryDate }))}
                   required
                 />
                 <span className="text-muted" style={{ fontSize: 12 }}>
@@ -567,7 +561,7 @@ export function ProductionPage() {
                 {usageRows.map((row, idx) => {
                   const material = materials.find((m) => m.id === row.materialId)
                   const unitOptions = material
-                    ? compatibleRecipeUnits(material.unit)
+                    ? recipeUnitOptions(material.unit, row.unit)
                     : row.unit
                       ? [row.unit]
                       : []
@@ -582,10 +576,17 @@ export function ProductionPage() {
                             const materialId = e.target.value
                             const nextMaterial = materials.find((m) => m.id === materialId)
                             const nextUnit = nextMaterial?.unit || ''
+                            const keepUnit = Boolean(
+                              row.unit && nextUnit && areUnitsCompatible(row.unit, nextUnit)
+                            )
                             updateUsageRow(idx, {
                               materialId,
-                              unit: row.fromRecipe ? row.unit : nextUnit || row.unit,
-                              materialQty: row.materialId === materialId ? row.materialQty : row.materialQty,
+                              // Satuan resep lama dipertahankan hanya bila masih
+                              // kompatibel dengan satuan stok bahan baru; baris
+                              // yang bahan bakunya diganti tidak lagi dianggap
+                              // murni dari resep sehingga satuannya dapat diubah.
+                              unit: keepUnit ? row.unit : nextUnit,
+                              fromRecipe: false,
                             })
                           }}
                         >
@@ -988,12 +989,11 @@ export function ProductionPage() {
                 <form onSubmit={saveExpiry} className="form-row">
                   <div className="field">
                     <label htmlFor="batch-expiry">Tanggal Kedaluwarsa</label>
-                    <input
+                    <DateField
                       id="batch-expiry"
-                      type="date"
                       value={expiryDraft}
                       min={minDetailExpiry}
-                      onChange={e => setExpiryDraft(e.target.value)}
+                      onChange={setExpiryDraft}
                       required
                     />
                     <span className="text-muted" style={{ fontSize: 12 }}>
@@ -1051,18 +1051,19 @@ export function ProductionPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Tanggal</th>
+                      <th>Tanggal Aktivitas</th>
                       <th>Jenis</th>
                       <th>Perubahan</th>
                       <th>Saldo</th>
                       <th>Alasan</th>
                       <th>Dicatat oleh</th>
+                      <th>Waktu Pencatatan</th>
                     </tr>
                   </thead>
                   <tbody>
                     {movementRows.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="text-muted">Belum ada pergerakan stok batch</td>
+                        <td colSpan={7} className="text-muted">Belum ada pergerakan stok batch</td>
                       </tr>
                     ) : (
                       movementRows.map(({ movement, balance }) => (
@@ -1079,6 +1080,7 @@ export function ProductionPage() {
                           </td>
                           <td className="text-muted">{movement.reason || '-'}</td>
                           <td>{movement.recordedBy?.username || '-'}</td>
+                          <td className="text-muted">{wibDateTime(movement.recordedAt)}</td>
                         </tr>
                       ))
                     )}

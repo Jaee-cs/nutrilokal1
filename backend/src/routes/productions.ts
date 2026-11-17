@@ -285,7 +285,7 @@ productionsRouter.post('/', authenticate, async (req, res) => {
                 quantity: usage.stockQuantityText,
                 inputQuantity: usage.inputQuantityText,
                 inputUnit: usage.inputUnit,
-              } as any,
+              },
             });
             await tx.materialStockMovement.create({
               data: {

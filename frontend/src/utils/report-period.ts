@@ -11,6 +11,8 @@
  * hari bisnis WIB (lib/report.ts), sehingga batas hari konsisten.
  */
 
+import { addDaysToDateCode, dateCodeParts, dateCodeToDisplay, todayDateCode } from './dates'
+
 export type ReportPreset = 'all' | 'today' | 'week' | 'month' | 'custom'
 
 export interface ReportRange {
@@ -19,17 +21,13 @@ export interface ReportRange {
   to: string | null
 }
 
-const WIB = 'Asia/Jakarta'
-
 /** Kode tanggal YYYY-MM-DD hari ini menurut kalender WIB. */
 export function todayBusinessDateCode(reference = new Date()): string {
-  return reference.toLocaleDateString('sv-SE', { timeZone: WIB })
+  return todayDateCode(reference)
 }
 
 function shiftDateCode(code: string, days: number): string {
-  const date = new Date(`${code}T00:00:00.000Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
+  return addDaysToDateCode(code, days)
 }
 
 /** Senin pada minggu yang sama dengan `code` (kalender Gregorian). */
@@ -76,14 +74,8 @@ export function validateReportRange(from: string, to: string): string | null {
 /** Label ringkas rentang tanggal untuk ditampilkan ke pengguna. */
 export function formatReportRange(from: string | null, to: string | null): string {
   if (!from || !to) return ''
-  const format = (code: string) =>
-    new Date(`${code}T00:00:00.000Z`).toLocaleDateString('id-ID', {
-      timeZone: 'UTC',
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    })
-  return `${format(from)} – ${format(to)}`
+  if (!dateCodeParts(from) || !dateCodeParts(to)) return `${from} – ${to}`
+  return `${dateCodeToDisplay(from)} – ${dateCodeToDisplay(to)}`
 }
 
 /** Bagian nama file CSV yang aman dan informatif. */

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ProductionPage } from './ProductionPage'
+import { addDaysToDateCode, todayDateCode } from '../utils/dates'
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -124,6 +125,112 @@ beforeEach(() => {
   mocks.notify.confirm.mockResolvedValue(true)
 })
 
+describe('ProductionPage - resep bahan baku dan konversi satuan', () => {
+  const recipeProduct = {
+    id: 'p-recipe',
+    name: 'Produk Resep',
+    unit: 'pcs',
+    isActive: true,
+    recipe: [
+      {
+        materialId: 'm-berat',
+        material: { id: 'm-berat', name: 'Tepung', unit: 'kg', isActive: true },
+        quantityPerUnit: 150,
+        recipeUnit: 'gram',
+      },
+      {
+        materialId: 'm-volume',
+        material: { id: 'm-volume', name: 'Susu', unit: 'liter', isActive: true },
+        quantityPerUnit: 250,
+        recipeUnit: 'ml',
+      },
+    ],
+  }
+
+  const recipeMaterials = [
+    { id: 'm-berat', name: 'Tepung', unit: 'kg', isActive: true, stock: 10 },
+    { id: 'm-volume', name: 'Susu', unit: 'liter', isActive: true, stock: 5 },
+    { id: 'm-lain', name: 'Minyak', unit: 'liter', isActive: true, stock: 3 },
+  ]
+
+  function mockRecipeApi() {
+    mocks.get.mockImplementation((url: string) => {
+      if (url === '/products') return Promise.resolve({ data: { data: [recipeProduct] } })
+      if (url === '/materials') return Promise.resolve({ data: { data: recipeMaterials } })
+      if (url === '/productions') return Promise.resolve({ data: { data: [] } })
+      if (url === '/batches') return Promise.resolve({ data: { data: [] } })
+      return Promise.reject(new Error(`URL tidak di-mock: ${url}`))
+    })
+  }
+
+  it('memuat resep otomatis dan menghitung jumlah sesuai hasil produksi', async () => {
+    mockRecipeApi()
+    const user = userEvent.setup()
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Produk Resep/ })
+
+    await user.selectOptions(screen.getByLabelText('Produk'), 'p-recipe')
+
+    // Sebelum hasil diisi, jumlah ditampilkan per 1 unit produk.
+    expect(screen.getAllByLabelText('Jumlah Digunakan')[0]).toHaveValue(150)
+    expect(screen.getAllByLabelText('Jumlah Digunakan')[1]).toHaveValue(250)
+    expect(screen.getAllByLabelText('Satuan')[0]).toHaveValue('gram')
+    expect(screen.getAllByLabelText('Satuan')[1]).toHaveValue('ml')
+
+    fireEvent.change(screen.getByLabelText('Jumlah Hasil'), { target: { value: '2' } })
+
+    expect(screen.getAllByLabelText('Jumlah Digunakan')[0]).toHaveValue(300)
+    expect(screen.getAllByLabelText('Jumlah Digunakan')[1]).toHaveValue(500)
+  })
+
+  it('perubahan hasil tidak menimpa penyesuaian manual dan menyediakan hitung ulang', async () => {
+    mockRecipeApi()
+    const user = userEvent.setup()
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Produk Resep/ })
+
+    await user.selectOptions(screen.getByLabelText('Produk'), 'p-recipe')
+    fireEvent.change(screen.getByLabelText('Jumlah Hasil'), { target: { value: '2' } })
+
+    const firstQty = screen.getAllByLabelText('Jumlah Digunakan')[0]
+    fireEvent.change(firstQty, { target: { value: '999' } })
+
+    fireEvent.change(screen.getByLabelText('Jumlah Hasil'), { target: { value: '3' } })
+
+    // Nilai manual dipertahankan, bukan ditimpa otomatis.
+    expect(screen.getAllByLabelText('Jumlah Digunakan')[0]).toHaveValue(999)
+    expect(screen.getAllByLabelText('Jumlah Digunakan')[1]).toHaveValue(500)
+    expect(
+      screen.getByText(/Perhitungan bahan disesuaikan manual dan tidak ditimpa otomatis/i)
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Hitung Ulang dari Resep' }))
+
+    expect(screen.getAllByLabelText('Jumlah Digunakan')[0]).toHaveValue(450)
+    expect(screen.getAllByLabelText('Jumlah Digunakan')[1]).toHaveValue(750)
+    expect(
+      screen.queryByText(/Perhitungan bahan disesuaikan manual dan tidak ditimpa otomatis/i)
+    ).not.toBeInTheDocument()
+  })
+
+  it('mengganti bahan pada baris resep menyesuaikan satuan agar tetap valid', async () => {
+    mockRecipeApi()
+    const user = userEvent.setup()
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Produk Resep/ })
+
+    await user.selectOptions(screen.getByLabelText('Produk'), 'p-recipe')
+    await user.selectOptions(screen.getAllByLabelText('Bahan Baku')[0], 'm-lain')
+
+    // Satuan resep "gram" tidak kompatibel dengan bahan baru bersatuan liter,
+    // sehingga baris memakai satuan stok bahan baru dan dapat diubah.
+    const unitField = screen.getAllByLabelText('Satuan')[0]
+    expect(unitField).toHaveValue('liter')
+    expect(unitField.tagName).toBe('SELECT')
+    expect(screen.getAllByLabelText('Bahan Baku')[0]).toHaveValue('m-lain')
+  })
+})
+
 describe('ProductionPage - tanggal kedaluwarsa', () => {
   it('menyediakan input tanggal kedaluwarsa wajib setelah tanggal produksi', async () => {
     render(<ProductionPage />)
@@ -134,7 +241,11 @@ describe('ProductionPage - tanggal kedaluwarsa', () => {
 
     expect(productionDate).toBeRequired()
     expect(expiryDate).toBeRequired()
-    expect(expiryDate).not.toHaveAttribute('min')
+    // Tanggal produksi default hari ini (WIB); kedaluwarsa harus setelahnya.
+    const today = todayDateCode()
+    expect(productionDate).toHaveValue(today.split('-').reverse().join('/'))
+    expect(expiryDate).toHaveValue('')
+    expect(expiryDate).toHaveAttribute('min', addDaysToDateCode(today, 1))
 
     fireEvent.change(productionDate, { target: { value: '2026-10-01' } })
     expect(expiryDate).toHaveAttribute('min', '2026-10-02')

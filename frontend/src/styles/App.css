@@ -1171,10 +1171,22 @@ table tbody tr:hover { background: var(--surface-low); }
   gap: 0.5rem;
 }
 
+/* Operator tanpa riwayat: dua tombol + ikon hapus dalam satu baris. */
+.user-card-actions.has-delete {
+  grid-template-columns:
+    minmax(0, 44fr)
+    minmax(0, 44fr)
+    minmax(3rem, 12fr);
+}
+
 .user-card-actions .button {
   justify-content: center;
   padding: 0 0.5rem;
   font-size: 13px;
+}
+
+.user-card-actions .user-delete-button {
+  width: 100%;
 }
 .sale-history-item {
   display: flex;
@@ -3388,5 +3400,427 @@ table tbody tr:hover { background: var(--surface-low); }
   }
   .product-history-card {
     gap: 0.5rem;
+  }
+}
+
+/* Halaman publik produk (QR permanen) -------------------------------------- */
+.public-page {
+  min-height: 100vh;
+  background: var(--surface);
+}
+
+.public-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--outline-variant);
+  background: var(--surface-lowest);
+}
+
+@media (min-width: 640px) {
+  .public-topbar { padding: 0.875rem 1.5rem; }
+}
+
+.public-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--on-surface);
+  text-decoration: none;
+}
+
+.public-brand img {
+  width: 2rem;
+  height: 2rem;
+  object-fit: contain;
+}
+
+.public-product { padding-top: 1.5rem; }
+
+@media (min-width: 640px) {
+  .public-product { padding-top: 2rem; }
+}
+
+.public-product-hero {
+  display: grid;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (min-width: 768px) {
+  .public-product-hero {
+    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    gap: 1.75rem;
+  }
+}
+
+.public-product-photo {
+  overflow: hidden;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-lg);
+  background: #ffffff;
+}
+
+.public-product-photo img {
+  display: block;
+  width: 100%;
+  height: 240px;
+  object-fit: contain;
+  background: #ffffff;
+}
+
+@media (min-width: 768px) {
+  .public-product-photo img { height: 300px; }
+}
+
+.public-product-body { min-width: 0; }
+
+.public-eyebrow {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.public-product-name {
+  margin-top: 0.25rem;
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--on-surface);
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 640px) {
+  .public-product-name { font-size: 32px; line-height: 40px; }
+}
+
+.public-product-unit {
+  margin-top: 0.25rem;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--on-surface-variant);
+}
+
+.public-meta {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+@media (min-width: 480px) {
+  .public-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.public-meta-item {
+  min-width: 0;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius);
+  background: var(--surface-low);
+}
+
+.public-meta-value {
+  margin: 0.125rem 0 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--on-surface);
+  overflow-wrap: anywhere;
+}
+
+.public-scan-note {
+  margin-top: 1.25rem;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--on-surface-variant);
+}
+
+.public-info-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+@media (min-width: 768px) {
+  .public-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.public-info-card { min-width: 0; }
+
+.public-info-text {
+  margin-top: 0.5rem;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--on-surface-variant);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.public-batch-section { margin-top: 1.5rem; }
+
+.public-section-note {
+  margin-top: 0.25rem;
+  max-width: 44rem;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--on-surface-variant);
+}
+
+.public-batch-list {
+  margin-top: 1rem;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.public-batch-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 0.9fr;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.875rem 1rem;
+  border-top: 1px solid var(--outline-variant);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.public-batch-row:first-child { border-top: none; }
+
+.public-batch-head {
+  background: var(--surface-low);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-variant);
+}
+
+.public-batch-cell { min-width: 0; overflow-wrap: anywhere; }
+
+.public-batch-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--on-surface);
+}
+
+@media (max-width: 639px) {
+  .public-batch-head { display: none; }
+
+  .public-batch-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.875rem 1rem;
+  }
+
+  .public-batch-cell::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.125rem;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--on-surface-variant);
+  }
+}
+
+.public-foot-note {
+  margin: 1.5rem 0 0;
+  font-size: 12.5px;
+  line-height: 19px;
+  color: var(--on-surface-variant);
+}
+
+.public-unavailable { max-width: 40rem; }
+
+.public-unavailable-actions { margin-top: 1.25rem; }
+
+/* Tautan nama produk di katalog publik */
+.product-name-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.product-name-link:hover { color: var(--primary); }
+
+.product-card-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+/* Manajemen QR produk (Admin) ---------------------------------------------- */
+.product-qr-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .product-qr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1180px) {
+  .product-qr-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.product-qr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-lg);
+  background: var(--surface-lowest);
+}
+
+@media (min-width: 560px) {
+  .product-qr-card { flex-direction: row; align-items: flex-start; }
+}
+
+.product-qr-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 180px;
+  margin: 0 auto;
+  padding: 0.5rem;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius);
+  background: #ffffff;
+}
+
+.product-qr-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (min-width: 560px) {
+  .product-qr-preview { width: 150px; margin: 0; }
+}
+
+.product-qr-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.product-qr-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.product-qr-head .product-name { min-width: 0; overflow-wrap: anywhere; }
+
+.product-qr-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--on-surface-variant);
+  overflow-wrap: anywhere;
+}
+
+.product-qr-note {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.product-qr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+.product-qr-actions .button { min-height: 2.25rem; }
+
+/* Label produk tanpa foto: QR saja, tetap terpusat saat dicetak. */
+.label-top-row.qr-only {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+
+.label-top-row.qr-only .label-qr-col { width: 100%; }
+
+/* Hapus akun Operator tanpa riwayat ---------------------------------------- */
+/* Ikon tempat sampah merah: hanya untuk Operator tanpa riwayat aktivitas.
+   Ukuran glyph lebih kecil, area klik selaras dengan tombol aksi lain. */
+.user-delete-button {
+  flex: 0 0 auto;
+  width: 3rem;
+  height: 2.75rem;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius);
+  background: var(--surface-lowest);
+  color: var(--error);
+}
+
+.user-delete-button .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.user-delete-button:hover:not(:disabled) {
+  background: var(--error-container);
+  border-color: var(--error);
+  color: var(--on-error-container);
+}
+
+.user-delete-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Identitas akun pada dialog konfirmasi penghapusan. */
+.account-delete-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.account-delete-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.account-delete-row span { color: var(--on-surface-variant); }
+
+.account-delete-row strong {
+  color: var(--on-surface);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 639px) {
+  .user-card-actions {
+    gap: 0.375rem;
+  }
+
+  .user-card-actions .button {
+    padding: 0 0.25rem;
+    font-size: 12px;
   }
 }

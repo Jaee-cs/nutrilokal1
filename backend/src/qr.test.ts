@@ -198,7 +198,15 @@ describe('katalog publik', () => {
 
     const full = mine.find((p) => p.name === `${runId}-produk-lengkap`)!;
     // Hanya kolom yang memang untuk publik; tidak ada data internal.
-    expect(Object.keys(full).sort()).toEqual(['description', 'name', 'photoUrl', 'sellingPrice', 'unit']);
+    expect(Object.keys(full).sort()).toEqual([
+      'description',
+      'id',
+      'name',
+      'photoUrl',
+      'sellingPrice',
+      'unit',
+    ]);
+    expect(full.id).toBe(prodFull);
     expect(full.description).toBe('Snack sehat khas KWT Gogor.');
     expect(full.sellingPrice).toBe(20000);
     // Foto publik berasal dari master produk (bukan salinan/base64).
@@ -211,7 +219,8 @@ describe('katalog publik', () => {
 
     const plain = mine.find((p) => p.name === `${runId}-produk-polos`)!;
     // Kolom yang belum diisi Admin disembunyikan — bukan null.
-    expect(Object.keys(plain).sort()).toEqual(['name', 'sellingPrice', 'unit']);
+    expect(Object.keys(plain).sort()).toEqual(['id', 'name', 'sellingPrice', 'unit']);
+    expect(plain.id).toBe(prodPlain);
   });
 
   it('data katalog selalu berasal dari master terkini (bukan salinan)', async () => {

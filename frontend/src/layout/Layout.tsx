@@ -20,6 +20,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { to: '/users', label: 'Pengguna', icon: 'group' },
+  { to: '/product-qr', label: 'QR Produk', icon: 'qr_code_2' },
   { to: '/qr-management', label: 'QR Traceability', icon: 'qr_code_2' },
 ]
 

@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../lib/api'
 import { productPhotoUrl } from '../utils/product-photo'
+import { productPublicPath } from '../utils/public-product'
 
 interface PublicProduct {
+  id: string
   name: string
   unit: string
   sellingPrice: number
@@ -51,13 +53,17 @@ export function CatalogPage() {
         </div>
       ) : (
         <div className="product-grid">
-          {products.map((p, idx) => {
+          {products.map((p) => {
             const photo = productPhotoUrl(p.photoUrl)
             return (
-              <div key={idx} className="card product-card">
+              <div key={p.id} className="card product-card">
                 <div className="product-card-head">
                   <div className="product-info">
-                    <h3 className="product-name">{p.name}</h3>
+                    <h3 className="product-name">
+                      <Link to={productPublicPath(p.id)} className="product-name-link">
+                        {p.name}
+                      </Link>
+                    </h3>
                     <p className="product-unit">Per {p.unit}</p>
                   </div>
                   <span className="badge success">Aktif</span>
@@ -77,6 +83,15 @@ export function CatalogPage() {
                 </div>
 
                 {p.description && <p className="product-desc">{p.description}</p>}
+
+                <div className="product-card-foot">
+                  <Link to={productPublicPath(p.id)} className="button secondary">
+                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                      info
+                    </span>
+                    Informasi Produk
+                  </Link>
+                </div>
               </div>
             )
           })}

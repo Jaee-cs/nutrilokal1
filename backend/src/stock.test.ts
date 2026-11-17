@@ -698,6 +698,45 @@ describe('Penyesuaian stok (hanya Admin)', () => {
     await auditMaterialStock([material.id]);
   });
 
+  it('Tanggal aktivitas penyesuaian dapat diisi dan terpisah dari waktu pencatatan', async () => {
+    const material = await createMaterial('tanggal');
+    await stockViaReceipt(material.id, 20);
+
+    const activityDate = pastCode(5);
+    const res = await adjust({
+      targetType: 'MATERIAL',
+      targetId: material.id,
+      quantity: 2,
+      reason: 'Koreksi stok opname hari sebelumnya',
+      date: activityDate,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.stock).toBe(22);
+
+    const movement = await prisma.materialStockMovement.findFirst({
+      where: { materialId: material.id, type: 'ADJUSTMENT' },
+      orderBy: { recordedAt: 'desc' },
+    });
+    expect(movement).toBeTruthy();
+    // Tanggal aktivitas mengikuti input pengguna (tengah malam UTC hari bisnis).
+    expect(movement!.occurredAt.toISOString()).toBe(`${activityDate}T00:00:00.000Z`);
+    // Waktu pencatatan sistem tetap saat ini dan tidak tertimpa tanggal aktivitas.
+    expect(wibFormatter.format(movement!.recordedAt)).toBe(todayCode());
+
+    // Tanggal yang tidak ada di kalender ditolak tanpa mengubah stok.
+    const invalid = await adjust({
+      targetType: 'MATERIAL',
+      targetId: material.id,
+      quantity: 1,
+      reason: 'Tanggal tidak valid',
+      date: '2026-02-30',
+    });
+    expect(invalid.status).toBe(400);
+    expect(await getMaterialStockApi(material.id)).toBe(22);
+
+    await auditMaterialStock([material.id]);
+  });
+
   it('Retur: Admin menambah stok batch asal dengan alasan retur dan pemeriksaan barang', async () => {
     const product = await createProduct('retur');
     const bahan = await createMaterial('retur');

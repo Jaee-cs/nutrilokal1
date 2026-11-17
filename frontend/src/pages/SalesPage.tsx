@@ -5,6 +5,7 @@ import { useNotify } from '../components/NotificationProvider'
 // Kode tanggal dan penanda kedaluwarsa memakai aturan bersama di
 // utils/batch-expiry.ts (kalender WIB, sama dengan backend lib/date.ts).
 import { wibDateCode, isBatchExpired } from '../utils/batch-expiry'
+import { dateCodeToDisplay, isoToDateTimeDisplay } from '../utils/dates'
 
 interface Product {
   id: string
@@ -69,9 +70,8 @@ const EMPTY_FORM: SaleFormItem[] = [
 ]
 
 function formatDateTime(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const label = isoToDateTimeDisplay(iso)
+  return label ? `${label} WIB` : iso
 }
 
 export function SalesPage() {
@@ -184,7 +184,8 @@ export function SalesPage() {
   function batchOptionLabel(b: Batch) {
     const parts = [b.code, `stok ${b.stock.toLocaleString('id-ID')}`]
     if (b.expiryDate) {
-      parts.push(isBatchExpired(b) ? `kedaluwarsa ${wibDateCode(b.expiryDate)} (tidak dapat dijual)` : `kedaluwarsa ${wibDateCode(b.expiryDate)}`)
+      const expiryLabel = dateCodeToDisplay(wibDateCode(b.expiryDate))
+      parts.push(isBatchExpired(b) ? `kedaluwarsa ${expiryLabel} (tidak dapat dijual)` : `kedaluwarsa ${expiryLabel}`)
     }
     return parts.join(' — ')
   }
@@ -409,7 +410,7 @@ export function SalesPage() {
               <thead>
                 <tr>
                   <th>ID Transaksi</th>
-                  <th>Tanggal</th>
+                  <th>Waktu Pencatatan</th>
                   <th>Item</th>
                   <th>Total</th>
                   <th>Status</th>

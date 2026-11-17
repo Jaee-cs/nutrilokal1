@@ -3,6 +3,7 @@ import QRCode from 'qrcode'
 import api from '../lib/api'
 import { useNotify } from '../components/NotificationProvider'
 import { validatedExpiryLabel } from '../utils/batch-expiry'
+import { isoToDateDisplay, isoToDateTimeDisplay } from '../utils/dates'
 import { productPhotoUrl } from '../utils/product-photo'
 
 // Bentuk API GET /batches (toPublicBatch): stock, productionDate bisa null
@@ -60,9 +61,8 @@ function publicTraceUrl(code: string): string {
 
 function formatDate(iso: string | null) {
   if (!iso) return '-'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const label = isoToDateTimeDisplay(iso)
+  return label ? `${label} WIB` : iso
 }
 
 export function QrManagementPage() {
@@ -210,7 +210,7 @@ export function QrManagementPage() {
                     <tr key={b.id} className={detail?.batchId === b.id ? 'row-active' : ''}>
                       <td><span className="badge neutral">{b.code}</span></td>
                       <td className="cell-primary">{b.product.name}</td>
-                      <td>{b.productionDate ?? '-'}</td>
+                      <td>{isoToDateDisplay(b.productionDate) || '-'}</td>
                       <td>{validatedExpiryLabel(b) ?? '—'}</td>
                       <td className="num">{b.stock.toLocaleString('id-ID')}</td>
                       <td>
@@ -253,7 +253,7 @@ export function QrManagementPage() {
                   </div>
                   <div className="qr-batch-row">
                     <span className="qr-batch-key">Tanggal Produksi</span>
-                    <span className="qr-batch-val">{b.productionDate ?? '-'}</span>
+                    <span className="qr-batch-val">{isoToDateDisplay(b.productionDate) || '-'}</span>
                   </div>
                   <div className="qr-batch-row">
                     <span className="qr-batch-key">Kedaluwarsa</span>

@@ -2,11 +2,13 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import api from '../lib/api'
+import { DateField } from '../components/DateField'
 import { PhotoField } from '../components/PhotoField'
 import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
+import { isoToDateDisplay, isoToDateTimeDisplay } from '../utils/dates'
 import { productPhotoUrl, uploadProductPhoto } from '../utils/product-photo'
-import { compatibleRecipeUnits } from '../utils/units'
+import { recipeUnitOptions } from '../utils/units'
 
 interface RecipeMaterial {
   id: string
@@ -122,23 +124,9 @@ function formatQuantity(value: number): string {
   return quantityFormatter.format(value)
 }
 
-/** Tanggal bisnis aktivitas pada kalender WIB. */
+/** Tanggal bisnis aktivitas pada kalender WIB, ditampilkan DD/MM/YYYY. */
 function movementDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('id-ID', {
-    timeZone: 'Asia/Jakarta',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
-}
-
-/** Waktu pencatatan pada kalender WIB (tanggal aktivitas dapat mundur). */
-function movementTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('id-ID', {
-    timeZone: 'Asia/Jakarta',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return isoToDateDisplay(iso)
 }
 
 function movementRecorder(row: ProductStockMovement): string {
@@ -820,22 +808,20 @@ export function ProductsPage() {
           </div>
           <div className="field">
             <label htmlFor="history-from">Dari</label>
-            <input
+            <DateField
               id="history-from"
-              type="date"
               value={historyFrom}
               max={historyTo || undefined}
-              onChange={(e) => setHistoryFrom(e.target.value)}
+              onChange={setHistoryFrom}
             />
           </div>
           <div className="field">
             <label htmlFor="history-to">Sampai</label>
-            <input
+            <DateField
               id="history-to"
-              type="date"
               value={historyTo}
               min={historyFrom || undefined}
-              onChange={(e) => setHistoryTo(e.target.value)}
+              onChange={setHistoryTo}
             />
           </div>
           <div className="field">
@@ -944,7 +930,7 @@ export function ProductsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>Tanggal</th>
+                    <th>Tanggal Aktivitas</th>
                     <th>Jenis Aktivitas</th>
                     <th>Batch</th>
                     <th>Stok Masuk</th>
@@ -960,7 +946,7 @@ export function ProductsPage() {
                       <td className="product-history-date">
                         <span>{movementDate(row.occurredAt)}</span>
                         <span className="product-history-sub">
-                          {movementTime(row.recordedAt)} WIB
+                          Dicatat {isoToDateTimeDisplay(row.recordedAt)} WIB
                         </span>
                       </td>
                       <td>
@@ -1086,7 +1072,7 @@ export function ProductsPage() {
                     {row.reference ? ` · ${row.reference.label}` : ''}
                   </div>
                   <div className="history-item-note">
-                    Dicatat oleh {movementRecorder(row)} · {movementTime(row.recordedAt)} WIB
+                    Dicatat oleh {movementRecorder(row)} · {isoToDateTimeDisplay(row.recordedAt)} WIB
                   </div>
                 </article>
               ))}
@@ -1207,7 +1193,7 @@ export function ProductsPage() {
                   {recipeRows.map((row, idx) => {
                     const selectedMaterial = materials.find((m) => m.id === row.materialId)
                     const unitOptions = selectedMaterial
-                      ? compatibleRecipeUnits(selectedMaterial.unit)
+                      ? recipeUnitOptions(selectedMaterial.unit, row.recipeUnit)
                       : row.recipeUnit
                         ? [row.recipeUnit]
                         : []
@@ -1221,7 +1207,7 @@ export function ProductsPage() {
                             onChange={(e) => {
                               const materialId = e.target.value
                               const mat = materials.find((m) => m.id === materialId)
-                              const compatible = mat ? compatibleRecipeUnits(mat.unit) : []
+                              const compatible = mat ? recipeUnitOptions(mat.unit, row.recipeUnit) : []
                               updateRecipeRow(idx, {
                                 materialId,
                                 recipeUnit:

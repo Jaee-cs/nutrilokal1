@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import api from '../lib/api'
 import { useNotify } from '../components/NotificationProvider'
 import { PasswordInput } from '../components/PasswordInput'
+import { isoToDateTimeDisplay } from '../utils/dates'
 
 interface User {
   id: string
@@ -13,6 +14,41 @@ interface User {
   createdAt: string
   updatedAt?: string | null
   lastLoginAt?: string | null
+  /** Diisi backend: true bila akun sudah punya riwayat aktivitas. */
+  hasActivityHistory?: boolean
+}
+
+/** Hanya Operator tanpa riwayat yang boleh dihapus permanen. */
+function canDeleteUser(user: User): boolean {
+  return user.role === 'OPERATOR' && user.hasActivityHistory === false
+}
+
+/** Waktu pencatatan sistem pada kalender WIB, format DD/MM/YYYY HH:mm. */
+function formatLastLogin(iso?: string | null): string {
+  if (!iso) return '-'
+  const label = isoToDateTimeDisplay(iso)
+  return label ? `${label} WIB` : iso
+}
+
+/**
+ * Identitas akun pada dialog konfirmasi hapus. Ditampilkan terpisah agar
+ * Admin dapat memastikan akun yang dipilih sebelum penghapusan permanen.
+ */
+function DeleteAccountDetails({ user }: { user: User }) {
+  return (
+    <div className="account-delete-details">
+      <div className="account-delete-row">
+        <span>Username</span>
+        <strong>{user.username}</strong>
+      </div>
+      {user.name && (
+        <div className="account-delete-row">
+          <span>Nama</span>
+          <strong>{user.name}</strong>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -77,6 +113,7 @@ export function UsersPage() {
   const [form, setForm] = useState({ username: '', password: '', name: '' })
   const [creating, setCreating] = useState(false)
   const [resettingId, setResettingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   async function fetchUsers(): Promise<boolean> {
     try {
@@ -167,6 +204,35 @@ export function UsersPage() {
       notify.error(err.response?.data?.message || 'Gagal mereset kata sandi')
     } finally {
       setResettingId(null)
+    }
+  }
+
+  async function deleteOperator(user: User) {
+    const confirmed = await notify.confirm({
+      title: 'Hapus Akun Operator',
+      message:
+        `Hapus akun "${user.username}" secara permanen? Penghapusan tidak dapat ` +
+        'dibatalkan. Server akan memeriksa ulang riwayat aktivitas sebelum menghapus.',
+      confirmLabel: 'Hapus Akun',
+      cancelLabel: 'Batal',
+      tone: 'danger',
+      details: <DeleteAccountDetails user={user} />,
+    })
+    if (!confirmed) return
+
+    setDeletingId(user.id)
+    try {
+      await api.delete(`/users/${user.id}`)
+      // Perbarui daftar di tempat tanpa reload halaman.
+      await fetchUsers()
+      notify.success(`Akun "${user.username}" berhasil dihapus`)
+    } catch (err: any) {
+      notify.error(err.response?.data?.message || 'Gagal menghapus akun')
+      // Riwayat bisa bertambah setelah daftar dimuat; segarkan agar tombol
+      // hapus menyesuaikan kondisi terbaru dari server.
+      void fetchUsers()
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -287,7 +353,7 @@ export function UsersPage() {
                       </td>
                       <td>{u.mustChangePassword ? <span className="badge warning">Ya</span> : 'Tidak'}</td>
                       <td className="text-muted">
-                        {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('id-ID') : '-'}
+                        {formatLastLogin(u.lastLoginAt)}
                       </td>
                       <td>
                         <div className="row-actions">
@@ -305,6 +371,20 @@ export function UsersPage() {
                           >
                             {resettingId === u.id ? 'Mereset...' : 'Reset Password'}
                           </button>
+                          {canDeleteUser(u) && (
+                            <button
+                              type="button"
+                              className="icon-btn danger user-delete-button"
+                              onClick={() => deleteOperator(u)}
+                              disabled={deletingId === u.id}
+                              aria-label={`Hapus akun ${u.username}`}
+                              title={`Hapus akun ${u.username}`}
+                            >
+                              <span className="material-symbols-outlined" aria-hidden="true">
+                                delete
+                              </span>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -349,10 +429,12 @@ export function UsersPage() {
                   </div>
                   <div className="user-card-row">
                     <span className="user-card-label">Terakhir login</span>
-                    <span className="user-card-value">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('id-ID') : '-'}</span>
+                    <span className="user-card-value">{formatLastLogin(u.lastLoginAt)}</span>
                   </div>
                 </div>
-                <div className="user-card-actions">
+                <div
+                  className={`user-card-actions${canDeleteUser(u) ? ' has-delete' : ''}`}
+                >
                   <button
                     className="button secondary"
                     onClick={() => toggleActive(u.id, u.isActive)}
@@ -367,6 +449,20 @@ export function UsersPage() {
                   >
                     {resettingId === u.id ? 'Mereset...' : 'Reset Password'}
                   </button>
+                  {canDeleteUser(u) && (
+                    <button
+                      type="button"
+                      className="icon-btn danger user-delete-button"
+                      onClick={() => deleteOperator(u)}
+                      disabled={deletingId === u.id}
+                      aria-label={`Hapus akun ${u.username}`}
+                      title={`Hapus akun ${u.username}`}
+                    >
+                      <span className="material-symbols-outlined" aria-hidden="true">
+                        delete
+                      </span>
+                    </button>
+                  )}
                 </div>
               </article>
             ))

@@ -5,6 +5,7 @@
  * memakai kalender WIB yang sama dengan backend (`lib/date.ts`), dan hanya
  * tanggal yang sudah DIVALIDASI Admin yang dipakai untuk keputusan jual.
  */
+import { addDaysToDateCode, isoToDateCode, isoToDateDisplay, todayDateCode } from './dates'
 
 export interface BatchExpiryFields {
   expiryDate: string | null
@@ -13,7 +14,7 @@ export interface BatchExpiryFields {
 
 /** Kode tanggal 'YYYY-MM-DD' menurut kalender WIB (sama dengan backend). */
 export function wibDateCode(iso: string | Date): string {
-  return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
+  return isoToDateCode(iso)
 }
 
 /**
@@ -21,21 +22,12 @@ export function wibDateCode(iso: string | Date): string {
  * Dipakai sebagai batas minimum tanggal kedaluwarsa (harus setelah produksi).
  */
 export function nextDateCode(code: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(code)) return code
-  const [year, month, day] = code.split('-').map(Number)
-  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10)
+  return addDaysToDateCode(code, 1)
 }
 
-/** Tanggal WIB yang ramah dibaca, mis. '20 Okt 2026'. */
+/** Tanggal WIB yang ramah dibaca, mis. '20/10/2026'. */
 export function wibDateLabel(iso: string | Date): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return String(iso)
-  return d.toLocaleDateString('id-ID', {
-    timeZone: 'Asia/Jakarta',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
+  return isoToDateDisplay(iso)
 }
 
 /**
@@ -45,7 +37,7 @@ export function wibDateLabel(iso: string | Date): string {
  */
 export function isBatchExpired(batch: BatchExpiryFields, now: Date = new Date()): boolean {
   if (!batch.expiryDate || !batch.expiryValidated) return false
-  return wibDateCode(batch.expiryDate) < wibDateCode(now)
+  return wibDateCode(batch.expiryDate) < todayDateCode(now)
 }
 
 /**

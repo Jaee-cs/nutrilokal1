@@ -53,6 +53,18 @@ export function compatibleRecipeUnits(stockUnit: string): string[] {
   return ['ml', 'liter']
 }
 
+/**
+ * Opsi satuan resep untuk satu bahan. Satuan yang sedang dipakai ikut
+ * dipertahankan bila masih kompatibel (mis. alias "g" pada stok "kg") agar
+ * nilai lama tidak tampil kosong saat form dibuka/diubah.
+ */
+export function recipeUnitOptions(stockUnit: string, currentUnit?: string): string[] {
+  const base = compatibleRecipeUnits(stockUnit)
+  const current = currentUnit?.trim()
+  if (!current || base.includes(current)) return base
+  return areUnitsCompatible(current, stockUnit) ? [current, ...base] : base
+}
+
 function trimZeros(text: string): string {
   if (!text.includes('.')) return text
   return text.replace(/\.?0+$/, '')

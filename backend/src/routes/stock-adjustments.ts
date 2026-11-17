@@ -15,6 +15,7 @@
  */
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
+import { parseBusinessDate } from '../lib/date';
 import { readIdempotencyKey, runIdempotent } from '../lib/idempotency';
 import { prisma } from '../lib/prisma';
 import {
@@ -28,7 +29,7 @@ import {
   STOCK_ADJUSTMENT_INCLUDE,
   toPublicStockAdjustment,
 } from '../lib/stock-view';
-import { validateAdjustmentQuantity, validateReason } from '../lib/validate';
+import { validateAdjustmentQuantity, validateDateOnly, validateReason } from '../lib/validate';
 import { authenticate, requireAdmin } from '../middleware/auth';
 
 export const stockAdjustmentsRouter = Router();
@@ -36,7 +37,7 @@ export const stockAdjustmentsRouter = Router();
 const ADJUSTMENT_ENDPOINT = 'POST /api/stock-adjustments';
 
 stockAdjustmentsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
-  const { targetType, targetId, quantity, reason } = req.body ?? {};
+  const { targetType, targetId, quantity, reason, date } = req.body ?? {};
 
   if (targetType !== 'MATERIAL' && targetType !== 'BATCH') {
     res.status(400).json({ message: 'targetType harus "MATERIAL" atau "BATCH".' });
@@ -58,6 +59,16 @@ stockAdjustmentsRouter.post('/', authenticate, requireAdmin, async (req, res) =>
   if (reasonError) {
     res.status(400).json({ message: reasonError });
     return;
+  }
+
+  // Tanggal aktivitas (opsional) terpisah dari `adjustedAt` (waktu pencatatan
+  // sistem). Bila tidak dikirim, aktivitas dianggap terjadi saat ini.
+  if (date !== undefined) {
+    const dateError = validateDateOnly(date);
+    if (dateError) {
+      res.status(400).json({ message: dateError });
+      return;
+    }
   }
 
   const id = targetId.trim();
@@ -83,8 +94,9 @@ stockAdjustmentsRouter.post('/', authenticate, requireAdmin, async (req, res) =>
   const quantityText = quantity.toFixed(3);
   const reasonText = reason.trim();
   const adjustedById = req.user!.id;
-  // Penyesuaian dicatat pada saat dilakukan (tidak ada tanggal terpisah).
-  const occurredAt = new Date();
+  // Tanggal aktivitas mengikuti input pengguna; `adjustedAt` tetap menjadi
+  // waktu pencatatan sistem sehingga keduanya tidak saling menimpa.
+  const occurredAt = date === undefined ? new Date() : parseBusinessDate(date);
 
   try {
     const result = await runIdempotent<{

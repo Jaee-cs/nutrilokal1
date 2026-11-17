@@ -148,8 +148,10 @@ afterAll(async () => {
   await prisma.production.deleteMany({ where: { id: { in: productionIds } } });
   await prisma.batch.deleteMany({ where: { id: { in: batchIds } } });
   await prisma.materialStock.deleteMany({ where: { materialId: { in: materialIds } } });
-  await prisma.material.deleteMany({ where: { id: { in: materialIds } } });
+  // Produk dihapus sebelum bahan agar baris resep (FK Restrict ke bahan)
+  // ikut ter-cascade dan tidak menghalangi pembersihan bahan uji.
   await prisma.product.deleteMany({ where: { id: { in: productIds } } });
+  await prisma.material.deleteMany({ where: { id: { in: materialIds } } });
   await prisma.idempotencyKey.deleteMany({ where: { key: { startsWith: runId } } });
   await prisma.user.deleteMany({ where: { username: { startsWith: runId } } });
 });
@@ -1063,5 +1065,110 @@ describe('Integritas dan riwayat', () => {
     // Riwayat tetap utuh.
     const list = await request(app).get('/api/productions').set(auth(operatorToken));
     expect((list.body.data as { productId: string }[]).some((p) => p.productId === product.id)).toBe(true);
+  });
+});
+
+describe('Produksi — resep dan konversi satuan', () => {
+  it('Mengonversi gram/ml ke satuan stok kg/liter dan menyimpan jumlah input aktual', async () => {
+    const bahanBerat = await createMaterial('konversi-berat', { unit: 'kg' });
+    const bahanVolume = await createMaterial('konversi-volume', { unit: 'liter' });
+    const product = await createProduct('konversi', {
+      recipe: [
+        { materialId: bahanBerat.id, quantityPerUnit: 150, recipeUnit: 'gram' },
+        { materialId: bahanVolume.id, quantityPerUnit: 250, recipeUnit: 'ml' },
+      ],
+    });
+    expect(product.recipe).toHaveLength(2);
+    await stockViaReceipt(bahanBerat.id, 5);
+    await stockViaReceipt(bahanVolume.id, 2);
+
+    // Resep 150 gram + 250 ml per unit; hasil 2 unit = 300 gram + 500 ml.
+    const res = await postProduction({
+      productId: product.id,
+      productionDate: pastCode(2),
+      yieldQuantity: 2,
+      materials: [
+        { materialId: bahanBerat.id, quantity: 300, unit: 'gram' },
+        { materialId: bahanVolume.id, quantity: 500, unit: 'ml' },
+      ],
+    });
+
+    expect(res.status).toBe(201);
+    expect(await getMaterialStockApi(bahanBerat.id)).toBe(4.7);
+    expect(await getMaterialStockApi(bahanVolume.id)).toBe(1.5);
+
+    const usages = res.body.production.usages as {
+      materialId: string;
+      quantity: number;
+      inputQuantity: number | null;
+      inputUnit: string | null;
+    }[];
+    const berat = usages.find((u) => u.materialId === bahanBerat.id);
+    expect(berat).toMatchObject({ quantity: 0.3, inputQuantity: 300, inputUnit: 'gram' });
+    const volume = usages.find((u) => u.materialId === bahanVolume.id);
+    expect(volume).toMatchObject({ quantity: 0.5, inputQuantity: 500, inputUnit: 'ml' });
+
+    // Jejak stok mencatat jumlah aktual dalam satuan stok + penjelasan input.
+    const movement = await prisma.materialStockMovement.findFirstOrThrow({
+      where: { materialId: bahanBerat.id, type: 'PRODUCTION_USAGE' },
+    });
+    expect(Number(movement.quantity)).toBe(0.3);
+    expect(movement.reason).toContain('300.000 gram = 0.300 kg');
+  });
+
+  it('Menolak satuan pemakaian yang tidak kompatibel tanpa mengubah stok atau membuat catatan', async () => {
+    const bahan = await createMaterial('konversi-tolak', { unit: 'kg' });
+    const product = await createProduct('konversi-tolak');
+    await stockViaReceipt(bahan.id, 10);
+
+    const res = await postProduction({
+      productId: product.id,
+      productionDate: pastCode(1),
+      yieldQuantity: 1,
+      materials: [{ materialId: bahan.id, quantity: 100, unit: 'ml' }],
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/tidak kompatibel/i);
+    expect(await getMaterialStockApi(bahan.id)).toBe(10);
+    expect(await prisma.production.count({ where: { productId: product.id } })).toBe(0);
+    expect(await prisma.batch.count({ where: { productId: product.id } })).toBe(0);
+  });
+
+  it('Perubahan resep produk tidak mengubah pemakaian pada catatan produksi lama', async () => {
+    const bahanLama = await createMaterial('riwayat-resep-lama', { unit: 'kg' });
+    const bahanBaru = await createMaterial('riwayat-resep-baru', { unit: 'kg' });
+    const product = await createProduct('riwayat-resep', {
+      recipe: [{ materialId: bahanLama.id, quantityPerUnit: 1, recipeUnit: 'kg' }],
+    });
+    await stockViaReceipt(bahanLama.id, 10);
+    await stockViaReceipt(bahanBaru.id, 10);
+
+    const created = await postProduction({
+      productId: product.id,
+      productionDate: pastCode(1),
+      yieldQuantity: 5,
+      materials: [{ materialId: bahanLama.id, quantity: 2, unit: 'kg' }],
+    });
+    expect(created.status).toBe(201);
+
+    const patched = await request(app)
+      .patch(`/api/products/${product.id}`)
+      .set(auth(adminToken))
+      .send({ recipe: [{ materialId: bahanBaru.id, quantityPerUnit: 5, recipeUnit: 'kg' }] });
+    expect(patched.status).toBe(200);
+    expect(patched.body.product.recipe).toHaveLength(1);
+    expect(patched.body.product.recipe[0].materialId).toBe(bahanBaru.id);
+
+    // Catatan produksi lama tetap memakai bahan dan jumlah saat produksi.
+    const detail = await request(app)
+      .get(`/api/productions/${created.body.production.id}`)
+      .set(auth(operatorToken));
+    expect(detail.status).toBe(200);
+    expect(detail.body.production.usages).toHaveLength(1);
+    expect(detail.body.production.usages[0].materialId).toBe(bahanLama.id);
+    expect(detail.body.production.usages[0].quantity).toBe(2);
+    expect(detail.body.production.usages[0].inputQuantity).toBe(2);
+    expect(detail.body.production.usages[0].inputUnit).toBe('kg');
   });
 });

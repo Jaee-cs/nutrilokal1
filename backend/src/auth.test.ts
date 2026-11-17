@@ -294,6 +294,96 @@ describe('DELETE /api/users/:id', () => {
     const res = await request(app).delete('/api/users/id-tidak-ada').set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(404);
   });
+
+  it('menolak Operator yang memiliki riwayat transaksi penjualan (409)', async () => {
+    const { user } = await createTempOperator('riwayat-penjualan');
+    const sale = await prisma.saleTransaction.create({
+      data: { total: 1000, recordedById: user.id },
+    });
+
+    try {
+      const res = await request(app)
+        .delete(`/api/users/${user.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toMatch(/riwayat aktivitas/i);
+      // Akun dan riwayatnya tetap ada.
+      expect(await prisma.user.findUnique({ where: { id: user.id } })).not.toBeNull();
+      expect(await prisma.saleTransaction.findUnique({ where: { id: sale.id } })).not.toBeNull();
+    } finally {
+      await prisma.saleTransaction.delete({ where: { id: sale.id } });
+      await prisma.user.deleteMany({ where: { id: user.id } });
+    }
+  });
+
+  it('menolak Operator yang hanya memiliki audit log perubahan kedaluwarsa (409)', async () => {
+    const { user } = await createTempOperator('riwayat-audit');
+    const product = await prisma.product.create({
+      data: { name: `${runId}-produk-audit`, unit: 'pcs', sellingPrice: 1000 },
+    });
+    const batch = await prisma.batch.create({
+      data: { code: `${runId}-AUDIT`, productId: product.id },
+    });
+    const change = await prisma.batchExpiryChange.create({
+      data: { batchId: batch.id, changedById: user.id, newExpiryDate: new Date() },
+    });
+
+    try {
+      const res = await request(app)
+        .delete(`/api/users/${user.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(409);
+      expect(res.body.message).toMatch(/riwayat aktivitas/i);
+      expect(await prisma.user.findUnique({ where: { id: user.id } })).not.toBeNull();
+    } finally {
+      await prisma.batchExpiryChange.delete({ where: { id: change.id } });
+      await prisma.batch.delete({ where: { id: batch.id } });
+      await prisma.product.delete({ where: { id: product.id } });
+      await prisma.user.deleteMany({ where: { id: user.id } });
+    }
+  });
+
+  it('tidak menghapus atau mengubah akun lain saat satu Operator dihapus', async () => {
+    const { user: keep } = await createTempOperator('tetap-ada');
+    const { user: remove } = await createTempOperator('hapus-saja');
+    const before = await prisma.user.count({ where: { username: { startsWith: runId } } });
+
+    const res = await request(app)
+      .delete(`/api/users/${remove.id}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { id: remove.id } })).toBeNull();
+    expect(await prisma.user.findUnique({ where: { id: keep.id } })).not.toBeNull();
+    const after = await prisma.user.count({ where: { username: { startsWith: runId } } });
+    expect(after).toBe(before - 1);
+  });
+
+  it('menandai riwayat aktivitas pada daftar pengguna', async () => {
+    const { user: fresh } = await createTempOperator('flag-tanpa-riwayat');
+    const { user: withHistory } = await createTempOperator('flag-dengan-riwayat');
+    const sale = await prisma.saleTransaction.create({
+      data: { total: 500, recordedById: withHistory.id },
+    });
+
+    try {
+      const res = await request(app)
+        .get('/api/users')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(200);
+      const byId = new Map<string, { hasActivityHistory?: boolean }>(
+        res.body.data.map((item: { id: string; hasActivityHistory?: boolean }) => [item.id, item])
+      );
+      expect(byId.get(fresh.id)?.hasActivityHistory).toBe(false);
+      expect(byId.get(withHistory.id)?.hasActivityHistory).toBe(true);
+    } finally {
+      await prisma.saleTransaction.delete({ where: { id: sale.id } });
+      await prisma.user.deleteMany({ where: { id: { in: [fresh.id, withHistory.id] } } });
+    }
+  });
 });
 
 describe('Alur reset kata sandi oleh Admin', () => {

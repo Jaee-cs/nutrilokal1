@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CalendarDays, Download, X } from 'lucide-react'
 import api from '../lib/api'
+import { DateField } from '../components/DateField'
+import { dateCodeToDisplay, isoToDateDisplay } from '../utils/dates'
 import {
   formatReportRange,
   presetRange,
@@ -176,12 +178,12 @@ function PeriodModal({ open, initialFrom, initialTo, onClose, onApply }: PeriodM
           <div className="form-row">
             <div className="field">
               <label htmlFor="report-period-from">Tanggal Mulai</label>
-              <input
+              <DateField
                 id="report-period-from"
-                type="date"
                 value={from}
-                onChange={(event) => {
-                  setFrom(event.target.value)
+                max={to || undefined}
+                onChange={(value) => {
+                  setFrom(value)
                   setError(null)
                 }}
                 required
@@ -189,12 +191,12 @@ function PeriodModal({ open, initialFrom, initialTo, onClose, onApply }: PeriodM
             </div>
             <div className="field">
               <label htmlFor="report-period-to">Tanggal Akhir</label>
-              <input
+              <DateField
                 id="report-period-to"
-                type="date"
                 value={to}
-                onChange={(event) => {
-                  setTo(event.target.value)
+                min={from || undefined}
+                onChange={(value) => {
+                  setTo(value)
                   setError(null)
                 }}
                 required
@@ -441,7 +443,7 @@ export function ReportsPage() {
                       <tbody>
                         {sales.byDay.map((d, i) => (
                           <tr key={i}>
-                            <td>{d.date}</td>
+                            <td>{dateCodeToDisplay(d.date)}</td>
                             <td className="num">{d.transactionCount}</td>
                             <td className="num">Rp {nf(d.omzet)}</td>
                           </tr>
@@ -553,7 +555,7 @@ export function ReportsPage() {
                       <tbody>
                         {productions.records.slice(0, 20).map((r) => (
                           <tr key={r.id}>
-                            <td>{new Date(r.productionDate).toLocaleDateString('id-ID')}</td>
+                            <td>{isoToDateDisplay(r.productionDate)}</td>
                             <td className="cell-primary">{r.productName}</td>
                             <td className="num">{nf(r.yieldQuantity)} <span className="text-muted">{r.unit}</span></td>
                           </tr>
