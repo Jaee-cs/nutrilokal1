@@ -247,6 +247,149 @@
   text-overflow: ellipsis;
 }
 
+/* Profil pengguna di header ------------------------------------------------- */
+.header-right {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.profile-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--on-surface);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.profile-trigger:hover,
+.profile-trigger[aria-expanded='true'] {
+  background: var(--surface-container);
+  border-color: var(--outline-variant);
+}
+
+.profile-trigger-caret {
+  font-size: 18px;
+  color: var(--primary);
+}
+
+.profile-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  object-fit: cover;
+  user-select: none;
+}
+
+.profile-avatar-large {
+  width: 3rem;
+  height: 3rem;
+  font-size: 1rem;
+}
+
+.user-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: min(19rem, calc(100vw - 2rem));
+  background: var(--surface-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+  z-index: 35;
+}
+
+.user-dropdown-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--surface-low);
+  border-bottom: 1px solid var(--outline-variant);
+}
+
+.user-dropdown-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.user-dropdown-name {
+  font-size: 0.9375rem;
+  color: var(--on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-dropdown-role {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.user-dropdown-actions {
+  display: flex;
+  flex-direction: column;
+  padding: 0.375rem;
+}
+
+.user-dropdown-actions button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.6875rem 0.75rem;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--on-surface);
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-dropdown-actions button:hover,
+.user-dropdown-actions button:focus-visible {
+  background: var(--surface-container);
+}
+
+.user-dropdown-actions .material-symbols-outlined {
+  font-size: 20px;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.user-dropdown-actions .user-dropdown-logout {
+  color: var(--error);
+}
+
+.user-dropdown-actions .user-dropdown-logout .material-symbols-outlined {
+  color: var(--error);
+}
+
 /* Main content -------------------------------------------------------------- */
 .main-content {
   min-height: calc(100vh - var(--header-h));
@@ -267,4 +410,7 @@
 @media (max-width: 480px) {
   .header-left { gap: 0.375rem; }
   .header-brand { gap: 0.375rem; }
+  /* Avatar tetap-flex di kanan; brand dipendekkan dengan ellipsis bila perlu. */
+  .profile-trigger { min-width: 2.5rem; min-height: 2.5rem; }
+  .profile-trigger-caret { display: none; }
 }

@@ -1637,6 +1637,110 @@ table tbody tr:hover { background: var(--surface-low); }
   }
 }
 
+/* Modal profil pengguna ------------------------------------------------------ */
+.profile-modal {
+  max-width: 30rem;
+}
+
+.profile-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--surface-container);
+}
+
+.profile-modal-head .modal-title {
+  margin-bottom: 0;
+}
+
+.profile-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem 0 0.25rem;
+  overscroll-behavior: contain;
+}
+
+.profile-dialog-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--surface-container);
+}
+
+.profile-dialog-identity > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.profile-dialog-name {
+  font-size: 1.0625rem;
+  color: var(--on-surface);
+  overflow-wrap: anywhere;
+}
+
+.profile-dialog-role {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.profile-detail-list {
+  margin: 0;
+  padding: 0.5rem 0 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.profile-detail-list > div {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: 0.75rem;
+  padding: 0.625rem 0;
+  border-bottom: 1px solid var(--surface-container);
+}
+
+.profile-detail-list dt {
+  font-size: 0.8125rem;
+  color: var(--on-surface-variant);
+}
+
+.profile-detail-list dd {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--on-surface);
+  overflow-wrap: anywhere;
+}
+
+.profile-dialog-form {
+  padding-top: 1rem;
+}
+
+.profile-hint,
+.profile-dialog-intro {
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.profile-dialog-intro {
+  padding-bottom: 0.75rem;
+}
+
+.profile-edit-button {
+  margin-top: 1rem;
+}
+
+@media (max-width: 480px) {
+  .profile-detail-list > div {
+    grid-template-columns: 1fr;
+    gap: 0.125rem;
+  }
+}
+
 /* Modal form produk (tambah/edit) ------------------------------------------- */
 .product-modal {
   max-width: 34rem;

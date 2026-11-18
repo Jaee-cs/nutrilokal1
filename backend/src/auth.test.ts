@@ -119,6 +119,102 @@ describe('GET /api/auth/me', () => {
   });
 });
 
+describe('PATCH /api/auth/me — profil sendiri', () => {
+  it('menolak permintaan tanpa token dan token rusak', async () => {
+    const tanpaToken = await request(app).patch('/api/auth/me').send({ name: 'Uji' });
+    const tokenRusak = await request(app)
+      .patch('/api/auth/me')
+      .set('Authorization', 'Bearer token-rusak')
+      .send({ name: 'Uji' });
+
+    expect(tanpaToken.status).toBe(401);
+    expect(tokenRusak.status).toBe(401);
+  });
+
+  it('Operator dapat mengubah nama lengkapnya sendiri', async () => {
+    const before = await prisma.user.findUniqueOrThrow({ where: { username: OPERATOR_USERNAME } });
+    const res = await request(app)
+      .patch('/api/auth/me')
+      .set('Authorization', `Bearer ${operatorToken}`)
+      .send({ name: 'Operator Profil Baru' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.name).toBe('Operator Profil Baru');
+    expect(res.body.user).not.toHaveProperty('passwordHash');
+
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: before.id } });
+    expect(after.name).toBe('Operator Profil Baru');
+    expect(after.username).toBe(before.username);
+    expect(after.role).toBe(before.role);
+    expect(after.isActive).toBe(before.isActive);
+    expect(after.mustChangePassword).toBe(before.mustChangePassword);
+    expect(after.passwordHash).toBe(before.passwordHash);
+
+    const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${operatorToken}`);
+    expect(me.body.user.name).toBe('Operator Profil Baru');
+  });
+
+  it('Admin juga dapat mengubah nama lengkapnya sendiri', async () => {
+    const res = await request(app)
+      .patch('/api/auth/me')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Admin Profil Baru' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.name).toBe('Admin Profil Baru');
+    expect(res.body.user.role).toBe('ADMIN');
+  });
+
+  it('tidak mengubah akun pengguna lain', async () => {
+    const { user: lain } = await createTempOperator('profil-lain');
+    const res = await request(app)
+      .patch('/api/auth/me')
+      .set('Authorization', `Bearer ${operatorToken}`)
+      .send({ name: 'Hanya Saya' });
+
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: lain.id } });
+    expect(res.status).toBe(200);
+    expect(after.name).toBeNull();
+  });
+
+  it('menolak field selain nama dan tipe nama yang tidak valid', async () => {
+    const auth = `Bearer ${operatorToken}`;
+
+    const role = await request(app).patch('/api/auth/me').set('Authorization', auth).send({ name: 'X', role: 'ADMIN' });
+    const username = await request(app).patch('/api/auth/me').set('Authorization', auth).send({ username: 'ubah' });
+    const kosong = await request(app).patch('/api/auth/me').set('Authorization', auth).send({});
+    const angka = await request(app).patch('/api/auth/me').set('Authorization', auth).send({ name: 123 });
+    const panjang = await request(app).patch('/api/auth/me').set('Authorization', auth).send({ name: 'a'.repeat(101) });
+
+    for (const res of [role, username, kosong, angka, panjang]) {
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('nama kosong disimpan sebagai null', async () => {
+    const res = await request(app)
+      .patch('/api/auth/me')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: '   ' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.name).toBeNull();
+  });
+
+  it('diblokir saat pengguna wajib mengganti kata sandi', async () => {
+    const { user, password } = await createTempOperator('profil-wajib');
+    await prisma.user.update({ where: { id: user.id }, data: { mustChangePassword: true } });
+    const forcedLogin = await login(user.username, password);
+    const res = await request(app)
+      .patch('/api/auth/me')
+      .set('Authorization', `Bearer ${forcedLogin.body.token}`)
+      .send({ name: 'Diblokir' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+  });
+});
+
 describe('Hak akses: Operator vs Admin', () => {
   it('Operator ditolak melihat daftar akun (403)', async () => {
     const res = await request(app).get('/api/users').set('Authorization', `Bearer ${operatorToken}`);

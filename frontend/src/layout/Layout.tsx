@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { UserMenu } from '../components/UserMenu'
 import './Layout.css'
 
 interface NavItem {
@@ -115,6 +116,8 @@ export function Layout() {
               <span className="header-brand-name">NutriLokal</span>
             </span>
           </div>
+
+          <UserMenu />
         </header>
 
         <main className="main-content">

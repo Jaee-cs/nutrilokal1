@@ -91,6 +91,7 @@ const ROUTES: Array<{ method: 'get' | 'post' | 'patch' | 'delete'; path: string;
 
   // Login & pengguna
   { method: 'get', path: '/api/auth/me', access: 'user' },
+  { method: 'patch', path: '/api/auth/me', access: 'user' },
   { method: 'post', path: '/api/auth/set-password', access: 'user' },
   { method: 'get', path: '/api/users', access: 'admin' },
   { method: 'post', path: '/api/users', access: 'admin' },

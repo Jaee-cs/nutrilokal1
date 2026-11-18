@@ -8,7 +8,7 @@ import { prisma } from '../lib/prisma';
 import { signToken } from '../lib/jwt';
 import { hashPassword, passwordFingerprint, validateNewPassword, verifyPassword } from '../lib/password';
 import { toPublicUser } from '../lib/user';
-import { authenticateAllowPendingPasswordChange } from '../middleware/auth';
+import { authenticate, authenticateAllowPendingPasswordChange } from '../middleware/auth';
 
 export const authRouter = Router();
 
@@ -58,6 +58,41 @@ authRouter.get('/me', authenticateAllowPendingPasswordChange, async (req, res) =
   }
 
   res.json({ user: toPublicUser(user) });
+});
+
+/**
+ * Profil sendiri: pengguna hanya boleh mengubah nama lengkapnya.
+ * Username, role, status akun, dan kata sandi sengaja tidak diterima agar
+ * tidak ada jalan pintas mengubah identitas lewat menu profil.
+ */
+authRouter.patch('/me', authenticate, async (req, res) => {
+  const body = req.body ?? {};
+
+  const extraFields = Object.keys(body).filter((field) => field !== 'name');
+  if (extraFields.length > 0) {
+    res.status(400).json({ message: 'Hanya nama lengkap yang dapat diubah melalui profil.' });
+    return;
+  }
+
+  const { name } = body;
+  if (name === undefined) {
+    res.status(400).json({ message: 'Nama lengkap wajib diisi.' });
+    return;
+  }
+  if (name !== null && (typeof name !== 'string' || name.trim().length > 100)) {
+    res.status(400).json({ message: 'Nama harus berupa teks maksimal 100 karakter.' });
+    return;
+  }
+
+  // Target selalu akun pemilik token, bukan id dari body/params.
+  const updated = await prisma.user.update({
+    where: { id: req.user!.id },
+    data: { name: typeof name === 'string' && name.trim() !== '' ? name.trim() : null },
+  });
+
+  // Nama tidak ikut masuk JWT/sidik jari kata sandi, sehingga token lama
+  // tetap berlaku — berbeda dengan alur set-password.
+  res.json({ message: 'Profil berhasil diperbarui.', user: toPublicUser(updated) });
 });
 
 authRouter.post('/set-password', authenticateAllowPendingPasswordChange, async (req, res) => {

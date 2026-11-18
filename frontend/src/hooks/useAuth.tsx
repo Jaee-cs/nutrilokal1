@@ -1,12 +1,16 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import api, { UNAUTHORIZED_EVENT } from '../lib/api'
 
-interface User {
+export interface User {
   id: string
   username: string
   role: 'ADMIN' | 'OPERATOR'
   name?: string | null
   mustChangePassword: boolean
+  /** Tersedia dari GET /auth/me (toPublicUser backend). */
+  createdAt?: string
+  /** Belum ada di backend saat ini; dipakai bila suatu hari tersedia. */
+  photoUrl?: string | null
 }
 
 /**
@@ -30,6 +34,8 @@ interface AuthContextValue {
   status: AuthStatus
   login: (t: string, u: User) => void
   logout: () => void
+  /** Perbarui data profil pengguna aktif tanpa mengganti token. */
+  updateUser: (u: User) => void
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -114,8 +120,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('unauthenticated')
   }
 
+  function updateUser(u: User) {
+    // Nama/avatar berubah, identitas dan token tidak.
+    setUser(u)
+  }
+
   return (
-    <AuthContext.Provider value={{ token, user, status, login, logout }}>
+    <AuthContext.Provider value={{ token, user, status, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   )
