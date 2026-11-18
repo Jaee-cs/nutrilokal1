@@ -6,11 +6,24 @@ import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
 import { DateField } from '../components/DateField'
 import { isoToDateDisplay, isoToDateTimeDisplay, todayDateCode } from '../utils/dates'
+import {
+  canonicalUnit,
+  convertQuantityValue,
+  formatQty,
+  isAutomaticConversion,
+  STANDARD_UNIT_CODES,
+  UNIT_GROUPS,
+  UNIT_KIND_LABELS,
+  unitKindOf,
+  unitOptionLabel,
+  type UnitGroup,
+} from '../utils/units'
 
 interface Material {
   id: string
   name: string
   unit: string
+  isManual?: boolean
   description?: string | null
   stock?: number
   isActive: boolean
@@ -26,7 +39,12 @@ interface Receipt {
   createdAt: string
 }
 
-type MovementType = 'RECEIPT' | 'OPENING_BALANCE' | 'PRODUCTION_USAGE' | 'ADJUSTMENT'
+type MovementType =
+  | 'RECEIPT'
+  | 'OPENING_BALANCE'
+  | 'PRODUCTION_USAGE'
+  | 'ADJUSTMENT'
+  | 'UNIT_CONVERSION'
 
 interface Movement {
   id: string
@@ -43,20 +61,53 @@ interface Movement {
   sourceId?: string | null
 }
 
-type ModalKey = 'add' | 'receipt' | 'adjust' | null
+type ModalKey = 'add' | 'receipt' | 'edit' | null
+type EditTab = 'stock' | 'unit'
+
+interface AddForm {
+  name: string
+  unitKind: UnitGroup
+  standardUnit: string
+  manualUnit: string
+  description: string
+}
+
+interface UnitForm {
+  materialId: string
+  unitKind: UnitGroup
+  standardUnit: string
+  manualUnit: string
+  newStock: string
+  reason: string
+}
 
 const MOVEMENT_LABELS: Record<MovementType, string> = {
   RECEIPT: 'Penerimaan',
   OPENING_BALANCE: 'Saldo Awal',
   PRODUCTION_USAGE: 'Pemakaian Produksi',
   ADJUSTMENT: 'Penyesuaian',
+  UNIT_CONVERSION: 'Konversi Satuan',
 }
 
-const EMPTY_ADD = { name: '', unit: '', description: '' }
+const EMPTY_ADD: AddForm = {
+  name: '',
+  unitKind: 'mass',
+  standardUnit: 'kg',
+  manualUnit: '',
+  description: '',
+}
 const EMPTY_ADD_OB = { quantity: '', date: '', reason: '' }
 const EMPTY_OB = { materialId: '', quantity: '', date: '', reason: '' }
 const EMPTY_ADJ = { materialId: '', quantity: '', date: '', reason: '' }
 const EMPTY_RECEIPT = { materialId: '', quantity: '', receivedAt: '', note: '' }
+const EMPTY_UNIT: UnitForm = {
+  materialId: '',
+  unitKind: 'mass',
+  standardUnit: 'kg',
+  manualUnit: '',
+  newStock: '',
+  reason: '',
+}
 
 /** Nilai awal formulir: tanggal aktivitas default hari ini (WIB). */
 function todayForms() {
@@ -228,6 +279,7 @@ export function MaterialsPage() {
   const canReceive = isAdmin || user?.role === 'OPERATOR'
 
   const [activeModal, setActiveModal] = useState<ModalKey>(null)
+  const [editTab, setEditTab] = useState<EditTab>('stock')
   const [materials, setMaterials] = useState<Material[]>([])
   const [loading, setLoading] = useState(true)
   // Kegagalan memuat daftar tetap tampil di halaman (keadaan halaman, bukan
@@ -240,6 +292,10 @@ export function MaterialsPage() {
   const [obEnabled, setObEnabled] = useState(false)
   const [addObForm, setAddObForm] = useState(EMPTY_ADD_OB)
   const [submittingAdd, setSubmittingAdd] = useState(false)
+
+  // Penyesuaian satuan utama bahan yang sudah dipakai (Admin)
+  const [unitForm, setUnitForm] = useState<UnitForm>(EMPTY_UNIT)
+  const [submittingUnit, setSubmittingUnit] = useState(false)
 
   // Saldo awal bahan yang sudah ada (Admin)
   const [obForm, setObForm] = useState(EMPTY_OB)
@@ -332,9 +388,101 @@ export function MaterialsPage() {
     setActiveModal('receipt')
   }
 
-  function openAdjustModal(material: Material) {
+  function unitChangeTarget(): string {
+    return unitForm.unitKind === 'manual' ? unitForm.manualUnit.trim() : unitForm.standardUnit
+  }
+
+  function unitChangeIsAutomatic(material?: Material): boolean {
+    const target = unitChangeTarget()
+    return !!material && !!target && isAutomaticConversion(material.unit, target)
+  }
+
+  /** Pensil membuka satu modal dengan dua tab: stok dan satuan. */
+  function openEditModal(material: Material, tab: EditTab) {
     setAdjForm({ ...todayForms().adj, materialId: material.id })
-    setActiveModal('adjust')
+    const kind = unitKindOf(material.unit)
+    setUnitForm({
+      materialId: material.id,
+      unitKind: kind,
+      standardUnit: kind === 'manual' ? 'kg' : canonicalUnit(material.unit) ?? 'kg',
+      manualUnit: kind === 'manual' ? material.unit : '',
+      newStock: '',
+      reason: '',
+    })
+    setEditTab(tab)
+    setActiveModal('edit')
+  }
+
+  async function submitUnitChange(e: React.FormEvent) {
+    e.preventDefault()
+    const material = materials.find((m) => m.id === unitForm.materialId)
+    if (!material) {
+      notify.error('Bahan baku tidak ditemukan.')
+      return
+    }
+    const target = unitChangeTarget()
+    if (!target) {
+      notify.error(
+        unitForm.unitKind === 'manual'
+          ? 'Nama satuan Manual wajib diisi.'
+          : 'Pilih satuan tujuan terlebih dahulu.'
+      )
+      return
+    }
+    if (unitForm.unitKind === 'manual' && STANDARD_UNIT_CODES.includes(target)) {
+      notify.error('Satuan Manual tidak boleh memakai kode Berat/Volume baku. Ketik nama satuan sendiri.')
+      return
+    }
+
+    const automatic = unitChangeIsAutomatic(material)
+    const payload: Record<string, unknown> = { newUnit: target, unitKind: unitForm.unitKind }
+    let confirmationMessage: string
+
+    if (automatic) {
+      confirmationMessage =
+        `Satuan ${material.name} akan diubah dari ${material.unit} ke ${target}. ` +
+        'Stok akan dikonversi otomatis dalam kelompok yang sama dan perubahannya dicatat.'
+    } else {
+      const stock = Number(unitForm.newStock)
+      if (!Number.isFinite(stock) || stock < 0) {
+        notify.error('Stok eksplisit pada satuan tujuan wajib diisi dan tidak boleh negatif.')
+        return
+      }
+      if (!unitForm.reason.trim()) {
+        notify.error('Alasan penyesuaian stok wajib diisi untuk perubahan satuan ini.')
+        return
+      }
+      payload.adjustment = { quantity: stock, reason: unitForm.reason.trim() }
+      confirmationMessage =
+        `Satuan ${material.name} akan diubah dari ${material.unit} ke ${target} tanpa konversi otomatis. ` +
+        `Stok akan ditetapkan menjadi ${formatQty(stock)} ${target} dan dicatat sebagai penyesuaian.`
+    }
+
+    const confirmed = await notify.confirm({
+      title: 'Konfirmasi Perubahan Satuan',
+      message: confirmationMessage,
+      tone: 'warning',
+      confirmLabel: 'Ya, Terapkan',
+    })
+    if (!confirmed) return
+
+    setSubmittingUnit(true)
+    try {
+      const res = await api.post(`/materials/${material.id}/unit-change`, payload)
+      await fetchMaterials()
+      notify.success(
+        automatic
+          ? `Satuan ${material.name} berhasil dikonversi ke ${target}. ` +
+              `Stok menjadi ${formatQty(Number(res.data.currentStock))} ${target} dan perubahannya tercatat.`
+          : `Satuan ${material.name} berhasil diubah ke ${target}. ` +
+              `Stok ditetapkan menjadi ${formatQty(Number(res.data.currentStock))} ${target} tanpa konversi dan tercatat.`
+      )
+      setActiveModal(null)
+    } catch (err: any) {
+      notify.error(err.response?.data?.message || 'Gagal mengubah satuan bahan baku')
+    } finally {
+      setSubmittingUnit(false)
+    }
   }
 
   function closeModal() {
@@ -360,8 +508,14 @@ export function MaterialsPage() {
       notify.error(DUPLICATE_NAME_MESSAGE)
       return
     }
-    if (!addForm.unit.trim()) {
+    const unit =
+      addForm.unitKind === 'manual' ? addForm.manualUnit.trim() : addForm.standardUnit.trim()
+    if (!unit) {
       notify.error('Satuan bahan wajib diisi.')
+      return
+    }
+    if (addForm.unitKind === 'manual' && STANDARD_UNIT_CODES.includes(unit)) {
+      notify.error('Satuan Manual tidak boleh memakai kode Berat/Volume baku. Ketik nama satuan sendiri.')
       return
     }
     if (obEnabled) {
@@ -384,7 +538,8 @@ export function MaterialsPage() {
     try {
       const created = await api.post('/materials', {
         name: addForm.name,
-        unit: addForm.unit,
+        unit,
+        unitKind: addForm.unitKind,
         description: addForm.description || undefined,
       })
       const newMaterial: Material = created.data.material
@@ -642,6 +797,70 @@ export function MaterialsPage() {
   const movementRows = buildMovementRows(movements, movementMaterial?.stock)
   const movementUnit = movementMaterial?.unit || ''
   const adjMaterial = materials.find((m) => m.id === adjForm.materialId)
+  const unitMaterial = materials.find((m) => m.id === unitForm.materialId)
+  const unitTarget = unitChangeTarget()
+  const unitAutomatic = unitChangeIsAutomatic(unitMaterial)
+  const unitPreview = unitAutomatic
+    ? convertQuantityValue(Number(unitMaterial?.stock ?? 0), unitMaterial!.unit, unitTarget)
+    : null
+
+  /**
+   * Sekumpulan aksi yang sama dipakai tabel desktop dan kartu mobile.
+   * Urutan DOM menentukan grid 2 kolom × 2 baris:
+   *   Tambah Stok | Pensil
+   *   Aktifkan/Nonaktifkan | Tempat Sampah
+   */
+  function renderMaterialActions(m: Material) {
+    return (
+      <div className="material-action-grid">
+        {canReceive && (
+          <button
+            type="button"
+            className="button material-stock-button"
+            onClick={() => openReceiptModal(m)}
+            disabled={!m.isActive}
+            title={m.isActive ? `Tambah stok ${m.name}` : 'Bahan nonaktif tidak dapat menerima stok'}
+          >
+            <Plus size={16} aria-hidden="true" />
+            Tambah Stok
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            className="icon-button material-action-icon"
+            onClick={() => openEditModal(m, 'stock')}
+            aria-label={`Penyesuaian bahan baku ${m.name}`}
+            title="Penyesuaian stok dan satuan"
+          >
+            <Pencil size={16} aria-hidden="true" />
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            className="button material-toggle-button"
+            onClick={() => toggleActive(m.id, m.isActive)}
+            title={m.isActive ? 'Nonaktifkan bahan' : 'Aktifkan kembali bahan'}
+          >
+            {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            className="icon-button material-action-icon material-action-danger"
+            onClick={() => requestDelete(m)}
+            disabled={deletingId === m.id}
+            aria-label={`Hapus bahan baku ${m.name}`}
+            title="Hapus bahan baku"
+          >
+            <Trash2 size={16} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="container materials-page">
@@ -722,54 +941,7 @@ export function MaterialsPage() {
                           </td>
                           {(isAdmin || canReceive) && (
                             <td>
-                              <div className="material-row-actions">
-                                <div className="material-action-grid">
-                                  {canReceive && (
-                                    <button
-                                      type="button"
-                                      className="button material-stock-button"
-                                      onClick={() => openReceiptModal(m)}
-                                      disabled={!m.isActive}
-                                      title={m.isActive ? `Tambah stok ${m.name}` : 'Bahan nonaktif tidak dapat menerima stok'}
-                                    >
-                                      <Plus size={16} aria-hidden="true" />
-                                      Tambah Stok
-                                    </button>
-                                  )}
-                                  {isAdmin && (
-                                    <button
-                                      type="button"
-                                      className="icon-button material-action-icon"
-                                      onClick={() => openAdjustModal(m)}
-                                      aria-label={`Penyesuaian stok ${m.name}`}
-                                      title="Penyesuaian stok"
-                                    >
-                                      <Pencil size={16} aria-hidden="true" />
-                                    </button>
-                                  )}
-                                  {isAdmin && (
-                                    <button
-                                      type="button"
-                                      className="button secondary"
-                                      onClick={() => toggleActive(m.id, m.isActive)}
-                                    >
-                                      {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                                    </button>
-                                  )}
-                                  {isAdmin && (
-                                    <button
-                                      type="button"
-                                      className="icon-button material-action-icon material-action-danger"
-                                      onClick={() => requestDelete(m)}
-                                      disabled={deletingId === m.id}
-                                      aria-label={`Hapus bahan baku ${m.name}`}
-                                      title="Hapus bahan baku"
-                                    >
-                                      <Trash2 size={16} aria-hidden="true" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
+                              <div className="material-row-actions">{renderMaterialActions(m)}</div>
                             </td>
                           )}
                         </tr>
@@ -798,53 +970,7 @@ export function MaterialsPage() {
                         </div>
                       </div>
                       {(isAdmin || canReceive) && (
-                        <div className="material-item-side">
-                          <div className="material-action-grid">
-                            {canReceive && (
-                              <button
-                                type="button"
-                                className="button material-stock-button"
-                                onClick={() => openReceiptModal(m)}
-                                disabled={!m.isActive}
-                                title={m.isActive ? `Tambah stok ${m.name}` : 'Bahan nonaktif tidak dapat menerima stok'}
-                              >
-                                Tambah Stok
-                              </button>
-                            )}
-                            {isAdmin && (
-                              <button
-                                type="button"
-                                className="icon-button material-action-icon"
-                                onClick={() => openAdjustModal(m)}
-                                aria-label={`Penyesuaian stok ${m.name}`}
-                                title="Penyesuaian stok"
-                              >
-                                <Pencil size={16} aria-hidden="true" />
-                              </button>
-                            )}
-                            {isAdmin && (
-                              <button
-                                type="button"
-                                className="button secondary"
-                                onClick={() => toggleActive(m.id, m.isActive)}
-                              >
-                                {m.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                              </button>
-                            )}
-                            {isAdmin && (
-                              <button
-                                type="button"
-                                className="icon-button material-action-icon material-action-danger"
-                                onClick={() => requestDelete(m)}
-                                disabled={deletingId === m.id}
-                                aria-label={`Hapus bahan baku ${m.name}`}
-                                title="Hapus bahan baku"
-                              >
-                                <Trash2 size={16} aria-hidden="true" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                        <div className="material-item-side">{renderMaterialActions(m)}</div>
                       )}
                     </article>
                   ))}
@@ -1068,14 +1194,63 @@ export function MaterialsPage() {
                 />
               </div>
               <div className="field">
-                <label htmlFor="m-unit">Satuan Dasar</label>
-                <input
-                  id="m-unit"
-                  value={addForm.unit}
-                  onChange={e => setAddForm(f => ({ ...f, unit: e.target.value }))}
-                  placeholder="Contoh: kg"
+                <label htmlFor="m-unit-kind">Jenis Satuan</label>
+                <select
+                  id="m-unit-kind"
+                  value={addForm.unitKind}
+                  onChange={e => {
+                    const kind = e.target.value as UnitGroup
+                    setAddForm((f) => ({
+                      ...f,
+                      unitKind: kind,
+                      standardUnit: UNIT_GROUPS.find((g) => g.group === kind)?.units[0] ?? 'kg',
+                    }))
+                  }}
                   required
-                />
+                >
+                  {(['mass', 'volume', 'manual'] as UnitGroup[]).map((kind) => (
+                    <option key={kind} value={kind}>
+                      {UNIT_KIND_LABELS[kind]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="m-unit">Satuan Stok Utama</label>
+                {addForm.unitKind === 'manual' ? (
+                  <input
+                    id="m-unit"
+                    value={addForm.manualUnit}
+                    onChange={e => setAddForm(f => ({ ...f, manualUnit: e.target.value }))}
+                    placeholder="Contoh: bungkus, botol, ikat"
+                    maxLength={30}
+                    required
+                  />
+                ) : (
+                  <select
+                    id="m-unit"
+                    value={addForm.standardUnit}
+                    onChange={e => setAddForm(f => ({ ...f, standardUnit: e.target.value }))}
+                    required
+                  >
+                    {UNIT_GROUPS
+                      .filter((group) => group.group === addForm.unitKind)
+                      .map((group) => (
+                        <optgroup key={group.group} label={group.label}>
+                          {group.units.map(code => (
+                            <option key={code} value={code}>
+                              {unitOptionLabel(code)}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                  </select>
+                )}
+                <small>
+                  {addForm.unitKind === 'manual'
+                    ? 'Ketik nama satuan sendiri. Satuan Manual tidak dikonversi otomatis dan tidak dipakai resep.'
+                    : 'Satuan ini menjadi acuan seluruh stok dan perhitungan resep.'}
+                </small>
               </div>
             </div>
             <div className="field">
@@ -1291,76 +1466,243 @@ export function MaterialsPage() {
         </div>
       </MaterialModal>
 
-      {/* Modal penyesuaian stok — Admin (backend juga menegakkan) */}
+      {/* Satu modal bertab untuk pensil: Penyesuaian Stok & Penyesuaian Satuan */}
       <MaterialModal
-        open={activeModal === 'adjust' && isAdmin}
-        title="Penyesuaian Stok"
-        description="Jumlah bernilai tanda: positif menambah stok, negatif mengurangi. Alasan wajib diisi."
+        open={activeModal === 'edit' && isAdmin}
+        title="Penyesuaian Bahan Baku"
+        description="Stok dan satuan utama diubah dengan pencatatan yang jelas. Pilih tab yang dibutuhkan."
         onClose={closeModal}
       >
         <div className="material-modal-body">
-          <form onSubmit={submitAdjustment} className="material-modal-form">
-            <div className="field">
-              <label htmlFor="adj-material">Bahan Baku</label>
-              <select
-                id="adj-material"
-                value={adjForm.materialId}
-                onChange={e => setAdjForm(f => ({ ...f, materialId: e.target.value }))}
-                required
-              >
-                <option value="">Pilih bahan baku</option>
-                {materials.map(m => (
-                  <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                ))}
-              </select>
+          <div className="tab-nav" role="tablist" aria-label="Jenis penyesuaian bahan baku">
+            <button
+              type="button"
+              role="tab"
+              id="edit-tab-stock"
+              aria-controls="edit-panel-stock"
+              aria-selected={editTab === 'stock'}
+              className={`tab-btn ${editTab === 'stock' ? 'active' : ''}`}
+              onClick={() => setEditTab('stock')}
+            >
+              Penyesuaian Stok
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="edit-tab-unit"
+              aria-controls="edit-panel-unit"
+              aria-selected={editTab === 'unit'}
+              className={`tab-btn ${editTab === 'unit' ? 'active' : ''}`}
+              onClick={() => setEditTab('unit')}
+            >
+              Penyesuaian Satuan
+            </button>
+          </div>
+
+          {editTab === 'stock' ? (
+            <div
+              className="tab-panel"
+              role="tabpanel"
+              id="edit-panel-stock"
+              aria-labelledby="edit-tab-stock"
+            >
+              <form onSubmit={submitAdjustment} className="material-modal-form">
+                <div className="field">
+                  <label htmlFor="adj-material">Bahan Baku</label>
+                  <select
+                    id="adj-material"
+                    value={adjForm.materialId}
+                    onChange={e => setAdjForm(f => ({ ...f, materialId: e.target.value }))}
+                    required
+                  >
+                    <option value="">Pilih bahan baku</option>
+                    {materials.map(m => (
+                      <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-grid">
+                  <div className="field">
+                    <label htmlFor="adj-quantity">Jumlah (bertanda)</label>
+                    <input
+                      id="adj-quantity"
+                      type="number"
+                      step="0.001"
+                      value={adjForm.quantity}
+                      onChange={e => setAdjForm(f => ({ ...f, quantity: e.target.value }))}
+                      placeholder="cth. -2.5"
+                      required
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="adj-date">Tanggal Penyesuaian</label>
+                    <DateField
+                      id="adj-date"
+                      value={adjForm.date}
+                      onChange={(date) => setAdjForm(f => ({ ...f, date }))}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="adj-reason">Alasan</label>
+                  <input
+                    id="adj-reason"
+                    value={adjForm.reason}
+                    onChange={e => setAdjForm(f => ({ ...f, reason: e.target.value }))}
+                    required
+                  />
+                </div>
+                {adjMaterial && (
+                  <p className="text-muted optional-hint">
+                    Stok {adjMaterial.name} saat ini: {Number(adjMaterial.stock ?? 0).toLocaleString('id-ID')} {adjMaterial.unit}
+                    {' '}— hasil penyesuaian tidak boleh membuat stok menjadi negatif.
+                  </p>
+                )}
+                <div className="modal-actions">
+                  <button type="button" className="button secondary" onClick={closeModal}>
+                    Batal
+                  </button>
+                  <button className="button" disabled={submittingAdj}>
+                    {submittingAdj ? 'Menyimpan...' : 'Catat Penyesuaian'}
+                  </button>
+                </div>
+              </form>
             </div>
-            <div className="form-grid">
-              <div className="field">
-                <label htmlFor="adj-quantity">Jumlah (bertanda)</label>
-                <input
-                  id="adj-quantity"
-                  type="number"
-                  step="0.001"
-                  value={adjForm.quantity}
-                  onChange={e => setAdjForm(f => ({ ...f, quantity: e.target.value }))}
-                  placeholder="cth. -2.5"
-                  required
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="adj-date">Tanggal Penyesuaian</label>
-                <DateField
-                  id="adj-date"
-                  value={adjForm.date}
-                  onChange={(date) => setAdjForm(f => ({ ...f, date }))}
-                  required
-                />
-              </div>
+          ) : (
+            <div
+              className="tab-panel"
+              role="tabpanel"
+              id="edit-panel-unit"
+              aria-labelledby="edit-tab-unit"
+            >
+              <form onSubmit={submitUnitChange} className="material-modal-form">
+                <div className="form-grid">
+                  <div className="field">
+                    <label htmlFor="unit-current-material">Bahan Baku</label>
+                    <input
+                      id="unit-current-material"
+                      value={unitMaterial?.name || ''}
+                      readOnly
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="unit-current">Satuan Saat Ini</label>
+                    <input id="unit-current" value={unitMaterial?.unit || ''} readOnly />
+                  </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="unit-kind">Jenis Satuan Tujuan</label>
+                  <select
+                    id="unit-kind"
+                    value={unitForm.unitKind}
+                    onChange={e => {
+                      const kind = e.target.value as UnitGroup
+                      setUnitForm(f => ({
+                        ...f,
+                        unitKind: kind,
+                        standardUnit:
+                          kind === 'mass' ? 'g' : kind === 'volume' ? 'L' : f.standardUnit,
+                      }))
+                    }}
+                    required
+                  >
+                    {(['mass', 'volume', 'manual'] as UnitGroup[]).map(kind => (
+                      <option key={kind} value={kind}>{UNIT_KIND_LABELS[kind]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="unit-change-new">Satuan Tujuan</label>
+                  {unitForm.unitKind === 'manual' ? (
+                    <input
+                      id="unit-change-new"
+                      value={unitForm.manualUnit}
+                      onChange={e => setUnitForm(f => ({ ...f, manualUnit: e.target.value }))}
+                      placeholder="Contoh: bungkus, botol, ikat"
+                      maxLength={30}
+                      required
+                    />
+                  ) : (
+                    <select
+                      id="unit-change-new"
+                      value={unitForm.standardUnit}
+                      onChange={e => setUnitForm(f => ({ ...f, standardUnit: e.target.value }))}
+                      required
+                    >
+                      {UNIT_GROUPS
+                        .filter(group => group.group === unitForm.unitKind)
+                        .map(group => (
+                          <optgroup key={group.group} label={group.label}>
+                            {group.units.map(code => (
+                              <option key={code} value={code}>{unitOptionLabel(code)}</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                    </select>
+                  )}
+                  <small>Konversi otomatis hanya Berat↔Berat atau Volume↔Volume.</small>
+                </div>
+                {unitMaterial && unitTarget && (
+                  <div className="optional-block">
+                    {unitAutomatic ? (
+                      <p>
+                        Pratinjau konversi: {formatQty(Number(unitMaterial.stock ?? 0))} {unitMaterial.unit}
+                        {' → '}
+                        {unitPreview === null
+                          ? 'satuan tidak kompatibel'
+                          : `${formatQty(unitPreview)} ${unitTarget}`}
+                      </p>
+                    ) : (
+                      <p>
+                        Tanpa konversi otomatis: stok lama {formatQty(Number(unitMaterial.stock ?? 0))}{' '}
+                        {unitMaterial.unit} tidak diubah oleh sistem. Tentukan stok aktual di satuan baru.
+                      </p>
+                    )}
+                  </div>
+                )}
+                {!unitAutomatic && (
+                  <>
+                    <div className="field">
+                      <label htmlFor="unit-new-stock">Stok Aktual di Satuan Baru</label>
+                      <input
+                        id="unit-new-stock"
+                        type="number"
+                        min="0"
+                        step="0.001"
+                        value={unitForm.newStock}
+                        onChange={e => setUnitForm(f => ({ ...f, newStock: e.target.value }))}
+                        placeholder="0"
+                        required
+                      />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="unit-change-reason">Alasan Penyesuaian</label>
+                      <input
+                        id="unit-change-reason"
+                        value={unitForm.reason}
+                        onChange={e => setUnitForm(f => ({ ...f, reason: e.target.value }))}
+                        placeholder="Contoh: Hasil stok opname"
+                        required
+                      />
+                    </div>
+                  </>
+                )}
+                <div className="modal-actions">
+                  <button type="button" className="button secondary" onClick={closeModal}>
+                    Batal
+                  </button>
+                  <button className="button" disabled={submittingUnit}>
+                    {submittingUnit
+                      ? 'Menyimpan...'
+                      : unitAutomatic
+                        ? 'Terapkan Konversi'
+                        : 'Terapkan Penyesuaian'}
+                  </button>
+                </div>
+              </form>
             </div>
-            <div className="field">
-              <label htmlFor="adj-reason">Alasan</label>
-              <input
-                id="adj-reason"
-                value={adjForm.reason}
-                onChange={e => setAdjForm(f => ({ ...f, reason: e.target.value }))}
-                required
-              />
-            </div>
-            {adjMaterial && (
-              <p className="text-muted optional-hint">
-                Stok {adjMaterial.name} saat ini: {Number(adjMaterial.stock ?? 0).toLocaleString('id-ID')} {adjMaterial.unit}
-                {' '}— hasil penyesuaian tidak boleh membuat stok menjadi negatif.
-              </p>
-            )}
-            <div className="modal-actions">
-              <button type="button" className="button secondary" onClick={closeModal}>
-                Batal
-              </button>
-              <button className="button" disabled={submittingAdj}>
-                {submittingAdj ? 'Menyimpan...' : 'Catat Penyesuaian'}
-              </button>
-            </div>
-          </form>
+          )}
         </div>
       </MaterialModal>
 

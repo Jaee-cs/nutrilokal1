@@ -143,3 +143,12 @@
   margin-top: 0.5rem;
   font-size: 14px;
 }
+
+/* Bantuan pemulihan akun: informatif, tapi tidak menyaingi tombol Masuk. */
+.login-recovery-help {
+  margin: 0.25rem 0 0;
+  color: var(--on-surface-variant);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}

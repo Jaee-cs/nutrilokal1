@@ -18,6 +18,10 @@
  *   tersedia disembunyikan. Jika informasi ditarik atau belum diterbitkan,
  *   respons hanya berisi pemberitahuan bahwa informasi publik tidak
  *   tersedia — tanpa data internal apa pun.
+ * - GET /api/public/qr/:code/product — resolver kompatibilitas untuk QR
+ *   batch yang sudah dicetak. Mengembalikan HANYA productId agar kode QR
+ *   lama dapat dialihkan ke halaman publik produk (satu QR statis per
+ *   produk), tanpa membuka detail batch atau data internal lainnya.
  */
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
@@ -135,6 +139,40 @@ const QR_BATCH_INCLUDE = {
   },
   qrPublication: { select: { publishedAt: true, withdrawnAt: true } },
 } as const;
+
+/**
+ * Kompatibilitas QR lama: terima kode batch aktif maupun kode alias, lalu
+ * kembalikan hanya ID produk. ID produk sudah dipakai terang-terangan di
+ * URL halaman publik (`/produk/:id`), jadi ini bukan data internal dan
+ * cukup untuk mengalihkan QR lama ke satu QR statis per produk.
+ */
+publicRouter.get('/qr/:code/product', async (req, res) => {
+  const code = typeof req.params.code === 'string' ? req.params.code.trim() : '';
+  if (!code) {
+    res.status(404).json({ message: 'QR tidak ditemukan.' });
+    return;
+  }
+
+  let batch = await prisma.batch.findUnique({
+    where: { code },
+    select: { productId: true },
+  });
+  if (!batch) {
+    const alias = await prisma.batchAlias.findUnique({
+      where: { code },
+      select: { batch: { select: { productId: true } } },
+    });
+    batch = alias?.batch ?? null;
+  }
+
+  if (!batch) {
+    res.status(404).json({ message: 'QR tidak ditemukan.' });
+    return;
+  }
+
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ productId: batch.productId });
+});
 
 publicRouter.get('/qr/:code', async (req, res) => {
   const code = typeof req.params.code === 'string' ? req.params.code.trim() : '';

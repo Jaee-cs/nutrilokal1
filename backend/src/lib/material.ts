@@ -21,6 +21,8 @@ export interface PublicMaterial {
   id: string;
   name: string;
   unit: string;
+  /** true bila satuan Manual (teks bebas, tanpa konversi otomatis). */
+  isManual: boolean;
   isActive: boolean;
   stock: number;
   createdAt: Date;
@@ -32,6 +34,7 @@ export function toPublicMaterial(material: Material, stock: number): PublicMater
     id: material.id,
     name: material.name,
     unit: material.unit,
+    isManual: material.isManual,
     isActive: material.isActive,
     stock,
     createdAt: material.createdAt,

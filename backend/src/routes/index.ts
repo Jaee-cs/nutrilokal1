@@ -13,6 +13,7 @@ import { publicRouter } from './public';
 import { reportsRouter } from './reports';
 import { salesRouter } from './sales';
 import { stockAdjustmentsRouter } from './stock-adjustments';
+import { unitReviewsRouter } from './unit-reviews';
 import { usersRouter } from './users';
 
 export const apiRouter = Router();
@@ -25,6 +26,7 @@ apiRouter.use('/materials', materialsRouter);
 apiRouter.use('/productions', productionsRouter);
 apiRouter.use('/batches', batchesRouter);
 apiRouter.use('/stock-adjustments', stockAdjustmentsRouter);
+apiRouter.use('/admin/unit-reviews', unitReviewsRouter);
 apiRouter.use('/sales', salesRouter);
 // Endpoint publik tanpa login (katalog & QR traceability, README 5.6).
 apiRouter.use('/public', publicRouter);

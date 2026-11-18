@@ -43,7 +43,13 @@ import {
   validateQuantity,
   validateUsageList,
 } from '../lib/validate';
-import { convertQuantity } from '../lib/unit-conversion';
+import {
+  convertQuantity,
+  isManualUnit,
+  multiplyRecipeQuantity,
+  parseUnitCode,
+  trimDecimal,
+} from '../lib/unit-conversion';
 import { authenticate, requireAdmin } from '../middleware/auth';
 
 export const productionsRouter = Router();
@@ -55,6 +61,7 @@ interface UsageInput {
   /** Jumlah aktual dalam satuan input pengguna (resep/manual). */
   inputQuantity: number;
   inputQuantityText: string;
+  /** Satuan aktual yang dipakai pengguna (kode baku atau teks Manual). */
   inputUnit: string;
   /** Jumlah hasil konversi ke satuan stok bahan baku. */
   stockQuantity: number;
@@ -120,23 +127,40 @@ productionsRouter.post('/', authenticate, async (req, res) => {
     return;
   }
 
-  const rawUsages: { materialId: string; inputQuantity: number; inputUnit?: string }[] = [];
+  /**
+   * `mode: 'recipe'` (default): backend menghitung sendiri kebutuhan dari
+   * resep × jumlah produk. `mode: 'manual'`: jumlah dan satuan aktual yang
+   * diinput pengguna dipakai, lalu tetap dikonversi dan divalidasi backend.
+   * Item lama tanpa `mode` tetapi membawa `quantity` diperlakukan manual.
+   */
+  const rawUsages: {
+    materialId: string;
+    mode: 'recipe' | 'manual';
+    quantity?: number;
+    unit?: string;
+  }[] = [];
   const seenMaterialIds = new Set<string>();
   for (const item of materials as Record<string, unknown>[]) {
-    const quantity = item.quantity as number;
-    const usageError = validateQuantity(quantity, 'Jumlah pemakaian');
-    if (usageError) {
-      res.status(400).json({ message: usageError });
-      return;
-    }
     const materialId = (item.materialId as string).trim();
     if (seenMaterialIds.has(materialId)) {
       res.status(400).json({ message: 'Bahan yang sama tidak boleh muncul dua kali dalam satu produksi.' });
       return;
     }
     seenMaterialIds.add(materialId);
+
+    const hasQuantity = item.quantity !== undefined && item.quantity !== null;
+    const mode = item.mode === 'manual' || (hasQuantity && item.mode !== 'recipe') ? 'manual' : 'recipe';
+    let quantity: number | undefined;
+    if (mode === 'manual') {
+      const usageError = validateQuantity(item.quantity, 'Jumlah pemakaian');
+      if (usageError) {
+        res.status(400).json({ message: usageError });
+        return;
+      }
+      quantity = item.quantity as number;
+    }
     const rawUnit = typeof item.unit === 'string' ? item.unit.trim() : '';
-    rawUsages.push({ materialId, inputQuantity: quantity, inputUnit: rawUnit || undefined });
+    rawUsages.push({ materialId, mode, quantity, unit: rawUnit || undefined });
   }
 
   const businessDate = parseBusinessDate(productionDate);
@@ -161,43 +185,169 @@ productionsRouter.post('/', authenticate, async (req, res) => {
     return;
   }
 
-  const materialsInDb = await prisma.material.findMany({
-    where: { id: { in: rawUsages.map((u) => u.materialId) } },
+  // Resep produk menjadi sumber kebutuhan. Backend yang mengalikan resep
+  // dengan jumlah hasil dan mengonversinya ke satuan stok utama bahan.
+  const recipeItems = await prisma.productRecipeItem.findMany({
+    where: { productId: product.id },
+    include: { material: true },
   });
+  const recipeByMaterialId = new Map(recipeItems.map((item) => [item.materialId, item]));
+  const requestedIds = new Set<string>([
+    ...rawUsages.map((u) => u.materialId),
+    ...recipeItems.map((item) => item.materialId),
+  ]);
+
+  const materialsInDb = await prisma.material.findMany({ where: { id: { in: [...requestedIds] } } });
   const materialById = new Map(materialsInDb.map((m) => [m.id, m]));
 
-  const usages: UsageInput[] = [];
-  for (const raw of rawUsages) {
-    const material = materialById.get(raw.materialId);
+  for (const id of requestedIds) {
+    const material = materialById.get(id);
     if (!material) {
-      res.status(404).json({ message: `Bahan baku "${raw.materialId}" tidak ditemukan.` });
+      res.status(404).json({ message: `Bahan baku "${id}" tidak ditemukan.` });
       return;
     }
     if (!material.isActive) {
-      res.status(409).json({ message: `Bahan baku "${material.name}" tidak aktif dan tidak dapat dipakai pada produksi baru.` });
+      res.status(409).json({
+        message: `Bahan baku "${material.name}" tidak aktif dan tidak dapat dipakai pada produksi baru.`,
+      });
       return;
     }
+  }
 
-    const inputUnit = raw.inputUnit || material.unit;
-    if (inputUnit.length > 30) {
-      res.status(400).json({ message: `Satuan pemakaian bahan "${material.name}" maksimal 30 karakter.` });
-      return;
+  type BuildOutcome = { ok: true; usage: UsageInput } | { ok: false; message: string };
+
+  function isManualMaterial(material: (typeof materialsInDb)[number]): boolean {
+    return material.isManual || isManualUnit(material.unit);
+  }
+
+  function buildUsage(
+    material: (typeof materialsInDb)[number],
+    inputQuantity: Prisma.Decimal,
+    inputUnit: string
+  ): BuildOutcome {
+    // Manual tidak dikonversi: jumlah input dipakai apa adanya sebagai stok.
+    if (isManualMaterial(material)) {
+      if (inputUnit !== material.unit) {
+        return {
+          ok: false,
+          message: `Satuan Manual "${inputUnit}" harus sama persis dengan satuan stok "${material.unit}". (Bahan: ${material.name})`,
+        };
+      }
+      return {
+        ok: true,
+        usage: {
+          materialId: material.id,
+          inputQuantity: Number(inputQuantity),
+          inputQuantityText: inputQuantity.toFixed(3),
+          inputUnit,
+          stockQuantity: Number(trimDecimal(inputQuantity)),
+          stockQuantityText: inputQuantity.toFixed(3),
+        },
+      };
     }
 
-    const converted = convertQuantity(new Prisma.Decimal(raw.inputQuantity.toFixed(3)), inputUnit, material.unit);
+    const converted = convertQuantity(inputQuantity, inputUnit, material.unit);
     if (!converted.ok) {
-      res.status(400).json({ message: `${converted.message} (Bahan: ${material.name})` });
+      return { ok: false, message: `${converted.message} (Bahan: ${material.name})` };
+    }
+    return {
+      ok: true,
+      usage: {
+        materialId: material.id,
+        inputQuantity: Number(inputQuantity),
+        inputQuantityText: inputQuantity.toFixed(3),
+        inputUnit,
+        stockQuantity: Number(converted.valueText),
+        stockQuantityText: converted.value.toFixed(3),
+      },
+    };
+  }
+
+  function resolveInputUnit(
+    material: (typeof materialsInDb)[number],
+    unit?: string
+  ): { ok: true; code: string } | { ok: false; message: string } {
+    if (isManualMaterial(material)) {
+      const code = unit ?? material.unit;
+      if (code !== material.unit) {
+        return {
+          ok: false,
+          message: `Satuan Manual "${code}" harus sama persis dengan satuan stok "${material.unit}".`,
+        };
+      }
+      return { ok: true, code };
+    }
+    return unit ? parseUnitCode(unit) : { ok: true, code: material.unit };
+  }
+
+  const usages: UsageInput[] = [];
+  const yieldDecimal = new Prisma.Decimal(yieldQuantity.toFixed(3));
+  const manualByMaterialId = new Map(
+    rawUsages.filter((u) => u.mode === 'manual').map((u) => [u.materialId, u])
+  );
+
+  for (const recipe of recipeItems) {
+    const material = materialById.get(recipe.materialId)!;
+    const manual = manualByMaterialId.get(recipe.materialId);
+
+    if (isManualMaterial(material) && !manual) {
+      res.status(400).json({
+        message:
+          `Bahan "${material.name}" bersatuan Manual tidak dapat ditarik otomatis dari resep. ` +
+          'Sertakan jumlah dan satuan pemakaian manual.',
+      });
       return;
     }
 
-    usages.push({
-      materialId: material.id,
-      inputQuantity: raw.inputQuantity,
-      inputQuantityText: raw.inputQuantity.toFixed(3),
-      inputUnit,
-      stockQuantity: Number(converted.valueText),
-      stockQuantityText: converted.value.toFixed(3),
-    });
+    if (manual) {
+      const unit = resolveInputUnit(material, manual.unit);
+      if (!unit.ok) {
+        res.status(400).json({ message: `${unit.message} (Bahan: ${material.name})` });
+        return;
+      }
+      const built = buildUsage(material, new Prisma.Decimal(manual.quantity!.toFixed(3)), unit.code);
+      if (!built.ok) {
+        res.status(400).json({ message: built.message });
+        return;
+      }
+      usages.push(built.usage);
+      continue;
+    }
+
+    const needed = multiplyRecipeQuantity(new Prisma.Decimal(recipe.quantityPerUnit), yieldDecimal);
+    if (!needed.ok) {
+      res.status(400).json({ message: `${needed.message} (Bahan: ${material.name})` });
+      return;
+    }
+    const built = buildUsage(material, needed.value, recipe.recipeUnit);
+    if (!built.ok) {
+      res.status(400).json({ message: built.message });
+      return;
+    }
+    usages.push(built.usage);
+  }
+
+  // Bahan di luar resep wajib menyertakan jumlah/satuan input manual.
+  for (const raw of rawUsages) {
+    if (recipeByMaterialId.has(raw.materialId)) continue;
+    const material = materialById.get(raw.materialId)!;
+    if (raw.mode === 'recipe' || raw.quantity === undefined) {
+      res.status(400).json({
+        message: `Bahan "${material.name}" tidak memiliki resep pada produk ini. Sertakan jumlah dan satuan input manual.`,
+      });
+      return;
+    }
+    const unit = resolveInputUnit(material, raw.unit);
+    if (!unit.ok) {
+      res.status(400).json({ message: `${unit.message} (Bahan: ${material.name})` });
+      return;
+    }
+    const built = buildUsage(material, new Prisma.Decimal(raw.quantity.toFixed(3)), unit.code);
+    if (!built.ok) {
+      res.status(400).json({ message: built.message });
+      return;
+    }
+    usages.push(built.usage);
   }
 
   let key: string | null;

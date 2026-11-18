@@ -1,13 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import api from '../lib/api'
 import { Drawer } from '../components/Drawer'
 import { DateField } from '../components/DateField'
 import { useAuth } from '../hooks/useAuth'
+import { useFormPersistence } from '../hooks/useFormPersistence'
 import { useNotify } from '../components/NotificationProvider'
+import { readFormState } from '../lib/form-state'
 import { wibDateCode, wibDateLabel, isBatchExpired, nextDateCode } from '../utils/batch-expiry'
 import { isoToDateTimeDisplay, todayDateCode } from '../utils/dates'
 import { productPhotoUrl } from '../utils/product-photo'
-import { areUnitsCompatible, convertQuantityValue, formatQty, multiplyRecipeQty, recipeUnitOptions } from '../utils/units'
+import {
+  areUnitsCompatible,
+  convertQuantityValue,
+  formatQty,
+  multiplyRecipeQty,
+  recipeUnitOptions,
+  unitLabel,
+  unitOptionLabel,
+} from '../utils/units'
 
 interface RecipeItem {
   materialId: string
@@ -28,8 +38,155 @@ interface Material {
   id: string
   name: string
   unit: string
+  isManual?: boolean
   isActive: boolean
   stock?: number
+}
+
+/** Bahan Manual tidak punya resep otomatis dan tidak dikonversi. */
+function isManualMaterial(material: Material | undefined): boolean {
+  return !!material && (!!material.isManual || recipeUnitOptions(material.unit).length === 0)
+}
+
+type UsageRow = {
+  rowId: string
+  materialId: string
+  materialQty: string
+  unit: string
+  fromRecipe: boolean
+  recipeQtyPerUnit?: number
+  /** Baris resep yang sudah disentuh pengguna wajib dikirim sebagai input manual. */
+  manualOverride?: boolean
+}
+
+interface ProductionFormSnapshot {
+  form: {
+    productId: string
+    productionDate: string
+    expiryDate: string
+    yieldQuantity: string
+  }
+  usageRows: UsageRow[]
+  manualEdited: boolean
+  recalcNotice: boolean
+}
+
+function emptyProductionForm(): ProductionFormSnapshot['form'] {
+  return { productId: '', productionDate: todayDateCode(), expiryDate: '', yieldQuantity: '' }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Validasi struktur isian lokal sebelum dipakai kembali oleh form. */
+function parseProductionSnapshot(raw: unknown): ProductionFormSnapshot | null {
+  if (!isRecord(raw) || !isRecord(raw.form) || !Array.isArray(raw.usageRows)) return null
+  const asString = (value: unknown): string | null =>
+    typeof value === 'string' ? value : null
+
+  const productId = asString(raw.form.productId)
+  const productionDate = asString(raw.form.productionDate)
+  const expiryDate = asString(raw.form.expiryDate)
+  const yieldQuantity = asString(raw.form.yieldQuantity)
+  if (
+    productId === null ||
+    productionDate === null ||
+    expiryDate === null ||
+    yieldQuantity === null
+  ) {
+    return null
+  }
+
+  const usageRows: UsageRow[] = []
+  for (const item of raw.usageRows) {
+    if (!isRecord(item)) return null
+    const rowId = asString(item.rowId)
+    const materialId = asString(item.materialId)
+    const materialQty = asString(item.materialQty)
+    const unit = asString(item.unit)
+    if (rowId === null || materialId === null || materialQty === null || unit === null) return null
+    usageRows.push({
+      rowId,
+      materialId,
+      materialQty,
+      unit,
+      fromRecipe: item.fromRecipe === true,
+      manualOverride: item.manualOverride === true,
+      ...(typeof item.recipeQtyPerUnit === 'number' && Number.isFinite(item.recipeQtyPerUnit)
+        ? { recipeQtyPerUnit: item.recipeQtyPerUnit }
+        : {}),
+    })
+  }
+  if (usageRows.length === 0) {
+    usageRows.push({ rowId: 'row-restored-0', materialId: '', materialQty: '', unit: '', fromRecipe: false })
+  }
+
+  return {
+    form: { productId, productionDate, expiryDate, yieldQuantity },
+    usageRows,
+    manualEdited: raw.manualEdited === true,
+    recalcNotice: raw.recalcNotice === true,
+  }
+}
+
+/**
+ * Validasi ulang referensi terhadap data master terbaru. Referensi yang sudah
+ * tidak valid dibersihkan satu per satu; field lain tetap dipertahankan.
+ */
+function validateProductionSnapshot(
+  snapshot: ProductionFormSnapshot,
+  products: Product[],
+  materials: Material[]
+): { snapshot: ProductionFormSnapshot; warnings: string[] } {
+  const warnings: string[] = []
+  const form = { ...snapshot.form }
+
+  if (form.productId && !products.some((p) => p.id === form.productId && p.isActive)) {
+    warnings.push('Produk pada isian tersimpan sudah tidak tersedia/nonaktif. Pilih produk lain; isian lain tetap dipertahankan.')
+    form.productId = ''
+  }
+  if (form.productionDate && form.productionDate > todayDateCode()) {
+    warnings.push('Tanggal produksi pada isian tersimpan belum dapat dipilih. Sesuaikan tanggal sebelum menyimpan.')
+  }
+  if (form.productionDate && form.expiryDate && form.expiryDate <= form.productionDate) {
+    warnings.push('Tanggal kedaluwarsa pada isian tersimpan harus setelah tanggal produksi.')
+  }
+  const yieldNumber = Number(form.yieldQuantity)
+  if (form.yieldQuantity && (!Number.isFinite(yieldNumber) || yieldNumber <= 0)) {
+    warnings.push('Jumlah hasil pada isian tersimpan harus lebih dari 0.')
+  }
+
+  const activeMaterials = materials.filter((m) => m.isActive)
+  const usedMaterialIds = new Set<string>()
+  const usageRows = snapshot.usageRows.map((row) => {
+    const next = { ...row }
+    const material = activeMaterials.find((m) => m.id === next.materialId)
+    if (next.materialId && !material) {
+      warnings.push('Bahan pada isian tersimpan sudah tidak tersedia/nonaktif. Pilih bahan lain; jumlahnya tetap dipertahankan.')
+      next.materialId = ''
+    } else if (next.materialId && usedMaterialIds.has(next.materialId)) {
+      warnings.push('Bahan yang sama muncul lebih dari sekali. Pilih bahan lain pada salah satu baris.')
+      next.materialId = ''
+    }
+    if (next.materialId && material) {
+      usedMaterialIds.add(next.materialId)
+      const qty = Number(next.materialQty)
+      const converted = next.unit ? convertQuantityValue(qty, next.unit, material.unit) : qty
+      if (
+        material.stock !== undefined &&
+        Number.isFinite(qty) &&
+        qty > 0 &&
+        converted !== null &&
+        converted > material.stock
+      ) {
+        warnings.push(`Stok ${material.name} tersedia ${formatQty(material.stock)} ${material.unit}; jumlah pada form perlu disesuaikan.`)
+      }
+    }
+    return next
+  })
+
+  return { snapshot: { ...snapshot, form, usageRows }, warnings }
 }
 
 /** Batch pada respons produksi (toPublicProduction). */
@@ -162,28 +319,25 @@ export function ProductionPage() {
   const [productions, setProductions] = useState<Production[]>([])
   const [batches, setBatches] = useState<BatchSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [dataReady, setDataReady] = useState(false)
   // Gagal memuat data halaman tetap tampil inline; hasil tindakan memakai dialog.
   const [loadError, setLoadError] = useState<string | null>(null)
-  type UsageRow = {
-    rowId: string
-    materialId: string
-    materialQty: string
-    unit: string
-    fromRecipe: boolean
-    recipeQtyPerUnit?: number
-  }
+  const [restoreWarnings, setRestoreWarnings] = useState<string[]>([])
 
-  const [form, setForm] = useState({
-    productId: '',
-    productionDate: todayDateCode(),
-    expiryDate: '',
-    yieldQuantity: '',
-  })
-  const [usageRows, setUsageRows] = useState<UsageRow[]>([
-    { rowId: 'row-0', materialId: '', materialQty: '', unit: '', fromRecipe: false },
-  ])
-  const [manualEdited, setManualEdited] = useState(false)
-  const [recalcNotice, setRecalcNotice] = useState(false)
+  const restoredRef = useRef<ProductionFormSnapshot | null | undefined>(undefined)
+  if (restoredRef.current === undefined) {
+    restoredRef.current = readFormState(user?.id, 'production', parseProductionSnapshot)
+  }
+  const validatedRef = useRef(false)
+  const initialSnapshot = restoredRef.current ?? null
+
+  const [form, setForm] = useState(() => initialSnapshot?.form ?? emptyProductionForm())
+  const [usageRows, setUsageRows] = useState<UsageRow[]>(
+    () => initialSnapshot?.usageRows ??
+      [{ rowId: 'row-0', materialId: '', materialQty: '', unit: '', fromRecipe: false }]
+  )
+  const [manualEdited, setManualEdited] = useState(initialSnapshot?.manualEdited ?? false)
+  const [recalcNotice, setRecalcNotice] = useState(initialSnapshot?.recalcNotice ?? false)
   const [submitting, setSubmitting] = useState(false)
 
   // Detail batch (Admin & Operator boleh melihat; mengubah kedaluwarsa: Admin)
@@ -193,6 +347,25 @@ export function ProductionPage() {
   const [expiryDraft, setExpiryDraft] = useState('')
   const [savingExpiry, setSavingExpiry] = useState(false)
   const [clearArmed, setClearArmed] = useState(false)
+
+  const productionSnapshot = useMemo<ProductionFormSnapshot>(
+    () => ({ form, usageRows, manualEdited, recalcNotice }),
+    [form, usageRows, manualEdited, recalcNotice]
+  )
+  const productionDirty = Boolean(
+    form.productId ||
+      form.expiryDate ||
+      form.yieldQuantity ||
+      form.productionDate !== todayDateCode() ||
+      usageRows.some((row) => row.materialId || row.materialQty || row.unit)
+  )
+  const { clearPersisted } = useFormPersistence({
+    userId: user?.id,
+    formKey: 'production',
+    state: productionSnapshot,
+    dirty: productionDirty,
+    enabled: dataReady,
+  })
 
   async function fetchData(): Promise<boolean> {
     try {
@@ -248,32 +421,72 @@ export function ProductionPage() {
   }
 
   useEffect(() => {
-    fetchData()
+    fetchData().then((ok) => {
+      if (ok) setDataReady(true)
+    })
   }, [])
+
+  // Validasi ulang hanya sekali, setelah data master terbaru tersedia.
+  useEffect(() => {
+    if (!dataReady || validatedRef.current) return
+    validatedRef.current = true
+    const restored = restoredRef.current
+    if (!restored) return
+    const checked = validateProductionSnapshot(restored, products, materials)
+    setForm(checked.snapshot.form)
+    setUsageRows(checked.snapshot.usageRows)
+    setManualEdited(checked.snapshot.manualEdited)
+    setRecalcNotice(checked.snapshot.recalcNotice)
+    setRestoreWarnings(checked.warnings)
+  }, [dataReady, products, materials])
 
   function newRowId() {
     return `row-${Math.random().toString(36).slice(2, 10)}`
   }
 
   function emptyUsageRow(): UsageRow {
-    return { rowId: newRowId(), materialId: '', materialQty: '', unit: '', fromRecipe: false }
+    return {
+      rowId: newRowId(),
+      materialId: '',
+      materialQty: '',
+      unit: '',
+      fromRecipe: false,
+      manualOverride: false,
+    }
   }
 
   function buildRecipeRows(product: Product | undefined, yieldValue: string): UsageRow[] {
     const recipe = (product?.recipe ?? []).filter((item) => item.material?.isActive !== false)
     if (recipe.length === 0) return [emptyUsageRow()]
     const yieldNum = Number(yieldValue)
-    return recipe.map((item) => ({
-      rowId: newRowId(),
-      materialId: item.materialId,
-      materialQty:
-        yieldValue && Number.isFinite(yieldNum) && yieldNum > 0
-          ? multiplyRecipeQty(item.quantityPerUnit, yieldNum)
-          : formatQty(item.quantityPerUnit),
-      unit: item.recipeUnit,
-      fromRecipe: true,
-      recipeQtyPerUnit: item.quantityPerUnit,
-    }))
+    const rows = recipe.map((item): UsageRow => {
+      const material = materials.find((m) => m.id === item.materialId)
+      // Bahan Manual tidak boleh ditarik otomatis dari resep. Baris tetap
+      // tampil agar pemakaiannya dicatat manual dengan satuan persis sama.
+      if (isManualMaterial(material)) {
+        return {
+          rowId: newRowId(),
+          materialId: item.materialId,
+          materialQty: '',
+          unit: material!.unit,
+          fromRecipe: false,
+          manualOverride: true,
+        }
+      }
+      return {
+        rowId: newRowId(),
+        materialId: item.materialId,
+        materialQty:
+          yieldValue && Number.isFinite(yieldNum) && yieldNum > 0
+            ? multiplyRecipeQty(item.quantityPerUnit, yieldNum)
+            : formatQty(item.quantityPerUnit),
+        unit: item.recipeUnit,
+        fromRecipe: true,
+        recipeQtyPerUnit: item.quantityPerUnit,
+        manualOverride: false,
+      }
+    })
+    return rows.length > 0 ? rows : [emptyUsageRow()]
   }
 
   const selectedProduct = products.find((p) => p.id === form.productId)
@@ -329,14 +542,60 @@ export function ProductionPage() {
       notify.error('Tanggal kedaluwarsa harus setelah tanggal produksi.')
       return
     }
+
+    // Validasi frontend untuk baris manual. Backend tetap memeriksa ulang.
+    const seenMaterials = new Set<string>()
+    for (const [index, row] of usageRows.entries()) {
+      if (!row.materialId) continue
+      if (seenMaterials.has(row.materialId)) {
+        notify.error(`Bahan baku tidak boleh dimasukkan berulang (baris ${index + 1}).`)
+        return
+      }
+      seenMaterials.add(row.materialId)
+      const material = materials.find((m) => m.id === row.materialId)
+      if (!material) {
+        notify.error(`Bahan baku baris ${index + 1} tidak ditemukan.`)
+        return
+      }
+      const manual = isManualMaterial(material)
+      const mode = row.fromRecipe && !row.manualOverride && !manual ? 'recipe' : 'manual'
+      if (mode === 'manual') {
+        const qty = Number(row.materialQty)
+        if (!Number.isFinite(qty) || qty <= 0) {
+          notify.error(`Jumlah pemakaian baris ${index + 1} harus lebih besar dari nol.`)
+          return
+        }
+        if (manual && row.unit !== material?.unit) {
+          notify.error(
+            `Satuan Manual "${row.unit}" harus sama persis dengan satuan stok "${material?.unit}" (baris ${index + 1}).`
+          )
+          return
+        }
+        if (!manual && !recipeUnitOptions(material.unit).includes(row.unit)) {
+          notify.error(`Satuan pemakaian baris ${index + 1} tidak kompatibel dengan satuan stok ${material.unit}.`)
+          return
+        }
+      }
+    }
+
     setSubmitting(true)
     try {
+      /**
+       * Baris resep yang belum disentuh dikirim tanpa jumlah: backend yang
+       * menghitung `quantityPerUnit × yieldQuantity` dan mengonversinya ke
+       * satuan stok bahan. Baris yang diedit/ditambah manual mengirim jumlah
+       * dan satuan aktual, tetap divalidasi & dikonversi backend.
+       */
       const materialsPayload = usageRows
-        .filter((r) => r.materialId && r.materialQty)
+        .filter((r) => r.materialId && (r.fromRecipe && !r.manualOverride ? true : r.materialQty))
         .map((r) => {
           const material = materials.find((m) => m.id === r.materialId)
+          if (r.fromRecipe && !r.manualOverride && !isManualMaterial(material)) {
+            return { materialId: r.materialId, mode: 'recipe' }
+          }
           return {
             materialId: r.materialId,
+            mode: 'manual',
             quantity: Number(r.materialQty),
             unit: r.unit || material?.unit || undefined,
           }
@@ -350,10 +609,12 @@ export function ProductionPage() {
         materials: materialsPayload,
       }
       const res = await api.post('/productions', payload)
-      setForm({ productId: '', productionDate: todayDateCode(), expiryDate: '', yieldQuantity: '' })
+      clearPersisted()
+      setForm(emptyProductionForm())
       setUsageRows([emptyUsageRow()])
       setManualEdited(false)
       setRecalcNotice(false)
+      setRestoreWarnings([])
       await fetchData()
       notify.success(`Produksi berhasil. Kode batch: ${res.data.production.batch?.code || '-'}`)
     } catch (err: any) {
@@ -365,6 +626,23 @@ export function ProductionPage() {
 
   function markManual() {
     setManualEdited(true)
+  }
+
+  async function resetProductionForm() {
+    if (!productionDirty) return
+    const confirmed = await notify.confirm({
+      title: 'Kosongkan Isian Produksi',
+      message: 'Isian form produksi yang tersimpan akan dihapus dan form kembali kosong. Lanjutkan?',
+      confirmLabel: 'Ya, Kosongkan',
+      tone: 'warning',
+    })
+    if (!confirmed) return
+    clearPersisted()
+    setForm(emptyProductionForm())
+    setUsageRows([emptyUsageRow()])
+    setManualEdited(false)
+    setRecalcNotice(false)
+    setRestoreWarnings([])
   }
 
   function addUsageRow() {
@@ -382,7 +660,11 @@ export function ProductionPage() {
 
   function updateUsageRow(index: number, patch: Partial<UsageRow>) {
     markManual()
-    setUsageRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+    // Sentuhan apa pun pada baris resep mengubahnya menjadi pemakaian aktual:
+    // backend tidak boleh lagi menghitungnya dari resep × hasil.
+    setUsageRows((rows) =>
+      rows.map((row, i) => (i === index ? { ...row, ...patch, manualOverride: true } : row))
+    )
   }
 
   /** Menyimpan tanggal kedaluwarsa sekaligus memvalidasinya (khusus Admin). */
@@ -476,6 +758,17 @@ export function ProductionPage() {
 
       {loadError && !detailOpen && <div className="alert error">{loadError}</div>}
 
+      {restoreWarnings.length > 0 && (
+        <div className="alert warning">
+          <strong>Isian tersimpan sudah diperiksa ulang.</strong>
+          <ul style={{ margin: '0.35rem 0 0', paddingLeft: 18 }}>
+            {restoreWarnings.map((warning, index) => (
+              <li key={index}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="grid-2col">
         {/* Form produksi */}
         <section className="card">
@@ -538,8 +831,9 @@ export function ProductionPage() {
                 {hasRecipe && (
                   <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
                     Resep produk dimuat otomatis untuk 1 {selectedProduct?.unit || 'satuan'}. Jumlah
-                    dihitung dari hasil produksi dan ditampilkan dalam satuan resep. Anda tetap dapat
-                    menyesuaikan, menambah, atau menghapus bahan sesuai kebutuhan aktual.
+                    dihitung backend dari hasil produksi dalam satuan resep, lalu dikonversi ke satuan
+                    stok bahan; pratinjau yang dikurangi ditampilkan di bawah kolom satuan. Anda tetap
+                    dapat menyesuaikan, menambah, atau menghapus bahan sesuai kebutuhan aktual.
                   </p>
                 )}
                 {recalcNotice && hasRecipe && (
@@ -630,15 +924,36 @@ export function ProductionPage() {
                             disabled={!row.materialId}
                           >
                             {unitOptions.map((u) => (
-                              <option key={u} value={u}>{u}</option>
+                              <option key={u} value={u}>{unitOptionLabel(u)}</option>
                             ))}
                           </select>
                         )}
-                        {material && row.unit && row.unit !== material.unit && areUnitsCompatible(row.unit, material.unit) && (
+                        {isManualMaterial(material) && (
                           <span className="text-muted" style={{ fontSize: 11 }}>
-                            ≈ {formatQty(convertQuantityValue(Number(row.materialQty || 0), row.unit, material.unit) ?? 0)} {material.unit}
+                            Satuan Manual dicatat apa adanya, tanpa konversi.
                           </span>
                         )}
+                        {material && row.unit && !areUnitsCompatible(row.unit, material.unit) && (
+                          <span className="text-muted" style={{ fontSize: 11, color: '#b42318' }}>
+                            Satuan tidak kompatibel dengan stok {unitLabel(material.unit)}.
+                          </span>
+                        )}
+                        {material &&
+                          row.unit &&
+                          row.unit !== material.unit &&
+                          areUnitsCompatible(row.unit, material.unit) && (
+                            <span className="text-muted" style={{ fontSize: 11 }}>
+                              ≈{' '}
+                              {formatQty(
+                                convertQuantityValue(
+                                  Number(row.materialQty || 0),
+                                  row.unit,
+                                  material.unit
+                                ) ?? 0
+                              )}{' '}
+                              {unitLabel(material.unit)} yang dikurangi dari stok
+                            </span>
+                          )}
                       </div>
                       <div className="form-actions" style={{ margin: 0 }}>
                         <button
@@ -671,6 +986,14 @@ export function ProductionPage() {
               </div>
             </div>
             <div className="form-actions production-submit-actions">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={resetProductionForm}
+                disabled={submitting}
+              >
+                Kosongkan Form
+              </button>
               <button className="button production-submit-btn" disabled={submitting}>
                 {submitting ? 'Menyimpan...' : 'Simpan Produksi'}
               </button>

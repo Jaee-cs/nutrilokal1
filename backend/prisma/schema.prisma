@@ -77,6 +77,9 @@ enum StockMovementType {
   PRODUCTION_USAGE
   /// Penyesuaian stok oleh Admin (README 5.4); quantity bernilai tanda.
   ADJUSTMENT
+  /// Konversi satuan utama bahan oleh Admin; quantity bernilai tanda
+  /// (selisih stok setelah konversi dikurangi stok sebelum konversi).
+  UNIT_CONVERSION
 }
 
 /// Saldo stok bahan baku per jenis bahan (README 5.2: stok dihitung sebagai
@@ -223,7 +226,8 @@ model ProductionMaterialUsage {
   quantity      Decimal     @db.Decimal(14, 3)
   /// Jumlah aktual yang diinput pengguna; null untuk data lama.
   inputQuantity Decimal?    @db.Decimal(14, 3)
-  /// Satuan input aktual pengguna; null untuk data lama.
+  /// Satuan input aktual pengguna (kode baku atau teks Manual); null untuk
+  /// data lama yang tidak dicatat satuannya dan tetap dipertahankan apa adanya.
   inputUnit     String?
   createdAt     DateTime    @default(now())
   movement      MaterialStockMovement?
@@ -592,8 +596,13 @@ model Material {
   /// tetap tertolak meski dua permintaan datang bersamaan. Bahan nonaktif
   /// tetap menempati kuncinya sehingga tidak bisa dibuat ulang.
   nameKey   String   @unique @map("name_key")
-  /// Satuan dasar bahan baku (mis. "kg", "liter", "sachet").
+  /// Satuan stok utama bahan baku: kode Berat/Volume (mis. "kg", "g", "L")
+  /// atau teks Manual yang diketik pengguna (mis. "bungkus"). Menjadi acuan
+  /// seluruh perhitungan dan penyimpanan stok.
   unit      String
+  /// Penanda satuan Manual. Manual tidak memiliki konversi otomatis dan
+  /// tidak boleh dipakai sebagai bahan resep otomatis.
+  isManual  Boolean  @default(false)
   /// Bahan baku nonaktif tidak dipakai untuk pencatatan baru; riwayat
   /// penerimaan/pemakaian yang tersimpan tetap utuh.
   isActive  Boolean  @default(true)
@@ -621,7 +630,8 @@ model ProductRecipeItem {
   materialId      String
   /// Kebutuhan per 1 satuan produk, dalam satuan resep.
   quantityPerUnit Decimal  @db.Decimal(14, 3)
-  /// Satuan resep; boleh berbeda dari satuan stok bahan (harus kompatibel).
+  /// Satuan resep. Hanya kode Berat/Volume yang diterima; wajib kompatibel
+  /// dengan satuan stok dalam kelompok yang sama. Bahan Manual tidak resep.
   recipeUnit      String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -629,4 +639,23 @@ model ProductRecipeItem {
   @@unique([productId, materialId])
   @@index([materialId])
   @@map("product_recipe_items")
+}
+
+/// Penanda data satuan lama yang tidak bisa dipetakan secara pasti.
+/// Baris dibuat oleh migrasi atau API, tidak pernah mengubah data historis
+/// yang sudah benar. Hanya Admin yang boleh melihat dan menandai selesai.
+model UnitReview {
+  id           String    @id @default(cuid())
+  entityType   String
+  entityId     String
+  field        String
+  legacyValue  String?
+  reason       String
+  createdAt    DateTime  @default(now())
+  reviewedAt   DateTime?
+  reviewedById String?
+  note         String?
+
+  @@index([reviewedAt])
+  @@map("unit_reviews")
 }

@@ -142,14 +142,15 @@ reportsRouter.get('/materials', authenticate, async (req, res) => {
     };
     const quantity = Number(row._sum.quantity ?? 0);
     // Jenis pergerakan bahan baku (README 5.2 dan 5.4); hanya ADJUSTMENT
-    // yang bernilai tanda.
+    // yang bernilai tanda. UNIT_CONVERSION hanya mengubah satuan penyimpanan
+    // stok, bukan pergerakan fisik, jadi sengaja tidak masuk agregasi laporan.
     if (row.type === 'RECEIPT') {
       entry.received += quantity;
     } else if (row.type === 'OPENING_BALANCE') {
       entry.openingBalance += quantity;
     } else if (row.type === 'PRODUCTION_USAGE') {
       entry.used += quantity;
-    } else {
+    } else if (row.type === 'ADJUSTMENT') {
       entry.adjusted += quantity;
     }
     byMaterial.set(row.materialId, entry);

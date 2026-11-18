@@ -14,8 +14,7 @@ import { ProductionPage } from './pages/ProductionPage'
 import { SalesPage } from './pages/SalesPage'
 import { CatalogPage } from './pages/CatalogPage'
 import { ProductPublicPage } from './pages/ProductPublicPage'
-import { QrTracePage } from './pages/QrTracePage'
-import { QrManagementPage } from './pages/QrManagementPage'
+import { LegacyQrRedirectPage } from './pages/LegacyQrRedirectPage'
 import { ProductQrPage } from './pages/ProductQrPage'
 import { ReportsPage } from './pages/ReportsPage'
 
@@ -25,14 +24,13 @@ export default function App() {
       <NotificationProvider>
         <BrowserRouter>
           <Routes>
-            {/* Halaman publik: landing, katalog, halaman produk (QR permanen),
-                dan traceability QR batch — semuanya dapat dibuka tanpa token
-                (README 5.6). */}
+            {/* Halaman publik: landing, katalog, dan halaman produk (QR permanen).
+                /qr/:code hanya shim kompatibilitas untuk QR batch yang sudah
+                dicetak — langsung mengalihkan ke halaman produk. */}
             <Route path="/" element={<LandingPage />} />
             <Route path="catalog" element={<CatalogPage />} />
             <Route path="produk/:id" element={<ProductPublicPage />} />
-            <Route path="qr/:code" element={<QrTracePage />} />
-            <Route path="qr-trace" element={<QrTracePage />} />
+            <Route path="qr/:code" element={<LegacyQrRedirectPage />} />
             <Route path="login" element={<LoginPage />} />
             {/* Halaman internal tetap di balik penjaga autentikasi. */}
             <Route element={<Layout />}>
@@ -54,7 +52,6 @@ export default function App() {
               <Route element={<AdminRoute />}>
                 <Route path="users" element={<UsersPage />} />
                 <Route path="product-qr" element={<ProductQrPage />} />
-                <Route path="qr-management" element={<QrManagementPage />} />
               </Route>
             </Route>
           </Routes>

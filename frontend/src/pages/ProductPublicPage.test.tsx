@@ -77,6 +77,8 @@ describe('ProductPublicPage', () => {
     expect(screen.getByText('Singkong, garam, minyak kelapa.')).toBeInTheDocument()
     expect(screen.getByText('Simpan di tempat kering dan sejuk.')).toBeInTheDocument()
     expect(screen.getByText('4 batch')).toBeInTheDocument()
+    expect(screen.getByText(/QR di kemasan bersifat permanen untuk produk ini/)).toBeInTheDocument()
+    expect(screen.queryByText(/batch terbaru pasti/)).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Informasi Nilai Gizi' })).not.toBeInTheDocument()
 
     expect(mocks.get).toHaveBeenCalledWith('/public/products/p1')

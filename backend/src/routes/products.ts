@@ -25,7 +25,12 @@ import { prisma } from '../lib/prisma';
 import { toPublicProduct } from '../lib/product';
 import { parseNutritionInput } from '../lib/product-nutrition';
 import { PRODUCT_RECIPE_INCLUDE, parseRecipeInput } from '../lib/product-recipe';
-import { validateRecipeUnitCompatibility } from '../lib/unit-conversion';
+import {
+  canonicalUnit,
+  isManualUnit,
+  validateRecipeUnitCompatibility,
+  type UnitCode,
+} from '../lib/unit-conversion';
 import {
   PRODUCT_STOCK_MOVEMENT_INCLUDE,
   buildProductStockHistory,
@@ -344,16 +349,16 @@ async function validateRecipeItems(items: { materialId: string; quantityPerUnit:
   if (items.length === 0) return null as
     | null
     | { message: string; status: number }
-    | { data: { materialId: string; quantityPerUnit: string; recipeUnit: string }[] };
+    | { data: { materialId: string; quantityPerUnit: string; recipeUnit: UnitCode }[] };
 
   const materialIds = items.map((i) => i.materialId);
   const materials = await prisma.material.findMany({
     where: { id: { in: materialIds } },
-    select: { id: true, name: true, unit: true, isActive: true },
+    select: { id: true, name: true, unit: true, isManual: true, isActive: true },
   });
   const byId = new Map(materials.map((m) => [m.id, m]));
 
-  const data: { materialId: string; quantityPerUnit: string; recipeUnit: string }[] = [];
+  const data: { materialId: string; quantityPerUnit: string; recipeUnit: UnitCode }[] = [];
   for (const item of items) {
     const material = byId.get(item.materialId);
     if (!material) {
@@ -365,6 +370,14 @@ async function validateRecipeItems(items: { materialId: string; quantityPerUnit:
         status: 409,
       };
     }
+    if (material.isManual || isManualUnit(material.unit)) {
+      return {
+        message:
+          `Bahan baku "${material.name}" bersatuan Manual tidak dapat dipakai pada resep otomatis. ` +
+          'Catat pemakaiannya secara manual saat produksi.',
+        status: 400,
+      };
+    }
     const compatError = validateRecipeUnitCompatibility(item.recipeUnit, material.unit);
     if (compatError) {
       return { message: `${compatError} (Bahan: ${material.name})`, status: 400 };
@@ -372,7 +385,7 @@ async function validateRecipeItems(items: { materialId: string; quantityPerUnit:
     data.push({
       materialId: material.id,
       quantityPerUnit: item.quantityPerUnit.toFixed(3),
-      recipeUnit: item.recipeUnit.trim(),
+      recipeUnit: canonicalUnit(item.recipeUnit)!,
     });
   }
   return { data, status: 200 as const };

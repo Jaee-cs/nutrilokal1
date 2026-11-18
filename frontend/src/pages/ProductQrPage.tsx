@@ -177,9 +177,7 @@ export function ProductQrPage() {
       <div className="page-head">
         <h1 className="page-title">QR Produk</h1>
         <p className="page-subtitle">
-          Satu QR permanen untuk setiap produk. QR mengarah ke halaman publik
-          produk yang menampilkan informasi produk dan seluruh riwayat batch
-          terbaru, sehingga tidak perlu dibuat ulang saat ada produksi baru.
+          Kelola dan unduh QR Code untuk setiap produk.
         </p>
       </div>
 

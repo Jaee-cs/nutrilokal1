@@ -362,7 +362,7 @@ describe('Integritas dan riwayat', () => {
     const unitChange = await request(app)
       .patch(`/api/materials/${material.id}`)
       .set(auth(adminToken))
-      .send({ unit: 'liter' });
+      .send({ unit: 'L' });
     expect(unitChange.status).toBe(409);
 
     // Data tetap utuh.

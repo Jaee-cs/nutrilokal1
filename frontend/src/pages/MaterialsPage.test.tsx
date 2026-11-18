@@ -48,13 +48,30 @@ const material = {
   isActive: true,
 }
 
+const manualMaterial = {
+  id: 'm2',
+  name: 'Kemasan Khusus',
+  unit: 'bungkus',
+  isManual: true,
+  stock: 4,
+  isActive: true,
+}
+
 function mockMaterials() {
   mocks.get.mockImplementation((url: string) => {
     if (url === '/materials') {
-      return Promise.resolve({ data: { data: [material] } })
+      return Promise.resolve({ data: { data: [material, manualMaterial] } })
     }
     return Promise.reject(new Error(`URL tidak di-mock: ${url}`))
   })
+}
+
+async function openEditDialog(user: ReturnType<typeof userEvent.setup>, name = 'Sapi Segar') {
+  const [button] = await screen.findAllByRole('button', {
+    name: `Penyesuaian bahan baku ${name}`,
+  })
+  await user.click(button)
+  return screen.getByRole('dialog', { name: 'Penyesuaian Bahan Baku' })
 }
 
 describe('MaterialsPage — modal dan aksi per bahan', () => {
@@ -69,7 +86,7 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     mockMaterials()
   })
 
-  it('menghapus navigasi tab dan menampilkan aksi bahan di daftar', async () => {
+  it('menampilkan aksi bahan di daftar tanpa tab di luar modal', async () => {
     render(<MaterialsPage />)
 
     expect((await screen.findAllByText('Sapi Segar')).length).toBeGreaterThan(0)
@@ -79,7 +96,7 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
 
     expect(screen.getByRole('button', { name: 'Tambah Bahan' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Tambah Stok' }).length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('button', { name: 'Penyesuaian stok Sapi Segar' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Penyesuaian bahan baku Sapi Segar' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: 'Hapus bahan baku Sapi Segar' }).length).toBeGreaterThan(0)
   })
 
@@ -91,7 +108,8 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Tambah Bahan Baku' })
     expect(within(dialog).getByLabelText('Nama Bahan')).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Satuan Dasar')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Jenis Satuan')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Satuan Stok Utama')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Deskripsi (opsional)')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Catat saldo awal sekaligus (opsional)')).toBeInTheDocument()
 
@@ -113,14 +131,16 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     expect(within(dialog).getByLabelText('Catatan (opsional)')).toBeInTheDocument()
   })
 
-  it('membuka modal penyesuaian stok dengan bahan yang dipilih sudah terisi', async () => {
+  it('pensil membuka satu modal bertab dengan tab Penyesuaian Stok aktif', async () => {
     const user = userEvent.setup()
     render(<MaterialsPage />)
 
-    const [adjustButton] = await screen.findAllByRole('button', { name: 'Penyesuaian stok Sapi Segar' })
-    await user.click(adjustButton)
-
-    const dialog = screen.getByRole('dialog', { name: 'Penyesuaian Stok' })
+    const dialog = await openEditDialog(user)
+    expect(within(dialog).getByRole('tablist')).toBeInTheDocument()
+    expect(within(dialog).getByRole('tab', { name: 'Penyesuaian Stok' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
     expect(within(dialog).getByLabelText('Bahan Baku')).toHaveValue('m1')
     expect(within(dialog).getByLabelText('Jumlah (bertanda)')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Alasan')).toBeInTheDocument()
@@ -139,10 +159,8 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     )
     await user.click(within(receiptDialog).getByRole('button', { name: 'Batal' }))
 
-    const [adjustButton] = await screen.findAllByRole('button', { name: 'Penyesuaian stok Sapi Segar' })
-    await user.click(adjustButton)
-    const adjustDialog = screen.getByRole('dialog', { name: 'Penyesuaian Stok' })
-    expect(within(adjustDialog).getByLabelText('Tanggal Penyesuaian')).toHaveValue(
+    const dialog = await openEditDialog(user)
+    expect(within(dialog).getByLabelText('Tanggal Penyesuaian')).toHaveValue(
       dateCodeToDisplay(todayDateCode()),
     )
   })
@@ -157,10 +175,7 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     mocks.post.mockResolvedValue({ data: {} })
 
     render(<MaterialsPage />)
-
-    const [adjustButton] = await screen.findAllByRole('button', { name: 'Penyesuaian stok Sapi Segar' })
-    await user.click(adjustButton)
-    const dialog = screen.getByRole('dialog', { name: 'Penyesuaian Stok' })
+    const dialog = await openEditDialog(user)
 
     await user.type(within(dialog).getByLabelText('Jumlah (bertanda)'), '2')
     fireEvent.change(within(dialog).getByLabelText('Tanggal Penyesuaian'), {
@@ -198,6 +213,98 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     expect(mocks.delete).not.toHaveBeenCalled()
   })
 
+  it('form tambah bahan hanya menawarkan Berat/Volume dan input Manual teks bebas', async () => {
+    const user = userEvent.setup()
+    render(<MaterialsPage />)
+
+    await user.click(await screen.findByRole('button', { name: 'Tambah Bahan' }))
+    const dialog = screen.getByRole('dialog', { name: 'Tambah Bahan Baku' })
+    const kindField = within(dialog).getByLabelText('Jenis Satuan')
+    const unitField = within(dialog).getByLabelText('Satuan Stok Utama')
+
+    expect(within(kindField).getByRole('option', { name: 'Berat' })).toBeInTheDocument()
+    expect(within(kindField).getByRole('option', { name: 'Volume' })).toBeInTheDocument()
+    expect(within(kindField).getByRole('option', { name: 'Manual' })).toBeInTheDocument()
+    expect(unitField.tagName).toBe('SELECT')
+    expect(within(unitField).getByRole('group', { name: 'Berat' })).toBeInTheDocument()
+    expect(within(unitField).queryByRole('group', { name: 'Volume' })).not.toBeInTheDocument()
+    expect(within(unitField).queryByRole('group', { name: 'Jumlah' })).not.toBeInTheDocument()
+    expect(within(unitField).getByRole('option', { name: 'g — gram' })).toHaveValue('g')
+
+    await user.selectOptions(within(dialog).getByLabelText('Jenis Satuan'), 'volume')
+    expect(within(unitField).getByRole('group', { name: 'Volume' })).toBeInTheDocument()
+    expect(within(unitField).getByRole('option', { name: 'L — liter' })).toHaveValue('L')
+
+    await user.selectOptions(within(dialog).getByLabelText('Jenis Satuan'), 'manual')
+    expect(within(dialog).getByLabelText('Satuan Stok Utama').tagName).toBe('INPUT')
+    await user.type(within(dialog).getByLabelText('Satuan Stok Utama'), 'ikat')
+    expect(within(dialog).getByLabelText('Satuan Stok Utama')).toHaveValue('ikat')
+  })
+
+  it('Admin mengonversi Berat yang kompatibel setelah konfirmasi', async () => {
+    const user = userEvent.setup()
+    mocks.get.mockImplementation((url: string) => {
+      if (url === '/materials') return Promise.resolve({ data: { data: [material] } })
+      if (url === '/materials/m1/movements') return Promise.resolve({ data: { data: [] } })
+      return Promise.reject(new Error(`URL tidak di-mock: ${url}`))
+    })
+    mocks.post.mockResolvedValue({ data: { currentStock: '12000.000' } })
+    mocks.notify.confirm.mockResolvedValue(true)
+
+    render(<MaterialsPage />)
+    const dialog = await openEditDialog(user)
+    await user.click(within(dialog).getByRole('tab', { name: 'Penyesuaian Satuan' }))
+
+    expect(within(dialog).getByLabelText('Satuan Saat Ini')).toHaveValue('kg')
+    const target = within(dialog).getByLabelText('Satuan Tujuan')
+    expect(within(target).queryByRole('option', { name: 'L — liter' })).not.toBeInTheDocument()
+
+    await user.selectOptions(target, 'g')
+    expect(within(dialog).getByText(/12 kg → 12000 g/)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Terapkan Konversi' }))
+
+    expect(mocks.notify.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Konfirmasi Perubahan Satuan' }),
+    )
+    await waitFor(() =>
+      expect(mocks.post).toHaveBeenCalledWith('/materials/m1/unit-change', {
+        newUnit: 'g',
+        unitKind: 'mass',
+      }),
+    )
+    expect(mocks.notify.success).toHaveBeenCalledWith(
+      expect.stringContaining('Stok menjadi 12000 g')
+    )
+  })
+
+  it('perubahan ke Manual meminta stok eksplisit dan alasan sebelum konfirmasi', async () => {
+    const user = userEvent.setup()
+    mocks.post.mockResolvedValue({ data: { currentStock: '10.000' } })
+    mocks.notify.confirm.mockResolvedValue(true)
+
+    render(<MaterialsPage />)
+    const dialog = await openEditDialog(user)
+    await user.click(within(dialog).getByRole('tab', { name: 'Penyesuaian Satuan' }))
+    await user.selectOptions(within(dialog).getByLabelText('Jenis Satuan Tujuan'), 'manual')
+    await user.type(within(dialog).getByLabelText('Satuan Tujuan'), 'dus')
+    await user.type(within(dialog).getByLabelText('Stok Aktual di Satuan Baru'), '10')
+    await user.type(within(dialog).getByLabelText('Alasan Penyesuaian'), 'Stok opname')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Terapkan Penyesuaian' }))
+
+    await waitFor(() =>
+      expect(mocks.post).toHaveBeenCalledWith('/materials/m1/unit-change', {
+        newUnit: 'dus',
+        unitKind: 'manual',
+        adjustment: { quantity: 10, reason: 'Stok opname' },
+      }),
+    )
+    expect(mocks.notify.success).toHaveBeenCalledWith(
+      expect.stringContaining('tanpa konversi')
+    )
+  })
+
   it('Operator tetap dapat menambah stok tetapi tidak melihat aksi Admin', async () => {
     mocks.role = 'OPERATOR'
     render(<MaterialsPage />)
@@ -205,7 +312,7 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     expect((await screen.findAllByText('Sapi Segar')).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: 'Tambah Bahan' })).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Tambah Stok' }).length).toBeGreaterThan(0)
-    expect(screen.queryByRole('button', { name: 'Penyesuaian stok Sapi Segar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Penyesuaian bahan baku Sapi Segar' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Hapus bahan baku Sapi Segar' })).not.toBeInTheDocument()
   })
 })

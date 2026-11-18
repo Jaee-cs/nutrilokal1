@@ -221,13 +221,13 @@ describe('Master produk — resep bahan baku', () => {
   it('Admin menyimpan resep per 1 unit produk dan resep tampil pada daftar/detail', async () => {
     const bahan = await createMaterial('resep-gram', { unit: 'kg' });
     const product = await createProduct('resep', {
-      recipe: [{ materialId: bahan.id, quantityPerUnit: 150, recipeUnit: 'gram' }],
+      recipe: [{ materialId: bahan.id, quantityPerUnit: 150, recipeUnit: 'g' }],
     });
 
     expect(product.recipe).toHaveLength(1);
     expect(product.recipe[0].materialId).toBe(bahan.id);
     expect(product.recipe[0].quantityPerUnit).toBe(150);
-    expect(product.recipe[0].recipeUnit).toBe('gram');
+    expect(product.recipe[0].recipeUnit).toBe('g');
     expect(product.recipe[0].material).toMatchObject({ id: bahan.id, unit: 'kg', isActive: true });
 
     const list = await request(app).get('/api/products').set(auth(operatorToken));
@@ -243,26 +243,26 @@ describe('Master produk — resep bahan baku', () => {
       request(app).post('/api/products').set(auth(adminToken)).send({ ...base, recipe });
 
     const duplicate = await post([
-      { materialId: bahan.id, quantityPerUnit: 1, recipeUnit: 'gram' },
-      { materialId: bahan.id, quantityPerUnit: 2, recipeUnit: 'gram' },
+      { materialId: bahan.id, quantityPerUnit: 1, recipeUnit: 'g' },
+      { materialId: bahan.id, quantityPerUnit: 2, recipeUnit: 'g' },
     ]);
     expect(duplicate.status).toBe(400);
     expect(duplicate.body.message).toMatch(/berulang/i);
 
-    const missing = await post([{ materialId: 'id-tidak-ada', quantityPerUnit: 1, recipeUnit: 'gram' }]);
+    const missing = await post([{ materialId: 'id-tidak-ada', quantityPerUnit: 1, recipeUnit: 'g' }]);
     expect(missing.status).toBe(404);
 
     const incompatible = await post([{ materialId: bahan.id, quantityPerUnit: 1, recipeUnit: 'ml' }]);
     expect(incompatible.status).toBe(400);
     expect(incompatible.body.message).toMatch(/tidak kompatibel/i);
 
-    const zero = await post([{ materialId: bahan.id, quantityPerUnit: 0, recipeUnit: 'gram' }]);
+    const zero = await post([{ materialId: bahan.id, quantityPerUnit: 0, recipeUnit: 'g' }]);
     expect(zero.status).toBe(400);
   });
 
   it('PATCH dapat mengganti/mengosongkan resep tanpa mengubah field lain; Operator ditolak', async () => {
     const bahanA = await createMaterial('resep-ganti-a', { unit: 'kg' });
-    const bahanB = await createMaterial('resep-ganti-b', { unit: 'liter' });
+    const bahanB = await createMaterial('resep-ganti-b', { unit: 'L' });
     const product = await createProduct('resep-ganti', {
       recipe: [{ materialId: bahanA.id, quantityPerUnit: 2, recipeUnit: 'kg' }],
     });
@@ -294,7 +294,7 @@ describe('Master produk — resep bahan baku', () => {
   it('Bahan yang dipakai resep tidak dapat dihapus dan satuannya tidak dapat diubah lintas kelompok', async () => {
     const bahan = await createMaterial('resep-kunci', { unit: 'kg' });
     const product = await createProduct('resep-kunci', {
-      recipe: [{ materialId: bahan.id, quantityPerUnit: 100, recipeUnit: 'gram' }],
+      recipe: [{ materialId: bahan.id, quantityPerUnit: 100, recipeUnit: 'g' }],
     });
 
     const deleted = await request(app).delete(`/api/materials/${bahan.id}`).set(auth(adminToken));
@@ -304,7 +304,7 @@ describe('Master produk — resep bahan baku', () => {
     const incompatible = await request(app)
       .patch(`/api/materials/${bahan.id}`)
       .set(auth(adminToken))
-      .send({ unit: 'liter' });
+      .send({ unit: 'L' });
     expect(incompatible.status).toBe(409);
     expect(incompatible.body.message).toMatch(/resep/i);
 
@@ -775,7 +775,7 @@ describe('Master bahan baku — CRUD, hak akses, dan validasi', () => {
     const unitPatch = await request(app)
       .patch(`/api/materials/${material.id}`)
       .set(auth(adminToken))
-      .send({ unit: 'liter' });
+      .send({ unit: 'L' });
     expect(unitPatch.status).toBe(409);
 
     // Data tetap utuh.

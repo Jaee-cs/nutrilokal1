@@ -332,9 +332,10 @@ export function ProductPublicPage() {
                   </span>
                 </div>
                 <p className="detail-batch-note">
-                  Batch terbaru ditampilkan lebih dulu. Status dihitung dari
-                  catatan stok, tanggal kedaluwarsa tervalidasi, dan publikasi
-                  informasi terkini.
+                  QR di kemasan bersifat permanen untuk produk ini dan tidak
+                  memilih batch tertentu. Batch terbaru ditampilkan lebih dulu;
+                  status dihitung dari catatan stok, tanggal kedaluwarsa
+                  tervalidasi, dan publikasi informasi terkini.
                 </p>
 
                 {data.batches.length === 0 ? (

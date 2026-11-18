@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import api, { UNAUTHORIZED_EVENT } from '../lib/api'
+import { clearAllFormStates, clearUserFormStates } from '../lib/form-state'
 
 export interface User {
   id: string
@@ -48,6 +49,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>(() =>
     localStorage.getItem(TOKEN_KEY) ? 'restoring' : 'unauthenticated'
   )
+  // Dipakai saat sesi berakhir: id akun terakhir yang dikenal dipakai untuk
+  // menghapus isian form sementara akun itu saja.
+  const userIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (user?.id) userIdRef.current = user.id
+  }, [user?.id])
+
+  function clearSessionFormState() {
+    if (userIdRef.current) clearUserFormStates(userIdRef.current)
+    else clearAllFormStates()
+    userIdRef.current = null
+  }
 
   // Pemulihan sesi setelah hard refresh: validasi token ke backend
   // lewat GET /auth/me — satu-satunya sumber identitas yang tepercaya.
@@ -75,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Token kedaluwarsa/tidak valid/akun nonaktif: akhiri sesi.
           // Interceptor api.ts sudah menghapus token dari storage.
           localStorage.removeItem(TOKEN_KEY)
+          clearSessionFormState()
           setToken(null)
           setUser(null)
           setStatus('unauthenticated')
@@ -98,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!token) return
     function onUnauthorized() {
+      clearSessionFormState()
       setUser(null)
       setStatus('unauthenticated')
       setToken(null)
@@ -108,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function login(t: string, u: User) {
     localStorage.setItem(TOKEN_KEY, t)
+    userIdRef.current = u.id
     setToken(t)
     setUser(u)
     setStatus('authenticated')
@@ -115,6 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function logout() {
     localStorage.removeItem(TOKEN_KEY)
+    clearSessionFormState()
     setToken(null)
     setUser(null)
     setStatus('unauthenticated')

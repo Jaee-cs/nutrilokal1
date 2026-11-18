@@ -1059,7 +1059,7 @@ describe('Integritas dan riwayat', () => {
     ).toBe(409);
     expect((await request(app).delete(`/api/materials/${bahan.id}`).set(auth(adminToken))).status).toBe(409);
     expect(
-      (await request(app).patch(`/api/materials/${bahan.id}`).set(auth(adminToken)).send({ unit: 'liter' })).status
+      (await request(app).patch(`/api/materials/${bahan.id}`).set(auth(adminToken)).send({ unit: 'L' })).status
     ).toBe(409);
 
     // Riwayat tetap utuh.
@@ -1071,10 +1071,10 @@ describe('Integritas dan riwayat', () => {
 describe('Produksi — resep dan konversi satuan', () => {
   it('Mengonversi gram/ml ke satuan stok kg/liter dan menyimpan jumlah input aktual', async () => {
     const bahanBerat = await createMaterial('konversi-berat', { unit: 'kg' });
-    const bahanVolume = await createMaterial('konversi-volume', { unit: 'liter' });
+    const bahanVolume = await createMaterial('konversi-volume', { unit: 'L' });
     const product = await createProduct('konversi', {
       recipe: [
-        { materialId: bahanBerat.id, quantityPerUnit: 150, recipeUnit: 'gram' },
+        { materialId: bahanBerat.id, quantityPerUnit: 150, recipeUnit: 'g' },
         { materialId: bahanVolume.id, quantityPerUnit: 250, recipeUnit: 'ml' },
       ],
     });
@@ -1088,7 +1088,7 @@ describe('Produksi — resep dan konversi satuan', () => {
       productionDate: pastCode(2),
       yieldQuantity: 2,
       materials: [
-        { materialId: bahanBerat.id, quantity: 300, unit: 'gram' },
+        { materialId: bahanBerat.id, quantity: 300, unit: 'g' },
         { materialId: bahanVolume.id, quantity: 500, unit: 'ml' },
       ],
     });
@@ -1104,7 +1104,7 @@ describe('Produksi — resep dan konversi satuan', () => {
       inputUnit: string | null;
     }[];
     const berat = usages.find((u) => u.materialId === bahanBerat.id);
-    expect(berat).toMatchObject({ quantity: 0.3, inputQuantity: 300, inputUnit: 'gram' });
+    expect(berat).toMatchObject({ quantity: 0.3, inputQuantity: 300, inputUnit: 'g' });
     const volume = usages.find((u) => u.materialId === bahanVolume.id);
     expect(volume).toMatchObject({ quantity: 0.5, inputQuantity: 500, inputUnit: 'ml' });
 
@@ -1113,7 +1113,7 @@ describe('Produksi — resep dan konversi satuan', () => {
       where: { materialId: bahanBerat.id, type: 'PRODUCTION_USAGE' },
     });
     expect(Number(movement.quantity)).toBe(0.3);
-    expect(movement.reason).toContain('300.000 gram = 0.300 kg');
+    expect(movement.reason).toContain('300.000 g = 0.300 kg');
   });
 
   it('Menolak satuan pemakaian yang tidak kompatibel tanpa mengubah stok atau membuat catatan', async () => {

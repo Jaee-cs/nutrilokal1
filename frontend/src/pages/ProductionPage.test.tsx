@@ -2,14 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ProductionPage } from './ProductionPage'
+import { formStateKey, readFormState, writeFormState } from '../lib/form-state'
 import { addDaysToDateCode, todayDateCode } from '../utils/dates'
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
   patch: vi.fn(),
+  userId: 'u1',
   role: 'ADMIN' as 'ADMIN' | 'OPERATOR',
   productions: [] as unknown[],
+  materials: [] as unknown[],
   notify: {
     success: vi.fn(),
     error: vi.fn(),
@@ -21,7 +24,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../hooks/useAuth', () => ({
   useAuth: () => ({
-    user: { id: 'u1', username: 'admin', name: 'Admin Uji', role: mocks.role },
+    user: { id: mocks.userId, username: 'admin', name: 'Admin Uji', role: mocks.role },
   }),
 }))
 
@@ -98,7 +101,7 @@ function mockApi() {
       return Promise.resolve({ data: { data: [product] } })
     }
     if (url === '/materials') {
-      return Promise.resolve({ data: { data: [] } })
+      return Promise.resolve({ data: { data: mocks.materials } })
     }
     if (url === '/productions') {
       return Promise.resolve({ data: { data: mocks.productions } })
@@ -119,11 +122,33 @@ function mockApi() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  localStorage.clear()
+  mocks.userId = 'u1'
   mocks.role = 'ADMIN'
   mocks.productions = []
+  mocks.materials = []
   mockApi()
   mocks.notify.confirm.mockResolvedValue(true)
 })
+
+const readAnyFormState = (userId: string, formKey: 'production' | 'sales') =>
+  readFormState(userId, formKey, (raw) => raw)
+
+function validProductionSnapshot() {
+  return {
+    form: {
+      productId: 'p1',
+      productionDate: '2026-10-01',
+      expiryDate: '2026-12-01',
+      yieldQuantity: '10',
+    },
+    usageRows: [
+      { rowId: 'row-uji', materialId: '', materialQty: '', unit: '', fromRecipe: false },
+    ],
+    manualEdited: false,
+    recalcNotice: false,
+  }
+}
 
 describe('ProductionPage - resep bahan baku dan konversi satuan', () => {
   const recipeProduct = {
@@ -136,11 +161,11 @@ describe('ProductionPage - resep bahan baku dan konversi satuan', () => {
         materialId: 'm-berat',
         material: { id: 'm-berat', name: 'Tepung', unit: 'kg', isActive: true },
         quantityPerUnit: 150,
-        recipeUnit: 'gram',
+        recipeUnit: 'g',
       },
       {
         materialId: 'm-volume',
-        material: { id: 'm-volume', name: 'Susu', unit: 'liter', isActive: true },
+        material: { id: 'm-volume', name: 'Susu', unit: 'L', isActive: true },
         quantityPerUnit: 250,
         recipeUnit: 'ml',
       },
@@ -149,8 +174,8 @@ describe('ProductionPage - resep bahan baku dan konversi satuan', () => {
 
   const recipeMaterials = [
     { id: 'm-berat', name: 'Tepung', unit: 'kg', isActive: true, stock: 10 },
-    { id: 'm-volume', name: 'Susu', unit: 'liter', isActive: true, stock: 5 },
-    { id: 'm-lain', name: 'Minyak', unit: 'liter', isActive: true, stock: 3 },
+    { id: 'm-volume', name: 'Susu', unit: 'L', isActive: true, stock: 5 },
+    { id: 'm-lain', name: 'Minyak', unit: 'L', isActive: true, stock: 3 },
   ]
 
   function mockRecipeApi() {
@@ -174,7 +199,7 @@ describe('ProductionPage - resep bahan baku dan konversi satuan', () => {
     // Sebelum hasil diisi, jumlah ditampilkan per 1 unit produk.
     expect(screen.getAllByLabelText('Jumlah Digunakan')[0]).toHaveValue(150)
     expect(screen.getAllByLabelText('Jumlah Digunakan')[1]).toHaveValue(250)
-    expect(screen.getAllByLabelText('Satuan')[0]).toHaveValue('gram')
+    expect(screen.getAllByLabelText('Satuan')[0]).toHaveValue('g')
     expect(screen.getAllByLabelText('Satuan')[1]).toHaveValue('ml')
 
     fireEvent.change(screen.getByLabelText('Jumlah Hasil'), { target: { value: '2' } })
@@ -222,12 +247,134 @@ describe('ProductionPage - resep bahan baku dan konversi satuan', () => {
     await user.selectOptions(screen.getByLabelText('Produk'), 'p-recipe')
     await user.selectOptions(screen.getAllByLabelText('Bahan Baku')[0], 'm-lain')
 
-    // Satuan resep "gram" tidak kompatibel dengan bahan baru bersatuan liter,
+    // Satuan resep g tidak kompatibel dengan bahan baru bersatuan L,
     // sehingga baris memakai satuan stok bahan baru dan dapat diubah.
     const unitField = screen.getAllByLabelText('Satuan')[0]
-    expect(unitField).toHaveValue('liter')
+    expect(unitField).toHaveValue('L')
     expect(unitField.tagName).toBe('SELECT')
     expect(screen.getAllByLabelText('Bahan Baku')[0]).toHaveValue('m-lain')
+  })
+
+  it('mengirim baris resep tanpa quantity agar backend yang menghitung', async () => {
+    mockRecipeApi()
+    const user = userEvent.setup()
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Produk Resep/ })
+
+    await user.selectOptions(screen.getByLabelText('Produk'), 'p-recipe')
+    fireEvent.change(screen.getByLabelText('Tanggal Produksi'), { target: { value: '2026-10-01' } })
+    fireEvent.change(screen.getByLabelText('Tanggal Kedaluwarsa'), { target: { value: '2026-12-01' } })
+    fireEvent.change(screen.getByLabelText('Jumlah Hasil'), { target: { value: '2' } })
+    fireEvent.submit(screen.getByRole('button', { name: 'Simpan Produksi' }).closest('form')!)
+
+    await waitFor(() => {
+      expect(mocks.post).toHaveBeenCalledWith(
+        '/productions',
+        expect.objectContaining({
+          yieldQuantity: 2,
+          materials: [
+            { materialId: 'm-berat', mode: 'recipe' },
+            { materialId: 'm-volume', mode: 'recipe' },
+          ],
+        })
+      )
+    })
+  })
+
+  it('mengirim baris yang disesuaikan sebagai pemakaian manual', async () => {
+    mockRecipeApi()
+    const user = userEvent.setup()
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Produk Resep/ })
+
+    await user.selectOptions(screen.getByLabelText('Produk'), 'p-recipe')
+    fireEvent.change(screen.getByLabelText('Tanggal Produksi'), { target: { value: '2026-10-01' } })
+    fireEvent.change(screen.getByLabelText('Tanggal Kedaluwarsa'), { target: { value: '2026-12-01' } })
+    fireEvent.change(screen.getByLabelText('Jumlah Hasil'), { target: { value: '2' } })
+    fireEvent.change(screen.getAllByLabelText('Jumlah Digunakan')[0], { target: { value: '999' } })
+    fireEvent.submit(screen.getByRole('button', { name: 'Simpan Produksi' }).closest('form')!)
+
+    await waitFor(() => {
+      expect(mocks.post).toHaveBeenCalledWith(
+        '/productions',
+        expect.objectContaining({
+          materials: [
+            { materialId: 'm-berat', mode: 'manual', quantity: 999, unit: 'g' },
+            { materialId: 'm-volume', mode: 'recipe' },
+          ],
+        })
+      )
+    })
+  })
+
+  it('bahan Manual tidak ditarik otomatis dari resep dan dicatat apa adanya', async () => {
+    const manualProduct = {
+      id: 'p-manual',
+      name: 'Produk Manual',
+      unit: 'pcs',
+      isActive: true,
+      recipe: [
+        {
+          materialId: 'm-manual',
+          material: { id: 'm-manual', name: 'Kemasan', unit: 'bungkus', isActive: true },
+          quantityPerUnit: 2,
+          recipeUnit: 'bungkus',
+        },
+      ],
+    }
+    mocks.get.mockImplementation((url: string) => {
+      if (url === '/products') return Promise.resolve({ data: { data: [manualProduct] } })
+      if (url === '/materials') {
+        return Promise.resolve({
+          data: {
+            data: [
+              {
+                id: 'm-manual',
+                name: 'Kemasan',
+                unit: 'bungkus',
+                isManual: true,
+                isActive: true,
+                stock: 5,
+              },
+            ],
+          },
+        })
+      }
+      if (url === '/productions') return Promise.resolve({ data: { data: [] } })
+      if (url === '/batches') return Promise.resolve({ data: { data: [] } })
+      return Promise.reject(new Error(`URL tidak di-mock: ${url}`))
+    })
+
+    const user = userEvent.setup()
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Produk Manual/ })
+    await user.selectOptions(screen.getByLabelText('Produk'), 'p-manual')
+
+    // Jumlah tidak diisi otomatis dari resep; satuan dipertahankan persis.
+    expect(screen.getByLabelText('Jumlah Digunakan')).toHaveValue(null)
+    expect(screen.getByLabelText('Satuan')).toHaveValue('bungkus')
+    expect(screen.getByText(/Satuan Manual dicatat apa adanya, tanpa konversi/)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Tanggal Produksi'), { target: { value: '2026-10-01' } })
+    fireEvent.change(screen.getByLabelText('Tanggal Kedaluwarsa'), { target: { value: '2026-12-01' } })
+    fireEvent.change(screen.getByLabelText('Jumlah Hasil'), { target: { value: '2' } })
+
+    // Validasi frontend menolak jumlah kosong sebelum request dikirim.
+    fireEvent.submit(screen.getByRole('button', { name: 'Simpan Produksi' }).closest('form')!)
+    await waitFor(() => expect(mocks.notify.error).toHaveBeenCalled())
+    expect(mocks.post).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Jumlah Digunakan'), { target: { value: '3' } })
+    fireEvent.submit(screen.getByRole('button', { name: 'Simpan Produksi' }).closest('form')!)
+
+    await waitFor(() => {
+      expect(mocks.post).toHaveBeenCalledWith(
+        '/productions',
+        expect.objectContaining({
+          materials: [{ materialId: 'm-manual', mode: 'manual', quantity: 3, unit: 'bungkus' }],
+        })
+      )
+    })
   })
 })
 
@@ -349,5 +496,126 @@ describe('ProductionPage - tanggal kedaluwarsa', () => {
     ).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('Tanggal Kedaluwarsa')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: 'Simpan Tanggal' })).not.toBeInTheDocument()
+  })
+})
+
+describe('ProductionPage - pemulihan isian lokal', () => {
+  function expectRestoredForm() {
+    expect(screen.getByLabelText('Produk')).toHaveValue('p1')
+    expect(screen.getByLabelText('Tanggal Produksi')).toHaveValue('01/10/2026')
+    expect(screen.getByLabelText('Tanggal Kedaluwarsa')).toHaveValue('01/12/2026')
+    expect(screen.getByLabelText('Jumlah Hasil')).toHaveValue(10)
+  }
+
+  it('memulihkan isian setelah halaman ditutup dan dibuka lagi', async () => {
+    writeFormState('u1', 'production', validProductionSnapshot())
+
+    const first = render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Keripik Uji/ })
+    expectRestoredForm()
+    first.unmount()
+
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Keripik Uji/ })
+    expectRestoredForm()
+  })
+
+  it('menyimpan perubahan dengan debounce dan memisahkan isian antar akun', async () => {
+    const first = render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Keripik Uji/ })
+
+    fireEvent.change(screen.getByLabelText('Jumlah Hasil'), { target: { value: '7' } })
+    await waitFor(() => {
+      expect(readAnyFormState('u1', 'production')).toMatchObject({
+        form: { yieldQuantity: '7' },
+      })
+    }, { timeout: 2000 })
+    expect(readAnyFormState('u2', 'production')).toBeNull()
+
+    first.unmount()
+    mocks.userId = 'u2'
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Keripik Uji/ })
+    expect(screen.getByLabelText('Jumlah Hasil')).toHaveValue(null)
+    expect(readAnyFormState('u1', 'production')).toMatchObject({
+      form: { yieldQuantity: '7' },
+    })
+    expect(localStorage.getItem(formStateKey('u1', 'sales'))).toBeNull()
+  })
+
+  it('menyimpan ketikan terakhir saat halaman dibongkar sebelum debounce selesai', async () => {
+    const first = render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Keripik Uji/ })
+
+    fireEvent.change(screen.getByLabelText('Jumlah Hasil'), { target: { value: '9' } })
+    first.unmount()
+
+    expect(readAnyFormState('u1', 'production')).toMatchObject({
+      form: { yieldQuantity: '9' },
+    })
+  })
+
+  it('mempertahankan isian saat transaksi gagal', async () => {
+    writeFormState('u1', 'production', validProductionSnapshot())
+    mocks.post.mockRejectedValueOnce(new Error('Gagal menyimpan'))
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Keripik Uji/ })
+
+    fireEvent.submit(screen.getByRole('button', { name: 'Simpan Produksi' }).closest('form')!)
+
+    await waitFor(() => expect(mocks.notify.error).toHaveBeenCalled())
+    expectRestoredForm()
+    expect(readAnyFormState('u1', 'production')).toMatchObject({
+      form: { yieldQuantity: '10' },
+    })
+  })
+
+  it('menghapus isian dan tidak menimpa ulang setelah transaksi berhasil', async () => {
+    writeFormState('u1', 'production', validProductionSnapshot())
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Keripik Uji/ })
+
+    fireEvent.submit(screen.getByRole('button', { name: 'Simpan Produksi' }).closest('form')!)
+
+    await waitFor(() => expect(mocks.notify.success).toHaveBeenCalled())
+    expect(screen.getByLabelText('Jumlah Hasil')).toHaveValue(null)
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    expect(readAnyFormState('u1', 'production')).toBeNull()
+  })
+
+  it('meminta konfirmasi sebelum mengosongkan form', async () => {
+    writeFormState('u1', 'production', validProductionSnapshot())
+    const user = userEvent.setup()
+    render(<ProductionPage />)
+    await screen.findByRole('option', { name: /Keripik Uji/ })
+
+    mocks.notify.confirm.mockResolvedValueOnce(false)
+    await user.click(screen.getByRole('button', { name: 'Kosongkan Form' }))
+    expectRestoredForm()
+
+    mocks.notify.confirm.mockResolvedValueOnce(true)
+    await user.click(screen.getByRole('button', { name: 'Kosongkan Form' }))
+    expect(screen.getByLabelText('Jumlah Hasil')).toHaveValue(null)
+    await waitFor(() => expect(readAnyFormState('u1', 'production')).toBeNull())
+  })
+
+  it('memberi tahu referensi invalid tanpa menghapus isian lain', async () => {
+    mocks.materials = [
+      { id: 'm1', name: 'Tepung', unit: 'kg', isActive: true, stock: 1 },
+    ]
+    const snapshot = validProductionSnapshot()
+    snapshot.form.productId = 'p-hilang'
+    snapshot.usageRows = [
+      { rowId: 'row-invalid', materialId: 'm-hilang', materialQty: '2', unit: 'kg', fromRecipe: false },
+    ]
+    writeFormState('u1', 'production', snapshot)
+
+    render(<ProductionPage />)
+
+    expect(await screen.findByText(/Produk pada isian tersimpan sudah tidak tersedia/i)).toBeInTheDocument()
+    expect(screen.getByText(/Bahan pada isian tersimpan sudah tidak tersedia/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Produk')).toHaveValue('')
+    expect(screen.getByLabelText('Jumlah Hasil')).toHaveValue(10)
+    expect(screen.getByLabelText('Jumlah Digunakan')).toHaveValue(2)
   })
 })

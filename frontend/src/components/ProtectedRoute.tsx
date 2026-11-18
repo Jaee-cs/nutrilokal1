@@ -6,7 +6,7 @@ import { useAuth } from '../hooks/useAuth'
  *
  * Saat status masih 'restoring' (memvalidasi token ke GET /auth/me),
  * JANGAN mengarahkan ke mana pun — hanya tampilkan pemuatan. Redirect
- * prematur adalah akar penyebab hard refresh di /users & /qr-management
+ * prematur adalah akar penyebab hard refresh di /users & /product-qr
  * terlempar ke /dashboard (F12).
  *
  * Pengguna yang wajib mengganti kata sandi diarahkan ke /change-password

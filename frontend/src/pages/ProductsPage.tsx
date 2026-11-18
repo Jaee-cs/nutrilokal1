@@ -8,7 +8,13 @@ import { useAuth } from '../hooks/useAuth'
 import { useNotify } from '../components/NotificationProvider'
 import { isoToDateDisplay, isoToDateTimeDisplay } from '../utils/dates'
 import { productPhotoUrl, uploadProductPhoto } from '../utils/product-photo'
-import { recipeUnitOptions } from '../utils/units'
+import {
+  convertQuantityValue,
+  formatQty,
+  recipeUnitOptions,
+  unitLabel,
+  unitOptionLabel,
+} from '../utils/units'
 
 interface RecipeMaterial {
   id: string
@@ -58,7 +64,13 @@ interface MaterialOption {
   id: string
   name: string
   unit: string
+  isManual?: boolean
   isActive: boolean
+}
+
+/** Bahan Manual dicatat manual saat produksi, bukan bahan resep otomatis. */
+function isManualMaterial(material: Pick<MaterialOption, 'unit' | 'isManual'>): boolean {
+  return !!material.isManual || recipeUnitOptions(material.unit).length === 0
 }
 
 type MovementType =
@@ -688,6 +700,21 @@ export function ProductsPage() {
       }
       if (seen.has(row.materialId)) {
         return { error: 'Bahan yang sama tidak boleh dimasukkan berulang dalam satu resep.' }
+      }
+      const material = materials.find((m) => m.id === row.materialId)
+      if (!material) {
+        return { error: `Bahan resep baris ${i + 1} tidak ditemukan.` }
+      }
+      if (isManualMaterial(material)) {
+        return {
+          error: `Bahan "${material.name}" bersatuan Manual tidak dapat dipakai pada resep otomatis. Catat pemakaiannya secara manual saat produksi.`,
+        }
+      }
+      const options = recipeUnitOptions(material.unit)
+      if (!options.includes(row.recipeUnit.trim())) {
+        return {
+          error: `Satuan resep baris ${i + 1} tidak kompatibel dengan satuan stok ${material.unit}. Pilih ${options.join(', ')}.`,
+        }
       }
       seen.add(row.materialId)
       const qty = Number(row.quantityPerUnit)
@@ -1326,7 +1353,7 @@ export function ProductsPage() {
                   id="p-unit"
                   value={form.unit}
                   onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
-                  placeholder="Contoh: pcs"
+                  placeholder="Contoh: bungkus, botol, kg"
                   required
                 />
                 {editTarget && (
@@ -1567,7 +1594,7 @@ export function ProductsPage() {
                       const mat = materials.find((m) => m.id === row.materialId)
                       return (
                         <li key={idx}>
-                          {(mat?.name || 'Bahan')} — {row.quantityPerUnit} {row.recipeUnit}
+                          {(mat?.name || 'Bahan')} — {row.quantityPerUnit} {unitLabel(row.recipeUnit)}
                         </li>
                       )
                     })}
@@ -1580,11 +1607,22 @@ export function ProductsPage() {
                   )}
                   {recipeRows.map((row, idx) => {
                     const selectedMaterial = materials.find((m) => m.id === row.materialId)
+                    const manualSelected = !!selectedMaterial && isManualMaterial(selectedMaterial)
                     const unitOptions = selectedMaterial
                       ? recipeUnitOptions(selectedMaterial.unit, row.recipeUnit)
                       : row.recipeUnit
                         ? [row.recipeUnit]
                         : []
+                    // Pratinjau hanya untuk membantu pemeriksaan; backend yang
+                    // menghitung dan menyimpan jumlah sebenarnya.
+                    const converted =
+                      selectedMaterial && row.recipeUnit && Number(row.quantityPerUnit) > 0
+                        ? convertQuantityValue(
+                            Number(row.quantityPerUnit),
+                            row.recipeUnit,
+                            selectedMaterial.unit
+                          )
+                        : null
                     return (
                       <div key={idx} className="form-row" style={{ alignItems: 'flex-end' }}>
                         <div className="field" style={{ flex: 2, minWidth: 140 }}>
@@ -1607,6 +1645,7 @@ export function ProductsPage() {
                           >
                             <option value="">Pilih bahan</option>
                             {materials
+                              .filter((m) => !isManualMaterial(m) || m.id === row.materialId)
                               .filter((m) => m.isActive || m.id === row.materialId)
                               .filter((m) => !recipeRows.some((r, i) => i !== idx && r.materialId === m.id))
                               .map((m) => (
@@ -1630,25 +1669,27 @@ export function ProductsPage() {
                         </div>
                         <div className="field" style={{ flex: 1, minWidth: 100 }}>
                           <label htmlFor={`recipe-unit-${idx}`}>Satuan Resep</label>
-                          {unitOptions.length > 1 ? (
-                            <select
-                              id={`recipe-unit-${idx}`}
-                              value={row.recipeUnit}
-                              onChange={(e) => updateRecipeRow(idx, { recipeUnit: e.target.value })}
-                              disabled={!row.materialId}
-                            >
-                              <option value="">Pilih satuan</option>
-                              {unitOptions.map((u) => (
-                                <option key={u} value={u}>{u}</option>
-                              ))}
-                            </select>
+                          <select
+                            id={`recipe-unit-${idx}`}
+                            value={row.recipeUnit}
+                            onChange={(e) => updateRecipeRow(idx, { recipeUnit: e.target.value })}
+                            disabled={!row.materialId}
+                          >
+                            <option value="">Pilih satuan</option>
+                            {unitOptions.map((u) => (
+                              <option key={u} value={u}>{unitOptionLabel(u)}</option>
+                            ))}
+                          </select>
+                          {manualSelected ? (
+                            <small style={{ color: 'var(--error)' }}>
+                              Bahan Manual tidak boleh masuk resep otomatis. Pilih bahan lain atau hapus baris ini.
+                            </small>
                           ) : (
-                            <input
-                              id={`recipe-unit-${idx}`}
-                              value={row.recipeUnit || selectedMaterial?.unit || ''}
-                              onChange={(e) => updateRecipeRow(idx, { recipeUnit: e.target.value })}
-                              disabled={!row.materialId}
-                            />
+                            converted !== null && selectedMaterial && row.recipeUnit !== selectedMaterial.unit && (
+                              <small>
+                                Setara {formatQty(converted)} {unitLabel(selectedMaterial.unit)} per 1 produk
+                              </small>
+                            )
                           )}
                         </div>
                         <div className="form-actions" style={{ margin: 0 }}>

@@ -379,28 +379,6 @@
   color: var(--nl-on-surface-variant);
 }
 
-.landing-secondary-links {
-  display: flex;
-  justify-content: center;
-  padding: 1rem 0 0.5rem;
-}
-
-.landing-trace-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  min-height: 2.5rem;
-  padding: 0.375rem 0.875rem;
-  border-radius: var(--radius-full);
-  background: var(--nl-surface-container-low);
-  color: var(--nl-primary);
-  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.landing-trace-link .material-symbols-outlined { font-size: 18px; }
-
 .landing-foot {
   padding: 1rem 1.25rem calc(1rem + env(safe-area-inset-bottom, 0px));
   text-align: center;

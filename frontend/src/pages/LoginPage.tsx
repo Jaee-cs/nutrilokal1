@@ -90,6 +90,9 @@ export function LoginPage() {
               <button className="button login-submit" disabled={l}>
                 {l ? 'Memproses...' : 'Masuk'}
               </button>
+              <p className="login-recovery-help">
+                Lupa password? Hubungi Admin untuk meminta reset password.
+              </p>
             </form>
           </div>
         </div>

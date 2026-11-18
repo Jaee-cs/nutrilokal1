@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
+import { useFormPersistence } from '../hooks/useFormPersistence'
 import { useNotify } from '../components/NotificationProvider'
+import { readFormState } from '../lib/form-state'
 // Kode tanggal dan penanda kedaluwarsa memakai aturan bersama di
 // utils/batch-expiry.ts (kalender WIB, sama dengan backend lib/date.ts).
 import { wibDateCode, isBatchExpired } from '../utils/batch-expiry'
@@ -65,9 +67,115 @@ interface SaleFormItem {
   allocations: AllocationForm[]
 }
 
-const EMPTY_FORM: SaleFormItem[] = [
-  { productId: '', allocations: [{ batchId: '', quantity: '' }] },
-]
+function emptySalesForm(): SaleFormItem[] {
+  return [{ productId: '', allocations: [{ batchId: '', quantity: '' }] }]
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Validasi struktur keranjang yang dibaca dari localStorage. */
+function parseSalesSnapshot(raw: unknown): SaleFormItem[] | null {
+  if (!Array.isArray(raw)) return null
+  const asString = (value: unknown): string | null =>
+    typeof value === 'string' ? value : null
+  const items: SaleFormItem[] = []
+
+  for (const item of raw) {
+    if (!isRecord(item) || !Array.isArray(item.allocations)) return null
+    const productId = asString(item.productId)
+    if (productId === null) return null
+    const allocations: AllocationForm[] = []
+    for (const allocation of item.allocations) {
+      if (!isRecord(allocation)) return null
+      const batchId = asString(allocation.batchId)
+      const quantity = asString(allocation.quantity)
+      if (batchId === null || quantity === null) return null
+      allocations.push({ batchId, quantity })
+    }
+    if (allocations.length === 0) allocations.push({ batchId: '', quantity: '' })
+    items.push({ productId, allocations })
+  }
+
+  if (items.length === 0) return null
+  return items
+}
+
+/**
+ * Validasi ulang produk, batch, stok, dan duplikasi terhadap data terbaru.
+ * Referensi yang tidak valid dibersihkan satu per satu; jumlah yang sudah
+ * diketik tetap dipertahankan.
+ */
+function validateSalesSnapshot(
+  snapshot: SaleFormItem[],
+  products: Product[],
+  batches: Batch[]
+): { snapshot: SaleFormItem[]; warnings: string[] } {
+  const warnings: string[] = []
+  const activeProductIds = new Set(products.filter((p) => p.isActive).map((p) => p.id))
+  const seenProducts = new Set<string>()
+
+  const items = snapshot.map((item) => {
+    let productId = item.productId
+    let productInvalid = false
+    if (productId && !activeProductIds.has(productId)) {
+      warnings.push('Produk pada isian tersimpan sudah tidak tersedia/nonaktif. Pilih produk lain; jumlah yang sudah diisi tetap dipertahankan.')
+      productId = ''
+      productInvalid = true
+    } else if (productId && seenProducts.has(productId)) {
+      warnings.push('Produk yang sama muncul lebih dari sekali. Pilih produk lain pada item tersebut.')
+      productId = ''
+      productInvalid = true
+    }
+    if (productId) seenProducts.add(productId)
+
+    const seenBatches = new Set<string>()
+    const allocations = item.allocations.map((allocation) => {
+      let batchId = allocation.batchId
+      if (!productId || productInvalid) {
+        if (batchId) {
+          warnings.push('Batch pada isian tersimpan ikut dibersihkan karena produk tidak valid. Pilih produk dan batch baru; jumlah tetap dipertahankan.')
+        }
+        batchId = ''
+      } else if (batchId) {
+        const batch = batches.find((b) => b.id === batchId)
+        if (!batch) {
+          warnings.push('Batch pada isian tersimpan sudah tidak tersedia. Pilih batch lain; jumlah tetap dipertahankan.')
+          batchId = ''
+        } else if (batch.product.id !== productId) {
+          warnings.push('Batch pada isian tersimpan tidak sesuai dengan produk yang dipilih. Pilih batch lain.')
+          batchId = ''
+        } else if (batch.stock <= 0) {
+          warnings.push(`Batch ${batch.code} sudah tidak memiliki stok. Jumlah tetap dipertahankan, pilih batch lain.`)
+          batchId = ''
+        } else if (isBatchExpired(batch)) {
+          warnings.push(`Batch ${batch.code} sudah kedaluwarsa. Jumlah tetap dipertahankan, pilih batch lain.`)
+          batchId = ''
+        } else if (seenBatches.has(batchId)) {
+          warnings.push('Batch yang sama muncul lebih dari sekali pada satu item. Pilih batch lain.')
+          batchId = ''
+        } else {
+          seenBatches.add(batchId)
+          const qty = Number(allocation.quantity)
+          if (Number.isFinite(qty) && qty > batch.stock) {
+            warnings.push(`Stok batch ${batch.code} tersedia ${batch.stock}; jumlah pada form perlu disesuaikan.`)
+          }
+        }
+      }
+
+      const qty = Number(allocation.quantity)
+      if (allocation.quantity && (!Number.isFinite(qty) || qty <= 0)) {
+        warnings.push('Jumlah pada isian tersimpan harus lebih dari 0.')
+      }
+      return { batchId, quantity: allocation.quantity }
+    })
+
+    return { productId, allocations }
+  })
+
+  return { snapshot: items, warnings }
+}
 
 function formatDateTime(iso: string): string {
   const label = isoToDateTimeDisplay(iso)
@@ -81,13 +189,34 @@ export function SalesPage() {
   const [batches, setBatches] = useState<Batch[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
+  const [dataReady, setDataReady] = useState(false)
   // Gagal memuat data halaman tetap inline; hasil tindakan memakai dialog.
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [formItems, setFormItems] = useState<SaleFormItem[]>(EMPTY_FORM)
+  const [restoreWarnings, setRestoreWarnings] = useState<string[]>([])
+
+  const restoredRef = useRef<SaleFormItem[] | null | undefined>(undefined)
+  if (restoredRef.current === undefined) {
+    restoredRef.current = readFormState(user?.id, 'sales', parseSalesSnapshot)
+  }
+  const validatedRef = useRef(false)
+  const initialSnapshot = restoredRef.current ?? null
+
+  const [formItems, setFormItems] = useState<SaleFormItem[]>(() => initialSnapshot ?? emptySalesForm())
   const [submitting, setSubmitting] = useState(false)
   const [cancelTarget, setCancelTarget] = useState<Sale | null>(null)
   const [cancelReason, setCancelReason] = useState('')
   const [cancelling, setCancelling] = useState(false)
+
+  const salesDirty = formItems.some((item) =>
+    Boolean(item.productId || item.allocations.some((a) => a.batchId || a.quantity))
+  )
+  const { clearPersisted } = useFormPersistence({
+    userId: user?.id,
+    formKey: 'sales',
+    state: formItems,
+    dirty: salesDirty,
+    enabled: dataReady,
+  })
 
   async function fetchData() {
     try {
@@ -101,6 +230,7 @@ export function SalesPage() {
       setBatches((b.data.data || b.data) || [])
       setSales((s.data.data || s.data) || [])
       setLoadError(null)
+      setDataReady(true)
     } catch (err: any) {
       setLoadError(err.response?.data?.message || 'Gagal memuat data penjualan')
     } finally {
@@ -109,6 +239,17 @@ export function SalesPage() {
   }
 
   useEffect(() => { fetchData() }, [])
+
+  // Validasi ulang hanya sekali, setelah data master terbaru tersedia.
+  useEffect(() => {
+    if (!dataReady || validatedRef.current) return
+    validatedRef.current = true
+    const restored = restoredRef.current
+    if (!restored) return
+    const checked = validateSalesSnapshot(restored, products, batches)
+    setFormItems(checked.snapshot)
+    setRestoreWarnings(checked.warnings)
+  }, [dataReady, products, batches])
 
   function addFormItem() {
     setFormItems(items => [...items, { productId: '', allocations: [{ batchId: '', quantity: '' }] }])
@@ -147,6 +288,20 @@ export function SalesPage() {
       if (i !== itemIdx || it.allocations.length <= 1) return it
       return { ...it, allocations: it.allocations.filter((_, j) => j !== allocIdx) }
     }))
+  }
+
+  async function resetSalesForm() {
+    if (!salesDirty) return
+    const confirmed = await notify.confirm({
+      title: 'Kosongkan Isian Penjualan',
+      message: 'Seluruh item dan alokasi batch pada form penjualan akan dihapus. Lanjutkan?',
+      confirmLabel: 'Ya, Kosongkan',
+      tone: 'warning',
+    })
+    if (!confirmed) return
+    clearPersisted()
+    setFormItems(emptySalesForm())
+    setRestoreWarnings([])
   }
 
   // Batch dengan stok tersedia untuk produk; batch yang sudah dipilih pada
@@ -232,7 +387,9 @@ export function SalesPage() {
       }))
       const res = await api.post('/sales', { items: itemsPayload })
       const transaction = res.data?.transaction
-      setFormItems(EMPTY_FORM)
+      clearPersisted()
+      setFormItems(emptySalesForm())
+      setRestoreWarnings([])
       await fetchData()
       notify.success(transaction
         ? `Penjualan berhasil. ID: ${transaction.id}`
@@ -274,6 +431,17 @@ export function SalesPage() {
       </div>
 
       {loadError && !cancelTarget && <div className="alert error">{loadError}</div>}
+
+      {restoreWarnings.length > 0 && (
+        <div className="alert warning">
+          <strong>Isian tersimpan sudah diperiksa ulang.</strong>
+          <ul style={{ margin: '0.35rem 0 0', paddingLeft: 18 }}>
+            {restoreWarnings.map((warning, index) => (
+              <li key={index}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Form penjualan */}
       <section className="card section-card">
@@ -386,6 +554,9 @@ export function SalesPage() {
             <button type="button" className="button secondary" onClick={addFormItem}>
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
               Tambah Item
+            </button>
+            <button type="button" className="button secondary" onClick={resetSalesForm}>
+              Kosongkan Form
             </button>
             <div className="sale-total">
               <span className="card-label">Total</span>

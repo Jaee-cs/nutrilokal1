@@ -92,6 +92,10 @@ const postQr = (batchId: string, action: string, token = adminToken) =>
 
 const getPublicQr = (code: string) => request(app).get(`/api/public/qr/${encodeURIComponent(code)}`);
 
+/** Resolver kompatibilitas untuk QR lama yang mengarah ke halaman produk. */
+const resolveLegacyQr = (code: string) =>
+  request(app).get(`/api/public/qr/${encodeURIComponent(code)}/product`);
+
 const getCatalog = () => request(app).get('/api/public/catalog');
 
 beforeAll(async () => {
@@ -353,6 +357,28 @@ describe('QR traceability per batch', () => {
     await expect(
       prisma.qrPublication.create({ data: { batchId: batchFull } })
     ).rejects.toThrow();
+  });
+
+  it('QR batch lama (kode aktif maupun alias) tetap resolver ke produk tanpa membuka detail batch', async () => {
+    const expectedProductId = (
+      await prisma.batch.findUniqueOrThrow({
+        where: { id: batchFull },
+        select: { productId: true },
+      })
+    ).productId;
+
+    for (const code of [await getBatchCode(batchFull), oldCode]) {
+      const res = await resolveLegacyQr(code);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ productId: expectedProductId });
+      // Tidak ada data batch/internal yang ikut terbuka lewat resolver ini.
+      expect(Object.keys(res.body)).toEqual(['productId']);
+      expect(JSON.stringify(res.body)).not.toContain(batchFull);
+      expect(JSON.stringify(res.body)).not.toContain('stock');
+    }
+
+    const missing = await resolveLegacyQr(`${runId}-kode-tidak-ada`);
+    expect(missing.status).toBe(404);
   });
 
   it('perubahan tanggal kedaluwarsa langsung tampil di QR tanpa mengganti kode batch', async () => {

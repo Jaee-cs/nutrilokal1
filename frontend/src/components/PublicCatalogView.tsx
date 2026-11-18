@@ -134,14 +134,6 @@ export function PublicCatalogView({
           </div>
         </div>
 
-        <div className="landing-secondary-links">
-          <Link to="/qr-trace" className="landing-trace-link">
-            <span className="material-symbols-outlined" aria-hidden="true">
-              qr_code_2
-            </span>
-            Cek Traceability QR
-          </Link>
-        </div>
       </main>
 
       <footer className="landing-foot">

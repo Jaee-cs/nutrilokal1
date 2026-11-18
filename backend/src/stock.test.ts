@@ -1099,7 +1099,7 @@ describe('Integritas dan riwayat', () => {
 
     expect((await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken))).status).toBe(409);
     expect(
-      (await request(app).patch(`/api/materials/${material.id}`).set(auth(adminToken)).send({ unit: 'liter' })).status
+      (await request(app).patch(`/api/materials/${material.id}`).set(auth(adminToken)).send({ unit: 'L' })).status
     ).toBe(409);
 
     // Penonaktifan tetap boleh dan riwayat tetap utuh.

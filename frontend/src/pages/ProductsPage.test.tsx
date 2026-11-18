@@ -214,7 +214,7 @@ describe('ProductsPage — modal tambah produk', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Tambah Bahan' }))
     await user.selectOptions(within(dialog).getByLabelText('Bahan Baku'), 'm1')
     await user.type(document.getElementById('recipe-qty-0') as HTMLElement, '150')
-    await user.selectOptions(within(dialog).getByLabelText('Satuan Resep'), 'gram')
+    await user.selectOptions(within(dialog).getByLabelText('Satuan Resep'), 'g')
 
     await user.click(within(dialog).getByRole('button', { name: 'Simpan Produk' }))
 
@@ -223,10 +223,40 @@ describe('ProductsPage — modal tambah produk', () => {
         '/products',
         expect.objectContaining({
           name: 'Produk Resep',
-          recipe: [{ materialId: 'm1', quantityPerUnit: 150, recipeUnit: 'gram' }],
+          recipe: [{ materialId: 'm1', quantityPerUnit: 150, recipeUnit: 'g' }],
         })
       )
     })
+  })
+
+  it('tidak menawarkan bahan Manual sebagai bahan resep otomatis', async () => {
+    const original = mocks.get.getMockImplementation()!
+    mocks.get.mockImplementation((url: string, config?: { params?: Record<string, string> }) => {
+      if (url === '/materials') {
+        return Promise.resolve({
+          data: {
+            data: [
+              { id: 'm1', name: 'Tepung', unit: 'kg', isActive: true },
+              { id: 'm2', name: 'Kemasan', unit: 'bungkus', isManual: true, isActive: true },
+              { id: 'm3', name: 'Minyak', unit: 'L', isActive: true },
+            ],
+          },
+        })
+      }
+      return original(url, config)
+    })
+
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: /Tambah Produk/ }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Tambah Produk' })
+    await user.click(within(dialog).getByRole('button', { name: 'Tambah Bahan' }))
+    const materialField = within(dialog).getByLabelText('Bahan Baku')
+
+    expect(within(materialField).getByRole('option', { name: /Tepung/ })).toBeInTheDocument()
+    expect(within(materialField).getByRole('option', { name: /Minyak/ })).toBeInTheDocument()
+    expect(within(materialField).queryByRole('option', { name: /Kemasan/ })).not.toBeInTheDocument()
   })
 })
 
