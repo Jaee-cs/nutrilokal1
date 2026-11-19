@@ -76,16 +76,27 @@ function rowFor(username: string): HTMLElement {
   return row
 }
 
-async function openDeleteConfirmation(username = 'operator-baru') {
+async function openArchiveConfirmation(username = 'operator-baru') {
   const user = userEvent.setup()
-  const buttons = await screen.findAllByRole('button', { name: `Hapus akun ${username}` })
+  const buttons = await screen.findAllByRole('button', { name: `Arsipkan akun ${username}` })
   // Tombol yang sama muncul di tabel desktop dan kartu mobile.
   await user.click(buttons[0])
-  const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Akun Operator' })
+  const dialog = await screen.findByRole('alertdialog', { name: 'Arsipkan Akun Operator' })
   return { user, dialog }
 }
 
-describe('UsersPage — hapus akun Operator', () => {
+/** Balas daftar pengguna dan ringkasan arsip sesuai URL yang diminta. */
+function mockGetUsers(list = users) {
+  mocks.get.mockImplementation((url: string) =>
+    Promise.resolve(
+      url === '/archive/summary'
+        ? { data: { data: { products: 0, materials: 0, users: 0 } } }
+        : { data: { data: list } },
+    ),
+  )
+}
+
+describe('UsersPage — arsip akun Operator', () => {
   beforeEach(() => {
     mocks.get.mockReset()
     mocks.post.mockReset()
@@ -93,31 +104,30 @@ describe('UsersPage — hapus akun Operator', () => {
     mocks.del.mockReset()
   })
 
-  it('hanya menampilkan ikon hapus untuk Operator tanpa riwayat', async () => {
-    mocks.get.mockResolvedValue({ data: { data: users } })
+  it('menampilkan ikon arsip untuk semua Operator, bukan untuk Admin', async () => {
+    mockGetUsers()
     renderPage()
 
     await screen.findAllByText('operator-baru')
 
-    // Desktop dan kartu mobile sama-sama menampilkan tombol hapus.
+    // Desktop dan kartu mobile sama-sama menampilkan tombol arsip.
     expect(
-      screen.getAllByRole('button', { name: 'Hapus akun operator-baru' }),
+      screen.getAllByRole('button', { name: 'Arsipkan akun operator-baru' }),
+    ).toHaveLength(2)
+    // Riwayat aktivitas tidak menghalangi pengarsipan.
+    expect(
+      screen.getAllByRole('button', { name: 'Arsipkan akun operator-lama' }),
     ).toHaveLength(2)
     expect(
-      screen.queryByRole('button', { name: 'Hapus akun operator-lama' }),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: 'Hapus akun admin' }),
+      screen.queryByRole('button', { name: 'Arsipkan akun admin' }),
     ).not.toBeInTheDocument()
 
-    // Operator dengan riwayat tetap hanya punya dua tombol lama.
     const historyRow = rowFor('operator-lama')
-    expect(within(historyRow).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      'Nonaktifkan',
-      'Reset Password',
-    ])
+    expect(
+      within(historyRow).getByRole('button', { name: 'Arsipkan akun operator-lama' }),
+    ).toBeInTheDocument()
 
-    // Admin tidak memiliki opsi hapus dan tombolnya tetap nonaktif.
+    // Admin tidak memiliki opsi arsip dan tombolnya tetap nonaktif.
     const adminRow = rowFor('admin')
     const adminButtons = within(adminRow).getAllByRole('button')
     expect(adminButtons.map((button) => button.textContent)).toEqual([
@@ -128,17 +138,17 @@ describe('UsersPage — hapus akun Operator', () => {
   })
 
   it('menampilkan identitas akun dan pembatalan tidak memanggil API', async () => {
-    mocks.get.mockResolvedValue({ data: { data: users } })
+    mockGetUsers()
     renderPage()
     await screen.findAllByText('operator-baru')
 
-    const { user, dialog } = await openDeleteConfirmation()
+    const { user, dialog } = await openArchiveConfirmation()
 
     expect(within(dialog).getByText('operator-baru')).toBeInTheDocument()
     expect(within(dialog).getByText('Operator Baru')).toBeInTheDocument()
-    expect(within(dialog).getByText(/permanen/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/dicabut/i)).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Batal' })).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Hapus Akun' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Ya, Arsipkan' })).toBeInTheDocument()
 
     await user.click(within(dialog).getByRole('button', { name: 'Batal' }))
 
@@ -146,20 +156,31 @@ describe('UsersPage — hapus akun Operator', () => {
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     })
     expect(mocks.del).not.toHaveBeenCalled()
-    expect(mocks.get).toHaveBeenCalledTimes(1)
+    // Satu panggilan daftar pengguna + satu panggilan ringkasan arsip.
+    expect(mocks.get).toHaveBeenCalledTimes(2)
   })
 
-  it('menghapus akun tanpa riwayat dan memperbarui daftar tanpa reload', async () => {
-    mocks.get
-      .mockResolvedValueOnce({ data: { data: users } })
-      .mockResolvedValueOnce({
-        data: { data: users.filter((item) => item.id !== 'u-op') },
+  it('mengarsipkan akun dan memperbarui daftar tanpa reload', async () => {
+    let remaining = [...users]
+    mockGetUsers()
+    mocks.get.mockImplementation((url: string) =>
+      Promise.resolve(
+        url === '/archive/summary'
+          ? { data: { data: { products: 0, materials: 0, users: 0 } } }
+          : { data: { data: remaining } },
+      ),
+    )
+    mocks.del.mockImplementation(() => {
+      remaining = users.filter((item) => item.id !== 'u-op')
+      return Promise.resolve({
+        data: { message: 'Akun "operator-baru" diarsipkan. Riwayat aktivitas tetap tersimpan.' },
       })
+    })
     renderPage()
     await screen.findAllByText('operator-baru')
 
-    const { user, dialog } = await openDeleteConfirmation()
-    await user.click(within(dialog).getByRole('button', { name: 'Hapus Akun' }))
+    const { user, dialog } = await openArchiveConfirmation()
+    await user.click(within(dialog).getByRole('button', { name: 'Ya, Arsipkan' }))
 
     await waitFor(() => {
       expect(mocks.del).toHaveBeenCalledWith('/users/u-op')
@@ -167,36 +188,32 @@ describe('UsersPage — hapus akun Operator', () => {
     await waitFor(() => {
       expect(screen.queryAllByText('operator-baru')).toHaveLength(0)
     })
-    expect(mocks.get).toHaveBeenCalledTimes(2)
     expect(
-      await screen.findByText('Akun "operator-baru" berhasil dihapus'),
+      await screen.findByText(/berhasil diarsipkan|diarsipkan\. Riwayat/i),
     ).toBeInTheDocument()
   })
 
-  it('menampilkan penolakan backend bila akun ternyata memiliki riwayat', async () => {
-    mocks.get.mockResolvedValue({ data: { data: users } })
+  it('menampilkan penolakan backend saat pengarsipan gagal', async () => {
+    mockGetUsers()
     mocks.del.mockRejectedValue({
       response: {
-        status: 409,
-        data: {
-          message:
-            'Akun memiliki riwayat aktivitas dan tidak boleh dihapus permanen. Nonaktifkan akun sebagai gantinya.',
-        },
+        status: 400,
+        data: { message: 'Akun Anda sendiri tidak dapat diarsipkan.' },
       },
     })
     renderPage()
     await screen.findAllByText('operator-baru')
 
-    const { user, dialog } = await openDeleteConfirmation()
-    await user.click(within(dialog).getByRole('button', { name: 'Hapus Akun' }))
+    const { user, dialog } = await openArchiveConfirmation()
+    await user.click(within(dialog).getByRole('button', { name: 'Ya, Arsipkan' }))
 
     expect(
-      await screen.findByText(/Akun memiliki riwayat aktivitas dan tidak boleh dihapus permanen/),
+      await screen.findByText(/Akun Anda sendiri tidak dapat diarsipkan/),
     ).toBeInTheDocument()
     // Akun tetap tampil; daftar disegarkan agar tombol menyesuaikan server.
     expect(screen.getAllByText('operator-baru').length).toBeGreaterThan(0)
     await waitFor(() => {
-      expect(mocks.get).toHaveBeenCalledTimes(2)
+      expect(mocks.get).toHaveBeenCalled()
     })
   })
 })

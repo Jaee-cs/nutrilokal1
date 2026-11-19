@@ -12,18 +12,23 @@ export interface PublicUser {
   isActive: boolean;
   mustChangePassword: boolean;
   lastLoginAt: Date | null;
+  /** Arsip (soft archive). null = data aktif. */
+  archivedAt: Date | null;
+  archivedById: string | null;
+  archiveReason: string | null;
+  archivedByName?: string | null;
   createdAt: Date;
   updatedAt: Date;
   /**
    * Hanya diisi pada daftar pengguna Admin: true bila akun sudah memiliki
-   * riwayat aktivitas sehingga tidak boleh dihapus permanen.
+   * riwayat aktivitas. Riwayat tetap dipertahankan saat akun diarsipkan.
    */
   hasActivityHistory?: boolean;
 }
 
 export function toPublicUser(
   user: User,
-  extras?: { hasActivityHistory?: boolean }
+  extras?: { hasActivityHistory?: boolean; archivedByName?: string | null }
 ): PublicUser {
   return {
     id: user.id,
@@ -33,6 +38,10 @@ export function toPublicUser(
     isActive: user.isActive,
     mustChangePassword: user.mustChangePassword,
     lastLoginAt: user.lastLoginAt,
+    archivedAt: user.archivedAt,
+    archivedById: user.archivedById,
+    archiveReason: user.archiveReason,
+    ...(extras?.archivedByName !== undefined ? { archivedByName: extras.archivedByName } : {}),
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
     ...(extras?.hasActivityHistory !== undefined

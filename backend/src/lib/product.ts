@@ -31,6 +31,12 @@ export interface PublicProduct {
   recipe: PublicRecipeItem[];
   /** Informasi nilai gizi opsional (null bila belum diisi). */
   nutrition: ProductNutrition | null;
+  /** Arsip (soft archive). null = data aktif. */
+  archivedAt: Date | null;
+  archivedById: string | null;
+  archiveReason: string | null;
+  /** Nama Admin pencatat arsip, bila tersedia. */
+  archivedByName?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,7 +54,8 @@ type ProductWithOptionalRecipe = Product & { recipeItems?: RecipeItemWithMateria
 
 export function toPublicProduct(
   product: ProductWithOptionalRecipe,
-  stockSummary?: ProductStockSummary
+  stockSummary?: ProductStockSummary,
+  extras?: { archivedByName?: string | null }
 ): PublicProduct {
   return {
     id: product.id,
@@ -63,6 +70,10 @@ export function toPublicProduct(
     ...(stockSummary ? { stock: stockSummary.stock, batchCount: stockSummary.batchCount } : {}),
     recipe: (product.recipeItems ?? []).map(toPublicRecipeItem),
     nutrition: toPublicProductNutrition((product as Product).nutrition),
+    archivedAt: product.archivedAt,
+    archivedById: product.archivedById,
+    archiveReason: product.archiveReason,
+    ...(extras?.archivedByName !== undefined ? { archivedByName: extras.archivedByName } : {}),
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };

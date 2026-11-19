@@ -287,6 +287,18 @@ export function MaterialsPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
+  // Jumlah bahan arsip dari endpoint Arsip; daftar operasional hanya aktif.
+  const [archivedCount, setArchivedCount] = useState(0)
+
+  async function fetchArchivedCount(): Promise<void> {
+    try {
+      const res = await api.get('/archive/summary')
+      setArchivedCount(Number(res.data?.data?.materials ?? 0))
+    } catch {
+      // Ringkasan opsional; biarkan angka terakhir tetap tampil.
+    }
+  }
+
   // Tambah bahan baku (+ saldo awal opsional dalam satu alur, Admin)
   const [addForm, setAddForm] = useState(EMPTY_ADD)
   const [obEnabled, setObEnabled] = useState(false)
@@ -372,6 +384,7 @@ export function MaterialsPage() {
 
   useEffect(() => {
     fetchMaterials()
+    void fetchArchivedCount()
   }, [])
 
   function openAddModal() {
@@ -598,21 +611,33 @@ export function MaterialsPage() {
   }
 
   /**
-   * Konfirmasi hapus memakai dialog terpusat. Tindakan baru dijalankan
-   * setelah pengguna menekan "Ya, Hapus"; Batal/Escape tidak menghapus apa pun.
+   * Konfirmasi arsip memakai dialog terpusat. Tindakan baru dijalankan
+   * setelah pengguna menekan "Ya, Arsipkan"; Batal/Escape tidak mengubah apa pun.
    */
   async function requestDelete(m: Material) {
+    const stock = Number(m.stock ?? 0)
     const confirmed = await notify.confirm({
-      title: 'Hapus Bahan Baku',
-      message: `Bahan baku "${m.name}" (${m.unit}) akan dihapus permanen dari daftar bahan baku.`,
-      tone: 'danger',
-      confirmLabel: 'Ya, Hapus',
+      title: 'Arsipkan Bahan Baku',
+      message:
+        `Bahan baku "${m.name}" (${m.unit}) akan diarsipkan dan tidak muncul ` +
+        'pada daftar/pilihan operasional baru.',
+      tone: 'warning',
+      confirmLabel: 'Ya, Arsipkan',
       cancelLabel: 'Batal',
       details: (
-        <p className="text-muted">
-          Bahan yang sudah memiliki riwayat penerimaan, saldo awal, pemakaian produksi,
-          atau penyesuaian stok tidak dapat dihapus — gunakan fitur Nonaktifkan sebagai gantinya.
-        </p>
+        <div>
+          {stock > 0 && (
+            <div className="alert warning">
+              Saldo stok saat ini: {stock.toLocaleString('id-ID')} {m.unit}. Saldo tidak dikurangi
+              atau dikosongkan saat pengarsipan.
+            </div>
+          )}
+          <p className="text-muted">
+            Tidak ada penghapusan permanen. Penerimaan, saldo awal, pemakaian produksi,
+            penyesuaian, dan pergerakan stok tetap tersimpan. Data dapat dipulihkan dengan
+            ID yang sama lewat menu Arsip.
+          </p>
+        </div>
       ),
     })
     if (!confirmed) return
@@ -620,9 +645,11 @@ export function MaterialsPage() {
     setDeletingId(m.id)
     try {
       const res = await api.delete(`/materials/${m.id}`)
-      const message = res.data?.message || `Bahan baku "${m.name}" berhasil dihapus.`
+      const message = res.data?.message || `Bahan baku "${m.name}" berhasil diarsipkan.`
       setMaterials(prev => prev.filter(item => item.id !== m.id))
+      await fetchArchivedCount()
       notify.success(message)
+      if (res.data?.warning) notify.warning(res.data.warning, 'Catatan Saldo')
       if (movementMaterialId === m.id) {
         setMovementMaterialId('')
         setMovements([])
@@ -641,7 +668,7 @@ export function MaterialsPage() {
         setObForm({ ...EMPTY_OB, date: todayDateCode() })
       }
     } catch (err: any) {
-      notify.error(err.response?.data?.message || 'Gagal menghapus bahan baku')
+      notify.error(err.response?.data?.message || 'Gagal mengarsipkan bahan baku')
     } finally {
       setDeletingId(null)
     }
@@ -790,7 +817,7 @@ export function MaterialsPage() {
   }
 
   const activeCount = materials.filter((m) => m.isActive).length
-  const inactiveCount = materials.length - activeCount
+  const inactiveCount = archivedCount
 
   const activeMaterials = materials.filter((m) => m.isActive)
   const movementMaterial = materials.find((m) => m.id === movementMaterialId)
@@ -852,8 +879,8 @@ export function MaterialsPage() {
             className="icon-button material-action-icon material-action-danger"
             onClick={() => requestDelete(m)}
             disabled={deletingId === m.id}
-            aria-label={`Hapus bahan baku ${m.name}`}
-            title="Hapus bahan baku"
+            aria-label={`Arsipkan bahan baku ${m.name}`}
+            title="Arsipkan bahan baku"
           >
             <Trash2 size={16} aria-hidden="true" />
           </button>

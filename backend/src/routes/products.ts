@@ -2,22 +2,23 @@
  * Master produk (README 5.1 dan 4).
  *
  * - Melihat daftar/detail: Admin dan Operator (informasi operasional).
- * - Membuat, mengubah, menonaktifkan/mengaktifkan, menghapus: hanya Admin.
+ * - Membuat, mengubah, menonaktifkan/mengaktifkan, mengarsipkan: hanya Admin.
  * - Setiap produk memiliki satu satuan dasar; tidak ada konversi satuan otomatis.
- * - Penghapusan (DELETE) mengikuti README 5.1 dengan urutan pemeriksaan:
- *     1. stok total (jumlah stok seluruh batch) wajib nol — stok tidak pernah
- *        dikurangi, dibuang, atau dipaksa agar penghapusan berhasil;
- *     2. produk yang masih punya riwayat operasional TIDAK dihapus permanen —
- *        diarsipkan (isActive = false) agar riwayat produksi, batch, penjualan,
- *        dan QR tetap utuh;
- *     3. produk tanpa riwayat dihapus permanen.
- * - Penonaktifan/arsip tidak menghapus riwayat, dan produk arsip tetap muncul
- *   di daftar master agar informasi historisnya masih bisa ditampilkan.
+ * - DELETE kini berarti arsip (soft archive), bukan hapus permanen: baris yang
+ *   sama diberi isActive = false plus waktu/Admin/alasan. Foto, resep, gizi,
+ *   QR, batch, dan seluruh riwayat tidak diubah.
+ * - Daftar operasional hanya menampilkan produk aktif. Produk arsip tetap
+ *   diakses lewat endpoint detail/riwayat dan halaman Arsip Admin.
  * - Produk nonaktif tidak tersedia untuk produksi/penjualan baru dan tidak
  *   muncul di katalog aktif (pemeriksaan pemakaian dilakukan modul B5/B7/B8).
  */
 import { Prisma } from '@prisma/client';
 import express, { Router } from 'express';
+import {
+  archiveProduct,
+  checkRestoreConflict,
+  parseArchiveReason,
+} from '../lib/archive';
 import { pathId } from '../lib/http';
 import { hasOperationalHistory } from '../lib/master-history';
 import { parseReportPeriod } from '../lib/report';
@@ -182,7 +183,10 @@ productsRouter.delete('/:id/photo', authenticate, requireAdmin, async (req, res)
 // ---------- Melihat (Admin & Operator) ----------
 
 productsRouter.get('/', authenticate, async (_req, res) => {
+  // Daftar operasional hanya produk aktif. Produk arsip tetap bisa dilihat
+  // lewat endpoint detail/riwayat dan dikelola di halaman Arsip Admin.
   const products = await prisma.product.findMany({
+    where: { isActive: true },
     orderBy: { name: 'asc' },
     include: PRODUCT_RECIPE_INCLUDE,
   });
@@ -485,7 +489,9 @@ productsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
-  const data: Prisma.ProductUpdateInput = {};
+  // Unchecked input dipakai agar kolom FK arsip (archivedById) bisa ditulis
+  // langsung bersama kolom lain tanpa mengubah pola update yang ada.
+  const data: Prisma.ProductUncheckedUpdateInput = {};
 
   if (body.name !== undefined) {
     const nameError = validateName(body.name);
@@ -554,7 +560,32 @@ productsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
       res.status(400).json({ message: 'Field isActive wajib berupa boolean.' });
       return;
     }
+
+    // Mengaktifkan kembali lewat PATCH lama tetap memakai validasi konflik
+    // yang sama dengan halaman Arsip, agar tidak menimpa produk aktif lain.
+    if (body.isActive === true) {
+      const conflict = await checkRestoreConflict(prisma, 'product', {
+        id: target.id,
+        name: typeof data.name === 'string' ? data.name : target.name,
+      });
+      if (conflict) {
+        res.status(conflict.status).json({ message: conflict.message });
+        return;
+      }
+    }
+
     data.isActive = body.isActive;
+    if (body.isActive === false) {
+      // Arsip implisit (data lama yang dinonaktifkan) ikut tercatat dengan
+      // Admin yang melakukan aksi; metadata lama tidak ditimpa.
+      data.archivedAt = target.archivedAt ?? new Date();
+      data.archivedById = target.archivedById ?? req.user!.id;
+      data.archiveReason = target.archiveReason ?? null;
+    } else {
+      data.archivedAt = null;
+      data.archivedById = null;
+      data.archiveReason = null;
+    }
   }
 
   const nutritionProvided = body.nutrition !== undefined;
@@ -611,52 +642,30 @@ productsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
   res.json({ product: toPublicProduct(product) });
 });
 
+/**
+ * Kompatibilitas endpoint lama: DELETE kini SELALU berarti arsip, bukan
+ * penghapusan permanen. Foto, resep, gizi, QR, batch, dan riwayat tidak
+ * dihapus. Stok yang masih ada hanya memunculkan peringatan, tidak dibuang.
+ */
 productsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
-  const target = await prisma.product.findUnique({ where: { id: pathId(req) } });
-
-  if (!target) {
-    res.status(404).json({ message: 'Produk tidak ditemukan.' });
+  const reason = parseArchiveReason(req.body?.reason);
+  if (!reason.ok) {
+    res.status(400).json({ message: reason.message });
     return;
   }
 
-  // 1) Stok total = jumlah stok seluruh batch (README 5.4). Selama masih ada
-  //    stok, penghapusan ditolak — sistem tidak mengurangi/membuang stok untuk
-  //    memaksa penghapusan berhasil.
-  const totals = await prisma.batch.aggregate({
-    where: { productId: target.id },
-    _sum: { stockQuantity: true },
+  const result = await archiveProduct(pathId(req), req.user!.id, reason.value);
+  if (!result.ok) {
+    res.status(result.status).json({ message: result.message });
+    return;
+  }
+
+  res.json({
+    message: result.unchanged
+      ? `Produk "${result.data.name}" sudah diarsipkan.`
+      : `Produk "${result.data.name}" diarsipkan. Riwayat, foto, resep, gizi, QR, dan stok tetap utuh.`,
+    ...(result.warning ? { warning: result.warning } : {}),
+    archived: true,
+    product: toPublicProduct(result.data),
   });
-  const stock = Number(totals._sum.stockQuantity ?? 0);
-  if (stock > 0) {
-    res.status(409).json({
-      message:
-        `Masih ada stok ${target.name} sebanyak ${stock.toLocaleString('id-ID')} ` +
-        `${target.unit}. Selesaikan stok terlebih dahulu sebelum menghapus produk.`,
-    });
-    return;
-  }
-
-  // 2) Produk dengan riwayat operasional: diarsipkan (hapus logis) — baris,
-  //    riwayat, dan QR tetap tersimpan; produk tidak lagi tersedia untuk
-  //    produksi/penjualan baru.
-  if (await hasOperationalHistory('product', target.id)) {
-    const archived = target.isActive
-      ? await prisma.product.update({ where: { id: target.id }, data: { isActive: false } })
-      : target;
-
-    res.json({
-      message:
-        `Produk "${target.name}" diarsipkan karena sudah memiliki riwayat. ` +
-        'Riwayat produksi, batch, penjualan, dan QR tetap utuh.',
-      archived: true,
-      product: toPublicProduct(archived),
-    });
-    return;
-  }
-
-  // 3) Produk tanpa riwayat dan tanpa stok: dihapus permanen (README 5.1).
-  //    Berkas fotonya ikut dibersihkan agar tidak menumpuk tanpa pemilik.
-  await prisma.product.delete({ where: { id: target.id } });
-  await deleteProductPhoto(target.photoUrl, target.photoPublicId);
-  res.json({ message: `Produk "${target.name}" berhasil dihapus.`, archived: false });
 });

@@ -25,11 +25,20 @@ export interface PublicMaterial {
   isManual: boolean;
   isActive: boolean;
   stock: number;
+  /** Arsip (soft archive). null = data aktif. */
+  archivedAt: Date | null;
+  archivedById: string | null;
+  archiveReason: string | null;
+  archivedByName?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export function toPublicMaterial(material: Material, stock: number): PublicMaterial {
+export function toPublicMaterial(
+  material: Material,
+  stock: number,
+  extras?: { archivedByName?: string | null }
+): PublicMaterial {
   return {
     id: material.id,
     name: material.name,
@@ -37,6 +46,10 @@ export function toPublicMaterial(material: Material, stock: number): PublicMater
     isManual: material.isManual,
     isActive: material.isActive,
     stock,
+    archivedAt: material.archivedAt,
+    archivedById: material.archivedById,
+    archiveReason: material.archiveReason,
+    ...(extras?.archivedByName !== undefined ? { archivedByName: extras.archivedByName } : {}),
     createdAt: material.createdAt,
     updatedAt: material.updatedAt,
   };

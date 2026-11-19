@@ -993,12 +993,13 @@ describe('hak akses, batasan endpoint, dan riwayat', () => {
     expect(movementDel.status).toBe(404);
   });
 
-  it('produk dengan riwayat penjualan: ditolak selama stok ada, lalu diarsipkan (README 5.1)', async () => {
-    // Selama masih ada stok, penghapusan ditolak — stok tidak dikurangi atau
-    // dibuang untuk memaksa penghapusan berhasil.
+  it('produk dengan riwayat penjualan: diarsipkan dengan stok tetap utuh', async () => {
+    // Stok tidak dikurangi atau dibuang; Admin mendapat peringatan saat
+    // mengarsipkan produk yang masih punya stok.
     const withStock = await request(app).delete(`/api/products/${prodA}`).set(auth(adminToken));
-    expect(withStock.status).toBe(409);
-    expect(withStock.body.message).toMatch(/stok/i);
+    expect(withStock.status).toBe(200);
+    expect(withStock.body.archived).toBe(true);
+    expect(withStock.body.warning).toMatch(/stok/i);
 
     // Sisa stok diselesaikan lewat penyesuaian resmi (riwayat tidak dihapus).
     const prodABatches = await prisma.batch.findMany({
@@ -1022,11 +1023,11 @@ describe('hak akses, batasan endpoint, dan riwayat', () => {
       }
     }
 
-    // Stok nol + ada riwayat penjualan: diarsipkan, bukan dihapus permanen.
+    // Pengarsipan berulang tetap aman (idempoten), bukan penghapusan permanen.
     const res = await request(app).delete(`/api/products/${prodA}`).set(auth(adminToken));
     expect(res.status).toBe(200);
     expect(res.body.archived).toBe(true);
-    expect(res.body.message).toContain('riwayat');
+    expect(res.body.message).toMatch(/diarsipkan/i);
 
     // Produk tetap bisa dibaca (arsip) dan riwayat penjualan/batch utuh.
     const detail = await request(app).get(`/api/products/${prodA}`).set(auth(adminToken));

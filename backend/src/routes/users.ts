@@ -1,11 +1,11 @@
 /**
  * Pengelolaan akun (hanya Admin, sesuai README):
- * - membuat, menonaktifkan, dan mengaktifkan kembali akun Operator
- * - menghapus akun Operator yang belum memiliki riwayat aktivitas
+ * - membuat, menonaktifkan/mengarsipkan, dan mengaktifkan kembali akun Operator
  * - memulai reset kata sandi (Admin tidak melihat kata sandi lama)
  *
- * Akun dengan riwayat aktivitas tidak boleh dihapus permanen.
- * Akun Admin tidak dapat dihapus melalui endpoint ini.
+ * Penghapusan permanen tidak tersedia: DELETE kini mengarsipkan akun Operator.
+ * Riwayat aktivitas tidak pernah dihapus. Akun Admin dan akun sendiri tidak
+ * dapat diarsipkan lewat endpoint ini.
  */
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
@@ -13,8 +13,8 @@ import { randomBytes } from 'node:crypto';
 import {
   ACTIVITY_RELATION_COUNTS,
   countsIndicateActivity,
-  userHasActivityHistory,
 } from '../lib/account-history';
+import { archiveUser, checkRestoreConflict, parseArchiveReason } from '../lib/archive';
 import { hashPassword, validateNewPassword } from '../lib/password';
 import { prisma } from '../lib/prisma';
 import { toPublicUser } from '../lib/user';
@@ -35,8 +35,10 @@ function validateUsername(value: unknown): string | null {
 }
 
 usersRouter.get('/', async (_req, res) => {
-  // Hitung riwayat lewat _count agar daftar pengguna tidak memicu N+1 query.
+  // Daftar pengguna aktif saja. Akun arsip tidak bisa login dan dikelola
+  // dari halaman Arsip Admin dengan identitas serta riwayat yang masih utuh.
   const users = await prisma.user.findMany({
+    where: { isActive: true },
     orderBy: { createdAt: 'asc' },
     include: { _count: { select: ACTIVITY_RELATION_COUNTS } },
   });
@@ -131,86 +133,67 @@ usersRouter.patch('/:id', async (req, res) => {
     return;
   }
 
-  const user = await prisma.user.update({ where: { id: target.id }, data: { isActive } });
+  // Arsipkan akun Admin lain melalui endpoint Arsip yang punya aturan
+  // keamanan eksplisit; PATCH lama hanya untuk Operator.
+  if (!isActive && target.role === 'ADMIN') {
+    res.status(403).json({ message: 'Akun Admin tidak dapat diarsipkan.' });
+    return;
+  }
+
+  if (isActive) {
+    const conflict = await checkRestoreConflict(prisma, 'user', {
+      id: target.id,
+      username: target.username,
+    });
+    if (conflict) {
+      res.status(conflict.status).json({ message: conflict.message });
+      return;
+    }
+  }
+
+  const user = await prisma.user.update({
+    where: { id: target.id },
+    data: {
+      isActive,
+      archivedAt: isActive ? null : target.archivedAt ?? new Date(),
+      archivedById: isActive ? null : target.archivedById ?? req.user!.id,
+      archiveReason: isActive ? null : target.archiveReason ?? null,
+    },
+  });
   res.json({ user: toPublicUser(user) });
 });
 
+/**
+ * Kompatibilitas endpoint lama: DELETE kini SELALU mengarsipkan akun Operator,
+ * bukan menghapusnya. Identitas dan riwayat tetap utuh, dan token lama langsung
+ * ditolak karena middleware memeriksa isActive tiap request.
+ */
 usersRouter.delete('/:id', async (req, res) => {
-  try {
-    // Pemeriksaan riwayat dan penghapusan berjalan dalam satu transaksi
-    // Serializable: bila riwayat baru tercatat bersamaan, transaksi gagal
-    // dan akun tidak jadi terhapus (tidak ada penghapusan sebagian).
-    const result = await prisma.$transaction(
-      async (tx) => {
-        const target = await tx.user.findUnique({ where: { id: req.params.id } });
-
-        if (!target) {
-          return { status: 404, body: { message: 'Akun tidak ditemukan.' } };
-        }
-
-        if (target.id === req.user!.id) {
-          return {
-            status: 400,
-            body: { message: 'Akun Anda sendiri tidak dapat dihapus.' },
-          };
-        }
-
-        if (target.role === 'ADMIN') {
-          return {
-            status: 403,
-            body: { message: 'Akun Admin tidak dapat dihapus.' },
-          };
-        }
-
-        if (await userHasActivityHistory(target.id, tx)) {
-          return {
-            status: 409,
-            body: {
-              message:
-                'Akun memiliki riwayat aktivitas dan tidak boleh dihapus permanen. Nonaktifkan akun sebagai gantinya.',
-            },
-          };
-        }
-
-        // Tanpa cascade delete: seluruh relasi historis tetap utuh. Bila
-        // masih ada baris yang mereferensikan akun ini, foreign key database
-        // menolak penghapusan dan ditangani sebagai 409 di bawah.
-        await tx.user.delete({ where: { id: target.id } });
-        return {
-          status: 200,
-          body: { message: `Akun "${target.username}" berhasil dihapus.` },
-        };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
-
-    res.status(result.status).json(result.body);
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      // Foreign key masih mereferensikan akun: riwayat muncul di antara
-      // pemeriksaan dan penghapusan.
-      if (error.code === 'P2003') {
-        res.status(409).json({
-          message:
-            'Akun memiliki riwayat aktivitas dan tidak boleh dihapus permanen. Nonaktifkan akun sebagai gantinya.',
-        });
-        return;
-      }
-      if (error.code === 'P2025') {
-        res.status(404).json({ message: 'Akun tidak ditemukan.' });
-        return;
-      }
-      // Konflik serialisasi/deadlock: data berubah saat proses berjalan.
-      if (error.code === 'P2034') {
-        res.status(409).json({
-          message:
-            'Data akun berubah saat proses penghapusan. Muat ulang daftar dan coba lagi.',
-        });
-        return;
-      }
-    }
-    throw error;
+  const reason = parseArchiveReason(req.body?.reason);
+  if (!reason.ok) {
+    res.status(400).json({ message: reason.message });
+    return;
   }
+
+  const result = await archiveUser(
+    req.params.id,
+    req.user!.id,
+    reason.value,
+    req.user!.id
+  );
+  if (!result.ok) {
+    res.status(result.status).json({ message: result.message });
+    return;
+  }
+
+  res.json({
+    message: result.unchanged
+      ? `Akun "${result.data.username}" sudah diarsipkan.`
+      : `Akun "${result.data.username}" diarsipkan. Riwayat aktivitas tetap tersimpan.`,
+    ...(result.warning ? { warning: result.warning } : {}),
+    archived: true,
+    user: toPublicUser(result.data),
+  });
 });
 
 usersRouter.post('/:id/password-reset', async (req, res) => {

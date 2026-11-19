@@ -578,13 +578,17 @@ describe('QR traceability per batch', () => {
     expect(res.body.status).toBe('PUBLISHED');
     expect(res.body.product.name).toBe(`${runId}-produk-lengkap`);
 
-    // Selama masih ada stok, penghapusan ditolak (README 5.1) — sistem tidak
-    // mengurangi stok atau membuang batch untuk memaksa penghapusan berhasil.
+    // Produk diarsipkan dengan peringatan stok; sistem tidak mengurangi stok
+    // atau membuang batch untuk memaksa pengarsipan berhasil.
     const delWithStock = await request(app)
       .delete(`/api/products/${prodFull}`)
       .set(auth(adminToken));
-    expect(delWithStock.status).toBe(409);
-    expect(delWithStock.body.message).toMatch(/stok/i);
+    expect(delWithStock.status).toBe(200);
+    expect(delWithStock.body.archived).toBe(true);
+    // Produk sudah dinonaktifkan lebih awal, jadi aksi ini idempoten.
+    // Stok tetap utuh dan QR lama tidak berubah.
+    const archivedDetail = await request(app).get(`/api/products/${prodFull}`).set(auth(adminToken));
+    expect(archivedDetail.body.product.stock).toBeGreaterThan(0);
 
     // Stok diselesaikan sampai nol lewat penyesuaian resmi (tanpa hapus batch).
     const fullBatches = await prisma.batch.findMany({

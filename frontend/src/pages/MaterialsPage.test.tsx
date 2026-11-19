@@ -97,7 +97,7 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     expect(screen.getByRole('button', { name: 'Tambah Bahan' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Tambah Stok' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: 'Penyesuaian bahan baku Sapi Segar' }).length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('button', { name: 'Hapus bahan baku Sapi Segar' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Arsipkan bahan baku Sapi Segar' }).length).toBeGreaterThan(0)
   })
 
   it('membuka form tambah bahan sebagai modal terpusat', async () => {
@@ -196,18 +196,18 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     )
   })
 
-  it('tetap memakai konfirmasi terpusat sebelum menghapus bahan', async () => {
+  it('tetap memakai konfirmasi terpusat sebelum mengarsipkan bahan', async () => {
     const user = userEvent.setup()
     render(<MaterialsPage />)
 
-    const [deleteButton] = await screen.findAllByRole('button', { name: 'Hapus bahan baku Sapi Segar' })
-    await user.click(deleteButton)
+    const [archiveButton] = await screen.findAllByRole('button', { name: 'Arsipkan bahan baku Sapi Segar' })
+    await user.click(archiveButton)
 
     expect(mocks.notify.confirm).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: 'Hapus Bahan Baku',
-        tone: 'danger',
-        confirmLabel: 'Ya, Hapus',
+        title: 'Arsipkan Bahan Baku',
+        tone: 'warning',
+        confirmLabel: 'Ya, Arsipkan',
       }),
     )
     expect(mocks.delete).not.toHaveBeenCalled()
@@ -313,6 +313,6 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
     expect(screen.queryByRole('button', { name: 'Tambah Bahan' })).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Tambah Stok' }).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: 'Penyesuaian bahan baku Sapi Segar' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Hapus bahan baku Sapi Segar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Arsipkan bahan baku Sapi Segar' })).not.toBeInTheDocument()
   })
 })

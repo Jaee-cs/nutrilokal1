@@ -1049,15 +1049,18 @@ describe('Integritas dan riwayat', () => {
       materials: [{ materialId: bahan.id, quantity: 2 }],
     });
 
-    // Stok batch hasil produksi masih ada (4) — penghapusan ditolak tanpa
-    // mengurangi stok; satuan tetap terkunci karena riwayat produksi.
+    // Stok batch hasil produksi masih ada (4) — produk diarsipkan dengan
+    // peringatan tanpa mengurangi stok; satuan tetap terkunci karena riwayat.
     const delProduct = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
-    expect(delProduct.status).toBe(409);
-    expect(delProduct.body.message).toMatch(/stok/i);
+    expect(delProduct.status).toBe(200);
+    expect(delProduct.body.archived).toBe(true);
+    expect(delProduct.body.warning).toMatch(/stok/i);
     expect(
       (await request(app).patch(`/api/products/${product.id}`).set(auth(adminToken)).send({ unit: 'box' })).status
     ).toBe(409);
-    expect((await request(app).delete(`/api/materials/${bahan.id}`).set(auth(adminToken))).status).toBe(409);
+    const delMaterial = await request(app).delete(`/api/materials/${bahan.id}`).set(auth(adminToken));
+    expect(delMaterial.status).toBe(200);
+    expect(delMaterial.body.archived).toBe(true);
     expect(
       (await request(app).patch(`/api/materials/${bahan.id}`).set(auth(adminToken)).send({ unit: 'L' })).status
     ).toBe(409);

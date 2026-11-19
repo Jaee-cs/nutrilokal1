@@ -1097,7 +1097,10 @@ describe('Integritas dan riwayat', () => {
     expect(res.status).toBe(201);
     expect(res.body.stock).toBe(5);
 
-    expect((await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken))).status).toBe(409);
+    const archived = await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken));
+    expect(archived.status).toBe(200);
+    expect(archived.body.archived).toBe(true);
+    expect(archived.body.warning).toMatch(/saldo stok/i);
     expect(
       (await request(app).patch(`/api/materials/${material.id}`).set(auth(adminToken)).send({ unit: 'L' })).status
     ).toBe(409);
@@ -1111,16 +1114,17 @@ describe('Integritas dan riwayat', () => {
     expect(await getMaterialStockApi(material.id)).toBe(5);
   });
 
-  it('Produk dengan batch stok awal tidak dapat dihapus/diubah satuan (409), hanya dinonaktifkan', async () => {
+  it('Produk dengan batch stok awal dapat diarsipkan, satuan tetap terkunci (409)', async () => {
     const product = await createProduct('riwayat-open');
     const opening = await openingStock({ productId: product.id, quantity: 4 });
     expect(opening.status).toBe(201);
 
-    // Stok batch awal (4) masih ada — penghapusan ditolak, stok tidak
-    // dikurangi; satuan terkunci karena riwayat batch.
+    // Stok batch awal (4) masih ada — produk diarsipkan dengan peringatan,
+    // stok tidak dikurangi; satuan terkunci karena riwayat batch.
     const delProduct = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
-    expect(delProduct.status).toBe(409);
-    expect(delProduct.body.message).toMatch(/stok/i);
+    expect(delProduct.status).toBe(200);
+    expect(delProduct.body.archived).toBe(true);
+    expect(delProduct.body.warning).toMatch(/stok/i);
     expect(
       (await request(app).patch(`/api/products/${product.id}`).set(auth(adminToken)).send({ unit: 'box' })).status
     ).toBe(409);

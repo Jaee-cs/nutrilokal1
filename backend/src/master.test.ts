@@ -197,15 +197,19 @@ describe('Master produk — CRUD', () => {
     expect(patched.body.product.description).toBe('Deskripsi uji');
   });
 
-  it('Admin menghapus produk yang belum memiliki riwayat, lalu detailnya 404', async () => {
+  it('Admin mengarsipkan produk tanpa riwayat: baris tetap ada dan tidak muncul di daftar aktif', async () => {
     const product = await createProduct('dihapus');
 
     const deleted = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
     expect(deleted.status).toBe(200);
-    expect(deleted.body.archived).toBe(false);
+    expect(deleted.body.archived).toBe(true);
+
+    const list = await request(app).get('/api/products').set(auth(adminToken));
+    expect(list.body.data.some((p: { id: string }) => p.id === product.id)).toBe(false);
 
     const detail = await request(app).get(`/api/products/${product.id}`).set(auth(adminToken));
-    expect(detail.status).toBe(404);
+    expect(detail.status).toBe(200);
+    expect(detail.body.product.isActive).toBe(false);
   });
 
   it('Detail dan penghapusan id tidak dikenal mengembalikan 404', async () => {
@@ -291,15 +295,15 @@ describe('Master produk — resep bahan baku', () => {
     expect(cleared.body.product.recipe).toEqual([]);
   });
 
-  it('Bahan yang dipakai resep tidak dapat dihapus dan satuannya tidak dapat diubah lintas kelompok', async () => {
+  it('Bahan yang dipakai resep dapat diarsipkan dan satuannya tetap tidak dapat diubah lintas kelompok', async () => {
     const bahan = await createMaterial('resep-kunci', { unit: 'kg' });
     const product = await createProduct('resep-kunci', {
       recipe: [{ materialId: bahan.id, quantityPerUnit: 100, recipeUnit: 'g' }],
     });
 
     const deleted = await request(app).delete(`/api/materials/${bahan.id}`).set(auth(adminToken));
-    expect(deleted.status).toBe(409);
-    expect(deleted.body.message).toMatch(/resep/i);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.archived).toBe(true);
 
     const incompatible = await request(app)
       .patch(`/api/materials/${bahan.id}`)
@@ -315,7 +319,7 @@ describe('Master produk — resep bahan baku', () => {
       .send({ unit: 'mg' });
     expect(compatible.status).toBe(200);
 
-    // Setelah produk (dan resepnya) dihapus, bahan tanpa riwayat boleh dihapus.
+    // Produk dan bahan diarsipkan, bukan dihapus permanen; aksi berulang aman.
     expect(
       (await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken))).status
     ).toBe(200);
@@ -352,7 +356,7 @@ describe('Master produk — validasi input', () => {
   });
 });
 
-describe('Master produk — riwayat operasional dan penghapusan', () => {
+describe('Master produk — riwayat operasional dan pengarsipan', () => {
   it('Produk dengan riwayat diarsipkan (bukan dihapus permanen) dan datanya tetap utuh', async () => {
     const product = await createProduct('riwayat');
     fakeHistoryFor([product.id]);
@@ -375,7 +379,7 @@ describe('Master produk — riwayat operasional dan penghapusan', () => {
     expect(again.body.archived).toBe(true);
   });
 
-  it('Produk dengan stok tersisa ditolak dihapus (409) dan stok tidak dikurangi', async () => {
+  it('Produk dengan stok tersisa dapat diarsipkan dan stok tidak dikurangi', async () => {
     const product = await createProduct('berstok');
 
     const created = await request(app)
@@ -388,16 +392,16 @@ describe('Master produk — riwayat operasional dan penghapusan', () => {
 
     try {
       const deleted = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
-      expect(deleted.status).toBe(409);
-      expect(deleted.body.message).toMatch(/stok/i);
-      expect(deleted.body.message).toMatch(/selesai/i);
+      expect(deleted.status).toBe(200);
+      expect(deleted.body.archived).toBe(true);
+      expect(deleted.body.warning).toMatch(/stok/i);
 
-      // Stok TIDAK dikurangi/dibuang untuk memaksa penghapusan berhasil,
-      // dan produk tetap utuh (masih aktif).
+      // Stok TIDAK dikurangi/dibuang; baris produk tetap ada dengan status
+      // nonaktif sehingga tidak dipakai produksi/penjualan baru.
       const detail = await request(app).get(`/api/products/${product.id}`).set(auth(adminToken));
       expect(detail.status).toBe(200);
       expect(detail.body.product.stock).toBe(5);
-      expect(detail.body.product.isActive).toBe(true);
+      expect(detail.body.product.isActive).toBe(false);
       expect(detail.body.product.batchCount).toBe(1);
     } finally {
       if (batchId) {
@@ -693,7 +697,7 @@ describe('Foto produk — unggah, ganti, hapus, dan validasi berkas', () => {
     expect(await readFile(packageJsonPath, 'utf8')).toContain('nutrilokal-backend');
   });
 
-  it('menghapus produk permanen ikut membersihkan berkas fotonya', async () => {
+  it('mengarsipkan produk tidak menghapus berkas fotonya', async () => {
     const product = await createProduct('hapus-produk-foto');
 
     const uploaded = await uploadPhoto(product.id, PNG_1PX, 'image/png');
@@ -703,8 +707,9 @@ describe('Foto produk — unggah, ganti, hapus, dan validasi berkas', () => {
 
     const deleted = await request(app).delete(`/api/products/${product.id}`).set(auth(adminToken));
     expect(deleted.status).toBe(200);
-    expect(deleted.body.archived).toBe(false);
-    expect(await photoFileExists(photoUrl)).toBe(false);
+    expect(deleted.body.archived).toBe(true);
+    expect(deleted.body.product.photoUrl).toBe(photoUrl);
+    expect(await photoFileExists(photoUrl)).toBe(true);
   });
 });
 
@@ -764,13 +769,13 @@ describe('Master bahan baku — CRUD, hak akses, dan validasi', () => {
     expect(patched.body.material.unit).toBe('kg');
   });
 
-  it('Bahan dengan riwayat operasional tidak dapat dihapus (409) dan satuan tidak dapat diubah (409)', async () => {
+  it('Bahan dengan riwayat operasional dapat diarsipkan dan satuannya tidak dapat diubah (409)', async () => {
     const material = await createMaterial('riwayat');
     fakeHistoryFor([material.id]);
 
     const deleted = await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken));
-    expect(deleted.status).toBe(409);
-    expect(deleted.body.message).match(/riwayat operasional/i);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.archived).toBe(true);
 
     const unitPatch = await request(app)
       .patch(`/api/materials/${material.id}`)
@@ -781,15 +786,21 @@ describe('Master bahan baku — CRUD, hak akses, dan validasi', () => {
     // Data tetap utuh.
     const detail = await request(app).get(`/api/materials/${material.id}`).set(auth(adminToken));
     expect(detail.body.material.unit).toBe('kg');
+    expect(detail.body.material.isActive).toBe(false);
   });
 
-  it('Bahan tanpa riwayat dapat dihapus; id tidak dikenal mengembalikan 404', async () => {
+  it('Bahan tanpa riwayat dapat diarsipkan; id tidak dikenal mengembalikan 404', async () => {
     const material = await createMaterial('dihapus');
     const deleted = await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken));
     expect(deleted.status).toBe(200);
+    expect(deleted.body.archived).toBe(true);
+
+    const list = await request(app).get('/api/materials').set(auth(adminToken));
+    expect(list.body.data.some((m: { id: string }) => m.id === material.id)).toBe(false);
 
     const detail = await request(app).get(`/api/materials/${material.id}`).set(auth(adminToken));
-    expect(detail.status).toBe(404);
+    expect(detail.status).toBe(200);
+    expect(detail.body.material.isActive).toBe(false);
 
     const missing = await request(app).patch('/api/materials/id-tidak-ada').set(auth(adminToken)).send({ name: 'x' });
     expect(missing.status).toBe(404);
@@ -915,8 +926,8 @@ describe('Master bahan baku — nama unik (tanpa beda kapitalisasi & spasi tepi)
   });
 });
 
-describe('Hapus bahan baku — validasi relasi nyata', () => {
-  it('Bahan dengan penerimaan nyata ditolak (409) dan riwayat tetap utuh', async () => {
+describe('Arsip bahan baku — relasi nyata tetap utuh', () => {
+  it('Bahan dengan penerimaan nyata dapat diarsipkan dan riwayat tetap utuh', async () => {
     const material = await createMaterial('ada-penerimaan');
 
     const receipt = await request(app)
@@ -926,17 +937,19 @@ describe('Hapus bahan baku — validasi relasi nyata', () => {
     expect(receipt.status).toBe(201);
 
     const deleted = await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken));
-    expect(deleted.status).toBe(409);
-    expect(deleted.body.message).toMatch(/riwayat operasional/i);
-    expect(deleted.body.message).toMatch(/nonaktifkan/i);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.archived).toBe(true);
+    expect(deleted.body.warning).toMatch(/saldo stok/i);
 
     // Bahan dan riwayatnya tidak rusak.
     const detail = await request(app).get(`/api/materials/${material.id}`).set(auth(adminToken));
     expect(detail.status).toBe(200);
     expect(detail.body.material.name).toBe(material.name);
+    expect(detail.body.material.stock).toBe(5);
+    expect(detail.body.material.isActive).toBe(false);
   });
 
-  it('Bahan dengan pemakaian produksi ditolak (409) dan tidak ada cascade delete', async () => {
+  it('Bahan dengan pemakaian produksi dapat diarsipkan dan tidak ada cascade delete', async () => {
     const material = await createMaterial('ada-produksi');
     const product = await createProduct('bahan-produksi');
 
@@ -961,8 +974,8 @@ describe('Hapus bahan baku — validasi relasi nyata', () => {
     });
 
     const deleted = await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken));
-    expect(deleted.status).toBe(409);
-    expect(deleted.body.message).toMatch(/riwayat operasional/i);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.archived).toBe(true);
 
     // Riwayat pemakaian produksi masih ada (tidak ikut terhapus).
     const usage = await prisma.productionMaterialUsage.findFirst({

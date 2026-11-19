@@ -2,6 +2,7 @@
  * Semua route API dipasang di sini melalui prefix /api.
  */
 import { Router } from 'express';
+import { archiveRouter } from './archive';
 import { authRouter } from './auth';
 import { batchesRouter } from './batches';
 import { dashboardRouter } from './dashboard';
@@ -21,6 +22,8 @@ export const apiRouter = Router();
 apiRouter.use('/health', healthRouter);
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/users', usersRouter);
+// Arsip master data (Admin saja; soft archive, tanpa hapus permanen).
+apiRouter.use('/archive', archiveRouter);
 apiRouter.use('/products', productsRouter);
 apiRouter.use('/materials', materialsRouter);
 apiRouter.use('/productions', productionsRouter);

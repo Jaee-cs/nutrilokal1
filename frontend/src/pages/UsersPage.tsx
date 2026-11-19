@@ -18,9 +18,13 @@ interface User {
   hasActivityHistory?: boolean
 }
 
-/** Hanya Operator tanpa riwayat yang boleh dihapus permanen. */
-function canDeleteUser(user: User): boolean {
-  return user.role === 'OPERATOR' && user.hasActivityHistory === false
+/**
+ * Semua akun Operator dapat diarsipkan. Riwayat aktivitas tidak menghalangi
+ * pengarsipan karena datanya tidak dihapus. Akun Admin dan akun sendiri
+ * dilarang oleh backend.
+ */
+function canArchiveUser(user: User): boolean {
+  return user.role === 'OPERATOR'
 }
 
 /** Waktu pencatatan sistem pada kalender WIB, format DD/MM/YYYY HH:mm. */
@@ -31,10 +35,10 @@ function formatLastLogin(iso?: string | null): string {
 }
 
 /**
- * Identitas akun pada dialog konfirmasi hapus. Ditampilkan terpisah agar
- * Admin dapat memastikan akun yang dipilih sebelum penghapusan permanen.
+ * Identitas akun pada dialog konfirmasi arsip. Ditampilkan terpisah agar
+ * Admin dapat memastikan akun yang dipilih sebelum sesinya dicabut.
  */
-function DeleteAccountDetails({ user }: { user: User }) {
+function ArchiveAccountDetails({ user }: { user: User }) {
   return (
     <div className="account-delete-details">
       <div className="account-delete-row">
@@ -47,6 +51,10 @@ function DeleteAccountDetails({ user }: { user: User }) {
           <strong>{user.name}</strong>
         </div>
       )}
+      <div className="account-delete-row">
+        <span>Riwayat aktivitas</span>
+        <strong>{user.hasActivityHistory ? 'Tetap tersimpan' : 'Belum ada'}</strong>
+      </div>
     </div>
   )
 }
@@ -115,6 +123,18 @@ export function UsersPage() {
   const [resettingId, setResettingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
+  // Jumlah akun arsip dari endpoint Arsip (daftar aktiv hanya berisi aktif).
+  const [archivedCount, setArchivedCount] = useState(0)
+
+  async function fetchArchivedCount(): Promise<void> {
+    try {
+      const res = await api.get('/archive/summary')
+      setArchivedCount(Number(res.data?.data?.users ?? 0))
+    } catch {
+      // Ringkasan opsional; biarkan angka terakhir tetap tampil.
+    }
+  }
+
   async function fetchUsers(): Promise<boolean> {
     try {
       const res = await api.get('/users')
@@ -131,6 +151,7 @@ export function UsersPage() {
 
   useEffect(() => {
     fetchUsers()
+    void fetchArchivedCount()
   }, [])
 
   async function createOperator(e: React.FormEvent) {
@@ -207,29 +228,29 @@ export function UsersPage() {
     }
   }
 
-  async function deleteOperator(user: User) {
+  async function archiveOperator(user: User) {
     const confirmed = await notify.confirm({
-      title: 'Hapus Akun Operator',
+      title: 'Arsipkan Akun Operator',
       message:
-        `Hapus akun "${user.username}" secara permanen? Penghapusan tidak dapat ` +
-        'dibatalkan. Server akan memeriksa ulang riwayat aktivitas sebelum menghapus.',
-      confirmLabel: 'Hapus Akun',
+        `Arsipkan akun "${user.username}"? Akun tidak dapat login dan sesi aktifnya ` +
+        'langsung dicabut. Identitas dan riwayat tetap tersimpan.',
+      confirmLabel: 'Ya, Arsipkan',
       cancelLabel: 'Batal',
-      tone: 'danger',
-      details: <DeleteAccountDetails user={user} />,
+      tone: 'warning',
+      details: <ArchiveAccountDetails user={user} />,
     })
     if (!confirmed) return
 
     setDeletingId(user.id)
     try {
-      await api.delete(`/users/${user.id}`)
+      const res = await api.delete(`/users/${user.id}`)
       // Perbarui daftar di tempat tanpa reload halaman.
       await fetchUsers()
-      notify.success(`Akun "${user.username}" berhasil dihapus`)
+      await fetchArchivedCount()
+      notify.success(res.data?.message || `Akun "${user.username}" berhasil diarsipkan`)
+      if (res.data?.warning) notify.warning(res.data.warning, 'Catatan Arsip')
     } catch (err: any) {
-      notify.error(err.response?.data?.message || 'Gagal menghapus akun')
-      // Riwayat bisa bertambah setelah daftar dimuat; segarkan agar tombol
-      // hapus menyesuaikan kondisi terbaru dari server.
+      notify.error(err.response?.data?.message || 'Gagal mengarsipkan akun')
       void fetchUsers()
     } finally {
       setDeletingId(null)
@@ -252,7 +273,7 @@ export function UsersPage() {
 
       <div className="summary-row">
         <div className="summary-item">
-          <span className="card-label">Total Pengguna</span>
+          <span className="card-label">Pengguna Aktif</span>
           <span className="summary-value">{users.length}</span>
         </div>
         <div className="summary-item">
@@ -262,6 +283,10 @@ export function UsersPage() {
         <div className="summary-item">
           <span className="card-label">Operator</span>
           <span className="summary-value">{operatorCount}</span>
+        </div>
+        <div className="summary-item">
+          <span className="card-label">Diarsipkan</span>
+          <span className="summary-value">{archivedCount}</span>
         </div>
       </div>
 
@@ -371,14 +396,14 @@ export function UsersPage() {
                           >
                             {resettingId === u.id ? 'Mereset...' : 'Reset Password'}
                           </button>
-                          {canDeleteUser(u) && (
+                          {canArchiveUser(u) && (
                             <button
                               type="button"
                               className="icon-btn danger user-delete-button"
-                              onClick={() => deleteOperator(u)}
+                              onClick={() => archiveOperator(u)}
                               disabled={deletingId === u.id}
-                              aria-label={`Hapus akun ${u.username}`}
-                              title={`Hapus akun ${u.username}`}
+                              aria-label={`Arsipkan akun ${u.username}`}
+                              title={`Arsipkan akun ${u.username}`}
                             >
                               <span className="material-symbols-outlined" aria-hidden="true">
                                 delete
@@ -433,7 +458,7 @@ export function UsersPage() {
                   </div>
                 </div>
                 <div
-                  className={`user-card-actions${canDeleteUser(u) ? ' has-delete' : ''}`}
+                  className={`user-card-actions${canArchiveUser(u) ? ' has-delete' : ''}`}
                 >
                   <button
                     className="button secondary"
@@ -449,14 +474,14 @@ export function UsersPage() {
                   >
                     {resettingId === u.id ? 'Mereset...' : 'Reset Password'}
                   </button>
-                  {canDeleteUser(u) && (
+                  {canArchiveUser(u) && (
                     <button
                       type="button"
                       className="icon-btn danger user-delete-button"
-                      onClick={() => deleteOperator(u)}
+                      onClick={() => archiveOperator(u)}
                       disabled={deletingId === u.id}
-                      aria-label={`Hapus akun ${u.username}`}
-                      title={`Hapus akun ${u.username}`}
+                      aria-label={`Arsipkan akun ${u.username}`}
+                      title={`Arsipkan akun ${u.username}`}
                     >
                       <span className="material-symbols-outlined" aria-hidden="true">
                         delete

@@ -46,6 +46,13 @@ model User {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
+  /// Arsip akun (soft archive): baris yang sama dipulihkan dengan ID yang sama.
+  /// isActive = false berarti akun tidak bisa login dan semua token lama ditolak.
+  archivedAt        DateTime?
+  archivedById      String?
+  archiveReason     String?
+  archivedBy        User?     @relation("UserArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+
   materialReceipts        MaterialReceipt[]
   materialOpeningBalances MaterialOpeningBalance[]
   materialStockMovements  MaterialStockMovement[]
@@ -61,6 +68,12 @@ model User {
   qrPublications          QrPublication[]   @relation("QrPublishedBy")
   qrWithdrawals           QrPublication[]   @relation("QrWithdrawnBy")
 
+  /// Master data lain yang diarsipkan oleh akun Admin ini.
+  archivedProducts        Product[]         @relation("ProductArchivedBy")
+  archivedMaterials       Material[]        @relation("MaterialArchivedBy")
+  archivedUsers           User[]            @relation("UserArchivedBy")
+
+  @@index([archivedAt])
   @@map("users")
 }
 
@@ -577,11 +590,19 @@ model Product {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  /// Arsip produk (soft archive). Foto, resep, gizi, QR, batch, dan riwayat
+  /// tidak pernah dihapus; pemulihan memakai baris dan ID yang sama.
+  archivedAt    DateTime?
+  archivedById  String?
+  archiveReason String?
+  archivedBy    User?     @relation("ProductArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+
   batches     Batch[]
   productions Production[]
   saleItems   SaleItem[]
   recipeItems ProductRecipeItem[]
 
+  @@index([archivedAt])
   @@map("products")
 }
 
@@ -609,6 +630,13 @@ model Material {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Arsip bahan baku (soft archive). Saldo stok dan seluruh riwayat
+  /// penerimaan/pemakaian/pergerakan tetap utuh, tidak dikosongkan.
+  archivedAt    DateTime?
+  archivedById  String?
+  archiveReason String?
+  archivedBy    User?     @relation("MaterialArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+
   stock            MaterialStock?
   receipts         MaterialReceipt[]
   openingBalances  MaterialOpeningBalance[]
@@ -617,6 +645,7 @@ model Material {
   stockAdjustments StockAdjustment[]
   recipeItems      ProductRecipeItem[]
 
+  @@index([archivedAt])
   @@map("materials")
 }
 

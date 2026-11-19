@@ -17,6 +17,7 @@ import { ProductPublicPage } from './pages/ProductPublicPage'
 import { LegacyQrRedirectPage } from './pages/LegacyQrRedirectPage'
 import { ProductQrPage } from './pages/ProductQrPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { ArchivePage } from './pages/ArchivePage'
 
 export default function App() {
   return (
@@ -51,6 +52,7 @@ export default function App() {
               </Route>
               <Route element={<AdminRoute />}>
                 <Route path="users" element={<UsersPage />} />
+                <Route path="archive" element={<ArchivePage />} />
                 <Route path="product-qr" element={<ProductQrPage />} />
               </Route>
             </Route>

@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { to: '/users', label: 'Pengguna', icon: 'group' },
+  { to: '/archive', label: 'Arsip', icon: 'archive' },
   { to: '/product-qr', label: 'QR Produk', icon: 'qr_code_2' },
 ]
 

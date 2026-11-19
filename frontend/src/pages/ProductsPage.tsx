@@ -355,7 +355,7 @@ export function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   // Kegagalan memuat daftar produk tetap tampil di halaman. Pesan hasil
-  // tindakan (simpan, ubah status, hapus, unggah foto) memakai dialog.
+  // tindakan (simpan, ubah status, arsipkan, unggah foto) memakai dialog.
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [formOpen, setFormOpen] = useState(false)
@@ -377,8 +377,21 @@ export function ProductsPage() {
   // Mode edit (hanya Admin): id produk yang sedang diubah + datanya.
   const [editTarget, setEditTarget] = useState<Product | null>(null)
 
-  // Proses hapus berjalan setelah pengguna menyetujui dialog konfirmasi.
+  // Proses arsip berjalan setelah pengguna menyetujui dialog konfirmasi.
   const [deleting, setDeleting] = useState(false)
+
+  // Jumlah produk arsip berasal dari endpoint Arsip (daftar operasional
+  // sekarang hanya berisi produk aktif).
+  const [archivedCount, setArchivedCount] = useState(0)
+
+  async function fetchArchivedCount(): Promise<void> {
+    try {
+      const res = await api.get('/archive/summary')
+      setArchivedCount(Number(res.data?.data?.products ?? 0))
+    } catch {
+      // Ringkasan opsional; biarkan angka terakhir tetap tampil.
+    }
+  }
 
   // Riwayat pergerakan stok produk (Admin & Operator): seluruh filter
   // dikirim ke backend; tidak ada penyaringan data yang sudah dimuat di UI.
@@ -421,6 +434,7 @@ export function ProductsPage() {
   useEffect(() => {
     fetchProducts()
     fetchMaterials()
+    void fetchArchivedCount()
   }, [])
 
   async function loadHistoryBatches(productId: string): Promise<void> {
@@ -850,16 +864,18 @@ export function ProductsPage() {
   }
 
   /**
-   * Konfirmasi hapus memakai dialog terpusat. Rincian stok dan batch tetap
+   * Konfirmasi arsip memakai dialog terpusat. Rincian stok dan batch tetap
    * ditampilkan agar Admin memahami dampak tindakan sebelum menyetujuinya.
    */
   async function requestDelete(product: Product) {
     const photo = productPhotoUrl(product.photoUrl)
     const confirmed = await notify.confirm({
-      title: 'Hapus Produk',
-      message: `Produk "${product.name}" akan dihapus dari daftar produk.`,
-      tone: 'danger',
-      confirmLabel: 'Ya, Hapus',
+      title: 'Arsipkan Produk',
+      message:
+        `Produk "${product.name}" akan diarsipkan dan tidak muncul di daftar operasional ` +
+        'maupun katalog publik.',
+      tone: 'warning',
+      confirmLabel: 'Ya, Arsipkan',
       cancelLabel: 'Batal',
       details: (
         <>
@@ -875,8 +891,9 @@ export function ProductsPage() {
             {Number(product.batchCount ?? 0).toLocaleString('id-ID')}
           </p>
           <p className="text-muted">
-            Produk tanpa riwayat operasional dihapus permanen. Produk yang sudah memiliki riwayat
-            akan diarsipkan, dan produk yang stoknya masih tersedia akan ditolak oleh sistem.
+            Tidak ada penghapusan permanen. Foto, resep, gizi, QR, stok, dan seluruh riwayat
+            tetap utuh. Stok yang tersisa hanya memunculkan peringatan dan tidak dikurangi.
+            Data dapat dipulihkan dengan ID yang sama lewat menu Arsip.
           </p>
         </>
       ),
@@ -885,22 +902,23 @@ export function ProductsPage() {
 
     setDeleting(true)
     try {
-      // Backend yang menentukan hasil: hapus permanen (tanpa riwayat),
-      // arsipkan (punya riwayat), atau tolak (stok masih ada).
+      // Kompatibilitas endpoint: DELETE kini selalu berarti arsip.
       const res = await api.delete(`/products/${product.id}`)
       const refreshed = await fetchProducts()
+      await fetchArchivedCount()
       if (refreshed) {
-        notify.success(res.data?.message || 'Produk berhasil dihapus')
+        notify.success(res.data?.message || 'Produk berhasil diarsipkan')
+        if (res.data?.warning) notify.warning(res.data.warning, 'Catatan Stok')
       }
     } catch (err: any) {
-      notify.error(err.response?.data?.message || 'Gagal menghapus produk')
+      notify.error(err.response?.data?.message || 'Gagal mengarsipkan produk')
     } finally {
       setDeleting(false)
     }
   }
 
   const activeCount = products.filter(p => p.isActive).length
-  const inactiveCount = products.length - activeCount
+  const inactiveCount = archivedCount
   const selectedHistoryProduct = products.find(p => p.id === historyProductId)
   const historyUnit =
     selectedHistoryProduct?.unit || historyMovements[0]?.product.unit || ''
@@ -1013,9 +1031,9 @@ export function ProductsPage() {
                       className="button danger-outline"
                       onClick={() => requestDelete(p)}
                       disabled={deleting}
-                      aria-label={`Hapus ${p.name}`}
+                      aria-label={`Arsipkan ${p.name}`}
                     >
-                      Hapus
+                      Arsipkan
                     </button>
                   )}
                 </div>

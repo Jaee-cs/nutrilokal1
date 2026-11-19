@@ -355,15 +355,22 @@ describe('PATCH /api/users/:id — nonaktifkan/aktifkan kembali', () => {
   });
 });
 
-describe('DELETE /api/users/:id', () => {
-  it('menghapus Operator tanpa riwayat aktivitas', async () => {
+describe('Arsip akun via DELETE /api/users/:id (kompatibilitas)', () => {
+  it('mengarsipkan Operator tanpa riwayat aktivitas', async () => {
     const { user, password } = await createTempOperator('dihapus');
     const userToken = (await login(user.username, password)).body.token;
 
     const res = await request(app).delete(`/api/users/${user.id}`).set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
+    expect(res.body.archived).toBe(true);
 
-    // Token pengguna terhapus langsung tidak berlaku.
+    // Baris akun tetap ada dengan ID sama; hanya statusnya yang berubah.
+    const archived = await prisma.user.findUnique({ where: { id: user.id } });
+    expect(archived).not.toBeNull();
+    expect(archived?.isActive).toBe(false);
+    expect(archived?.archivedAt).not.toBeNull();
+
+    // Token pengguna terarsip langsung tidak berlaku (sesi dicabut).
     const blocked = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${userToken}`);
     expect(blocked.status).toBe(401);
   });
@@ -391,7 +398,7 @@ describe('DELETE /api/users/:id', () => {
     expect(res.status).toBe(404);
   });
 
-  it('menolak Operator yang memiliki riwayat transaksi penjualan (409)', async () => {
+  it('mengarsipkan Operator yang memiliki riwayat transaksi penjualan', async () => {
     const { user } = await createTempOperator('riwayat-penjualan');
     const sale = await prisma.saleTransaction.create({
       data: { total: 1000, recordedById: user.id },
@@ -402,10 +409,12 @@ describe('DELETE /api/users/:id', () => {
         .delete(`/api/users/${user.id}`)
         .set('Authorization', `Bearer ${adminToken}`);
 
-      expect(res.status).toBe(409);
-      expect(res.body.message).toMatch(/riwayat aktivitas/i);
-      // Akun dan riwayatnya tetap ada.
-      expect(await prisma.user.findUnique({ where: { id: user.id } })).not.toBeNull();
+      expect(res.status).toBe(200);
+      expect(res.body.archived).toBe(true);
+      // Akun dan riwayatnya tetap ada, tidak dihapus.
+      const archived = await prisma.user.findUnique({ where: { id: user.id } });
+      expect(archived).not.toBeNull();
+      expect(archived?.isActive).toBe(false);
       expect(await prisma.saleTransaction.findUnique({ where: { id: sale.id } })).not.toBeNull();
     } finally {
       await prisma.saleTransaction.delete({ where: { id: sale.id } });
@@ -413,7 +422,7 @@ describe('DELETE /api/users/:id', () => {
     }
   });
 
-  it('menolak Operator yang hanya memiliki audit log perubahan kedaluwarsa (409)', async () => {
+  it('mengarsipkan Operator yang hanya memiliki audit log perubahan kedaluwarsa', async () => {
     const { user } = await createTempOperator('riwayat-audit');
     const product = await prisma.product.create({
       data: { name: `${runId}-produk-audit`, unit: 'pcs', sellingPrice: 1000 },
@@ -430,9 +439,11 @@ describe('DELETE /api/users/:id', () => {
         .delete(`/api/users/${user.id}`)
         .set('Authorization', `Bearer ${adminToken}`);
 
-      expect(res.status).toBe(409);
-      expect(res.body.message).toMatch(/riwayat aktivitas/i);
-      expect(await prisma.user.findUnique({ where: { id: user.id } })).not.toBeNull();
+      expect(res.status).toBe(200);
+      expect(res.body.archived).toBe(true);
+      const archived = await prisma.user.findUnique({ where: { id: user.id } });
+      expect(archived).not.toBeNull();
+      expect(archived?.isActive).toBe(false);
     } finally {
       await prisma.batchExpiryChange.delete({ where: { id: change.id } });
       await prisma.batch.delete({ where: { id: batch.id } });
@@ -441,7 +452,7 @@ describe('DELETE /api/users/:id', () => {
     }
   });
 
-  it('tidak menghapus atau mengubah akun lain saat satu Operator dihapus', async () => {
+  it('tidak mengubah akun lain saat satu Operator diarsipkan', async () => {
     const { user: keep } = await createTempOperator('tetap-ada');
     const { user: remove } = await createTempOperator('hapus-saja');
     const before = await prisma.user.count({ where: { username: { startsWith: runId } } });
@@ -451,10 +462,12 @@ describe('DELETE /api/users/:id', () => {
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
-    expect(await prisma.user.findUnique({ where: { id: remove.id } })).toBeNull();
-    expect(await prisma.user.findUnique({ where: { id: keep.id } })).not.toBeNull();
+    const archived = await prisma.user.findUnique({ where: { id: remove.id } });
+    expect(archived).not.toBeNull();
+    expect(archived?.isActive).toBe(false);
+    expect((await prisma.user.findUnique({ where: { id: keep.id } }))?.isActive).toBe(true);
     const after = await prisma.user.count({ where: { username: { startsWith: runId } } });
-    expect(after).toBe(before - 1);
+    expect(after).toBe(before);
   });
 
   it('menandai riwayat aktivitas pada daftar pengguna', async () => {

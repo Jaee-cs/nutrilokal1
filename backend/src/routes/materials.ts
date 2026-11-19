@@ -2,13 +2,20 @@
  * Master bahan baku (README 5.1 dan 4).
  *
  * - Melihat daftar/detail: Admin dan Operator (informasi operasional).
- * - Membuat, mengubah, menonaktifkan/mengaktifkan, menghapus: hanya Admin.
+ * - Membuat, mengubah, menonaktifkan/mengaktifkan, mengarsipkan: hanya Admin.
  * - Setiap bahan baku memiliki satu satuan dasar; tidak ada konversi satuan otomatis.
- * - Bahan baku yang sudah memiliki riwayat operasional tidak boleh dihapus;
- *   Admin hanya dapat menonaktifkannya. Penonaktifan tidak menghapus riwayat.
+ * - DELETE kini berarti arsip (soft archive), bukan hapus permanen. Saldo stok
+ *   dan seluruh riwayat penerimaan/pemakaian/pergerakan tidak diubah.
+ * - Daftar operasional hanya menampilkan bahan aktif; bahan arsip dikelola
+ *   lewat halaman Arsip Admin.
  */
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
+import {
+  archiveMaterial,
+  checkRestoreConflict,
+  parseArchiveReason,
+} from '../lib/archive';
 import { pathId } from '../lib/http';
 import { hasOperationalHistory } from '../lib/master-history';
 import {
@@ -31,12 +38,6 @@ import { authenticate, requireAdmin } from '../middleware/auth';
 import { materialOpeningBalancesRouter, materialReceiptsRouter } from './material-records';
 
 export const materialsRouter = Router();
-
-/** Penanda internal: bahan memiliki histori sehingga penghapusan ditolak. */
-class MaterialHasHistoryError extends Error {}
-
-/** Penanda internal: bahan masih dipakai pada resep produk. */
-class MaterialInUseError extends Error {}
 
 /** Penanda internal: konversi satuan utama tidak aman atau tidak diizinkan. */
 class UnitChangeError extends Error {}
@@ -89,7 +90,12 @@ function isMaterialNameConflict(err: unknown): boolean {
 // ---------- Melihat (Admin & Operator) ----------
 
 materialsRouter.get('/', authenticate, async (_req, res) => {
-  const materials = await prisma.material.findMany({ orderBy: { name: 'asc' } });
+  // Daftar/pilihan operasional hanya bahan aktif; saldo tetap dihitung dari
+  // seluruh baris stok yang tidak dihapus saat bahan diarsipkan.
+  const materials = await prisma.material.findMany({
+    where: { isActive: true },
+    orderBy: { name: 'asc' },
+  });
 
   // Stok ditampilkan sebagai total per jenis bahan baku (README 5.2).
   const stocks = await prisma.materialStock.findMany({
@@ -195,7 +201,8 @@ materialsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
-  const data: Prisma.MaterialUpdateInput = {};
+  // Unchecked input agar kolom FK arsip (archivedById) ikut bisa ditulis.
+  const data: Prisma.MaterialUncheckedUpdateInput = {};
 
   if (body.name !== undefined) {
     const nameError = validateName(body.name);
@@ -282,7 +289,28 @@ materialsRouter.patch('/:id', authenticate, requireAdmin, async (req, res) => {
       res.status(400).json({ message: 'Field isActive wajib berupa boolean.' });
       return;
     }
+
+    if (body.isActive === true) {
+      const conflict = await checkRestoreConflict(prisma, 'material', {
+        id: target.id,
+        nameKey: typeof data.nameKey === 'string' ? data.nameKey : target.nameKey,
+      });
+      if (conflict) {
+        res.status(conflict.status).json({ message: conflict.message });
+        return;
+      }
+    }
+
     data.isActive = body.isActive;
+    if (body.isActive === false) {
+      data.archivedAt = target.archivedAt ?? new Date();
+      data.archivedById = target.archivedById ?? req.user!.id;
+      data.archiveReason = target.archiveReason ?? null;
+    } else {
+      data.archivedAt = null;
+      data.archivedById = null;
+      data.archiveReason = null;
+    }
   }
 
   if (Object.keys(data).length === 0) {
@@ -479,85 +507,32 @@ materialsRouter.post('/:id/unit-change', authenticate, requireAdmin, async (req,
 });
 
 /**
- * Menghapus bahan baku secara permanen (hanya Admin).
- *
- * Aturan (README 5.1):
- * - Bahan yang belum pernah dipakai (tanpa penerimaan, saldo awal, pemakaian
- *   produksi, penyesuaian stok, maupun jejak pergerakan stok) boleh dihapus
- *   permanen.
- * - Bahan yang sudah memiliki histori-operational TIDAK boleh dihapus: balas
- *   409 dengan alasan yang jelas dan arahkan Admin memakai fitur Nonaktifkan.
- * - Tidak ada cascade delete: histori produksi maupun pergerakan stok tidak
- *   pernah ikut terhapus.
- *
- * Penghapusan dijalankan dalam satu transaksi: pemeriksaan relasi diulang
- * sebagai validasi akhir tepat sebelum baris dihapus, sehingga bahan yang
- * baru saja dipakai tidak bisa terhapus karena balapan data.
+ * Kompatibilitas endpoint lama: DELETE kini SELALU mengarsipkan, bukan
+ * menghapus permanen. Baris stok, penerimaan, pemakaian, penyesuaian, dan
+ * pergerakan tidak dihapus atau diubah; Admin hanya menerima peringatan
+ * bila masih ada saldo.
  */
 materialsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
-  const materialId = pathId(req);
-  const target = await prisma.material.findUnique({ where: { id: materialId } });
-
-  if (!target) {
-    res.status(404).json({ message: 'Bahan baku tidak ditemukan.' });
+  const reason = parseArchiveReason(req.body?.reason);
+  if (!reason.ok) {
+    res.status(400).json({ message: reason.message });
     return;
   }
 
-  if (await hasOperationalHistory('material', target.id)) {
-    res.status(409).json({
-      message:
-        'Bahan baku memiliki riwayat operasional dan tidak boleh dihapus. ' +
-        'Nonaktifkan bahan baku sebagai gantinya.',
-    });
+  const result = await archiveMaterial(pathId(req), req.user!.id, reason.value);
+  if (!result.ok) {
+    res.status(result.status).json({ message: result.message });
     return;
   }
 
-  try {
-    await prisma.$transaction(async (tx) => {
-      // Validasi akhir: pastikan tidak ada relasi yang muncul sejak pemeriksaan
-      // awal. Relasi ini checked di dalam transaksi agar konsisten.
-      const [movements, receipts, openingBalances, productionUsages, adjustments, recipeItems] = await Promise.all([
-        tx.materialStockMovement.count({ where: { materialId: target.id } }),
-        tx.materialReceipt.count({ where: { materialId: target.id } }),
-        tx.materialOpeningBalance.count({ where: { materialId: target.id } }),
-        tx.productionMaterialUsage.count({ where: { materialId: target.id } }),
-        tx.stockAdjustment.count({ where: { materialId: target.id } }),
-        tx.productRecipeItem.count({ where: { materialId: target.id } }),
-      ]);
-
-      if (recipeItems > 0) {
-        throw new MaterialInUseError();
-      }
-
-      if (movements > 0 || receipts > 0 || openingBalances > 0 || productionUsages > 0 || adjustments > 0) {
-        throw new MaterialHasHistoryError();
-      }
-
-      // Baris stok ikut dihapus (hanya mungkin ada bila belum ada pergerakan).
-      await tx.materialStock.deleteMany({ where: { materialId: target.id } });
-      await tx.material.delete({ where: { id: target.id } });
-    });
-  } catch (err) {
-    if (err instanceof MaterialInUseError) {
-      res.status(409).json({
-        message:
-          'Bahan baku masih digunakan pada resep produk dan tidak boleh dihapus. ' +
-          'Hapus bahan dari resep terkait terlebih dahulu, atau nonaktifkan bahan baku.',
-      });
-      return;
-    }
-    if (err instanceof MaterialHasHistoryError) {
-      res.status(409).json({
-        message:
-          'Bahan baku memiliki riwayat operasional dan tidak boleh dihapus. ' +
-          'Nonaktifkan bahan baku sebagai gantinya.',
-      });
-      return;
-    }
-    throw err;
-  }
-
-  res.json({ message: `Bahan baku "${target.name}" berhasil dihapus.` });
+  res.json({
+    message: result.unchanged
+      ? `Bahan baku "${result.data.name}" sudah diarsipkan.`
+      : `Bahan baku "${result.data.name}" diarsipkan. Saldo dan riwayat tetap utuh.`,
+    ...(result.warning ? { warning: result.warning } : {}),
+    archived: true,
+    material: toPublicMaterial(result.data, 0),
+  });
 });
 
 // Riwayat penerimaan dan saldo awal per bahan baku.

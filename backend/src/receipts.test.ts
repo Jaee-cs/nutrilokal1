@@ -352,12 +352,13 @@ describe('Integritas dan riwayat', () => {
     expect(await prisma.materialStock.count({ where: { materialId: material.id } })).toBe(0);
   });
 
-  it('Bahan dengan riwayat nyata tidak dapat dihapus (409) dan satuan tidak dapat diubah (409)', async () => {
+  it('Bahan dengan riwayat nyata dapat diarsipkan dan satuan tidak dapat diubah (409)', async () => {
     const material = await createMaterial('riwayat-nyata');
     await postReceipt(material.id, { quantity: 3 });
 
     const deleted = await request(app).delete(`/api/materials/${material.id}`).set(auth(adminToken));
-    expect(deleted.status).toBe(409);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.archived).toBe(true);
 
     const unitChange = await request(app)
       .patch(`/api/materials/${material.id}`)
