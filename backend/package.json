@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc && prisma migrate deploy",
     "start": "node server.js",
     "test": "vitest run",
     "db:up": "docker compose up -d",
