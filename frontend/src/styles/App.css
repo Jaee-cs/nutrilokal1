@@ -12,8 +12,63 @@
 @media (min-width: 640px)  { .container { padding: 2rem 1.5rem; } }
 @media (min-width: 1024px) { .container { padding: 2.5rem 2rem; } }
 
-/* Judul halaman — mobile-first: lebih ringkas di HP, ukuran penuh di layar lega.
-   Dashboard memakai pola yang sama agar hierarki judul konsisten. */
+/* Hero judul halaman — satu pola untuk seluruh fitur internal.
+   CSS-only: .page-head sudah dipakai semua halaman, jadi tidak ada JSX baru.
+   Gradient putih → sage → hijau muda, dengan shape organik transparan di kanan.
+   overflow:hidden memotong dekorasi agar tidak pernah menyebabkan scroll horizontal. */
+.page-head {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+  padding: 1.15rem 1.25rem;
+  padding-right: 3rem;
+  border: 1px solid rgba(94, 145, 105, 0.3);
+  border-radius: 1.25rem;
+  background-color: #ffffff;
+  background-image:
+    radial-gradient(circle at 96% 10%, rgba(120, 178, 130, 0.2) 0 3rem, transparent 3.1rem),
+    radial-gradient(ellipse at 82% 122%, rgba(151, 200, 158, 0.22) 0 7.5rem, transparent 7.6rem),
+    linear-gradient(110deg, #ffffff 0%, #f8fbf7 40%, #eef7ec 72%, #dfefdd 100%);
+  box-shadow: 0 1px 2px rgba(36, 53, 42, 0.04);
+}
+
+.page-head::before,
+.page-head::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Lingkaran berongga di kanan atas. */
+.page-head::before {
+  width: 9rem;
+  height: 9rem;
+  top: -3.75rem;
+  right: -2.75rem;
+  border: 1.75rem solid rgba(126, 182, 135, 0.16);
+  border-radius: var(--radius-full);
+}
+
+/* Blob organik di kanan bawah. */
+.page-head::after {
+  width: 8rem;
+  height: 6rem;
+  right: -0.5rem;
+  bottom: -3.25rem;
+  border-radius: 58% 42% 37% 63% / 45% 55% 45% 55%;
+  background: rgba(104, 165, 118, 0.14);
+  transform: rotate(-16deg);
+}
+
+/* Teks selalu di atas dekorasi; hierarki tipografi tidak diubah. */
+.page-title,
+.page-subtitle {
+  position: relative;
+  z-index: 1;
+}
+
 .page-title {
   font-family: var(--font-display);
   font-size: 22px;
@@ -29,12 +84,48 @@
   margin-top: 0.25rem;
   max-width: 42rem;
 }
-.page-head { margin-bottom: 1.25rem; }
 
 @media (min-width: 640px) {
   .page-title { font-size: 28px; line-height: 36px; }
   .page-subtitle { font-size: 16px; line-height: 24px; }
-  .page-head { margin-bottom: 2rem; }
+  .page-head {
+    margin-bottom: 2rem;
+    padding: 1.5rem 2rem;
+    padding-right: 5.5rem;
+  }
+  .page-head::before {
+    width: 13rem;
+    height: 13rem;
+    top: -5.5rem;
+    right: -3.5rem;
+    border-width: 2.25rem;
+  }
+  .page-head::after {
+    width: 12rem;
+    height: 9rem;
+    right: 0.5rem;
+    bottom: -4.75rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .page-head {
+    padding: 1.75rem 2.25rem;
+    padding-right: 8.5rem;
+  }
+  .page-head::before {
+    width: 16rem;
+    height: 16rem;
+    top: -7rem;
+    right: -4.5rem;
+    border-width: 2.5rem;
+  }
+  .page-head::after {
+    width: 15rem;
+    height: 11rem;
+    right: 2.5rem;
+    bottom: -6rem;
+  }
 }
 
 /* Kartu -------------------------------------------------------------------- */
