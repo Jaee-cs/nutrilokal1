@@ -3,7 +3,8 @@
  *
  * Halaman ini TIDAK menyimpan salinan data. Produk, bahan baku, dan akun
  * tetap berada di tabel asal dengan ID yang sama; hanya status isActive dan
- * metadata arsip yang diubah. Tidak ada endpoint hapus permanen di sini.
+ * metadata arsip yang diubah. Penghapusan permanen (khusus Admin) tersedia
+ * lewat DELETE /:kind/:id dan hanya untuk data yang lolos audit relasi.
  *
  * Objek arsip hanya master data. Transaksi, produksi, penjualan, dan
  * pergerakan stok adalah catatan historis dan sengaja tidak ikut diarsipkan.
@@ -24,6 +25,12 @@ import {
   type ArchiveResult,
 } from '../lib/archive';
 import { ACTIVITY_RELATION_COUNTS, countsIndicateActivity } from '../lib/account-history';
+import {
+  permanentlyDeleteMaterial,
+  permanentlyDeleteProduct,
+  permanentlyDeleteUser,
+  type PermanentDeleteResult,
+} from '../lib/permanent-delete';
 import { toPublicMaterial } from '../lib/material';
 import { PRODUCT_RECIPE_INCLUDE } from '../lib/product-recipe';
 import { prisma } from '../lib/prisma';
@@ -77,6 +84,22 @@ function sendResult<T>(
     ...(result.warning ? { warning: result.warning } : {}),
     data: present(result.data),
   });
+}
+
+/** Respons hapus permanen: alasan penolakan ikut dikirim ke notifikasi Admin. */
+function sendDeleteResult<T>(
+  res: Response,
+  result: PermanentDeleteResult<T>,
+  present: (data: T) => unknown
+) {
+  if (!result.ok) {
+    res.status(result.status).json({
+      message: result.message,
+      ...(result.blockers ? { blockers: result.blockers } : {}),
+    });
+    return;
+  }
+  res.json({ message: result.message, data: present(result.data) });
 }
 
 const ARCHIVED_BY_SELECT = { id: true, name: true, username: true } as const;
@@ -371,4 +394,22 @@ archiveRouter.post('/users/:id/restore', async (req, res) => {
   sendResult(res, result, (user) => toPublicUser(user), 'dipulihkan');
 });
 
-// Tidak ada rute DELETE di router ini: penghapusan permanen tidak tersedia.
+// ---------------------------------------------------------------------------
+// Penghapusan permanen — hanya Admin (router sudah memasang requireAdmin),
+// hanya untuk data yang sedang diarsipkan dan lolos audit relasi di backend.
+// ---------------------------------------------------------------------------
+
+archiveRouter.delete('/products/:id', async (req, res) => {
+  const result = await permanentlyDeleteProduct(pathId(req));
+  sendDeleteResult(res, result, (data) => data);
+});
+
+archiveRouter.delete('/materials/:id', async (req, res) => {
+  const result = await permanentlyDeleteMaterial(pathId(req));
+  sendDeleteResult(res, result, (data) => data);
+});
+
+archiveRouter.delete('/users/:id', async (req, res) => {
+  const result = await permanentlyDeleteUser(pathId(req), req.user!.id);
+  sendDeleteResult(res, result, (data) => data);
+});

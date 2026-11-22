@@ -5,11 +5,16 @@ import { MemoryRouter } from 'react-router-dom'
 import { NotificationProvider } from '../components/NotificationProvider'
 import { ArchivePage } from './ArchivePage'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), delete: vi.fn() }))
+const authState = vi.hoisted(() => ({ role: 'ADMIN' as 'ADMIN' | 'OPERATOR' }))
 
 vi.mock('../lib/api', () => ({
-  default: { get: mocks.get, post: mocks.post },
+  default: { get: mocks.get, post: mocks.post, delete: mocks.delete },
   UNAUTHORIZED_EVENT: 'nutrilokal:unauthorized',
+}))
+
+vi.mock('../hooks/useAuth', () => ({
+  useAuth: () => ({ user: { id: 'admin-1', username: 'admin', role: authState.role } }),
 }))
 
 const archivedProduct = {
@@ -64,16 +69,19 @@ function mockApi() {
     return Promise.resolve({ data: { data: [], meta: { page: 1, pageSize: 20, total: 0, totalPages: 1 } } })
   })
   mocks.post.mockResolvedValue({ data: { message: 'Data berhasil dipulihkan.' } })
+  mocks.delete.mockResolvedValue({ data: { message: 'Produk berhasil dihapus permanen dari Arsip.' } })
 }
 
 describe('ArchivePage — halaman Arsip Admin', () => {
   beforeEach(() => {
     mocks.get.mockReset()
     mocks.post.mockReset()
+    mocks.delete.mockReset()
+    authState.role = 'ADMIN'
     mockApi()
   })
 
-  it('menampilkan tiga tab master tanpa tab Lainnya dan tanpa aksi hapus', async () => {
+  it('menampilkan tiga tab master tanpa tab Lainnya, dengan aksi hapus untuk Admin', async () => {
     renderPage()
 
     const tabs = await screen.findAllByRole('tab')
@@ -83,7 +91,7 @@ describe('ArchivePage — halaman Arsip Admin', () => {
       'Akun Pengguna (3)',
     ])
     expect(screen.queryByRole('tab', { name: /Lainnya/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Hapus Permanen/i })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Hapus' }).length).toBeGreaterThan(0)
 
     expect((await screen.findAllByText('Keripik Arsip')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('Admin Utama').length).toBeGreaterThan(0)
@@ -143,5 +151,70 @@ describe('ArchivePage — halaman Arsip Admin', () => {
       expect.stringContaining('Keripik Arsip'),
       expect.stringContaining('Keripik Lama'),
     ])
+  })
+
+  it('menghapus permanen setelah modal konfirmasi danger disetujui', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    const [deleteButton] = screen.getAllByRole('button', { name: 'Hapus' })
+    await user.click(deleteButton)
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen' })
+    expect(within(dialog).getByText(/bersifat permanen dan tidak dapat dipulihkan/i)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Batal' })).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Hapus Permanen' }))
+
+    await waitFor(() => {
+      expect(mocks.delete).toHaveBeenCalledWith('/archive/products/p-arsip')
+    })
+    expect(await screen.findByText('Produk berhasil dihapus permanen dari Arsip.')).toBeInTheDocument()
+  })
+
+  it('membatalkan konfirmasi tanpa memanggil endpoint hapus', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    const [deleteButton] = screen.getAllByRole('button', { name: 'Hapus' })
+    await user.click(deleteButton)
+    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen' })
+    await user.click(within(dialog).getByRole('button', { name: 'Batal' }))
+
+    expect(mocks.delete).not.toHaveBeenCalled()
+  })
+
+  it('menampilkan alasan penolakan backend sebagai notifikasi terpusat', async () => {
+    mocks.delete.mockRejectedValueOnce({
+      response: {
+        data: {
+          message:
+            'Produk tidak dapat dihapus karena masih memiliki riwayat produksi dan penjualan. Data tetap tersimpan di Arsip.',
+        },
+      },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    const [deleteButton] = screen.getAllByRole('button', { name: 'Hapus' })
+    await user.click(deleteButton)
+    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen' })
+    await user.click(within(dialog).getByRole('button', { name: 'Hapus Permanen' }))
+
+    expect(await screen.findByText('Penghapusan Ditolak')).toBeInTheDocument()
+    expect(
+      await screen.findByText(/masih memiliki riwayat produksi dan penjualan/i)
+    ).toBeInTheDocument()
+  })
+
+  it('Operator tidak melihat tombol hapus sama sekali', async () => {
+    authState.role = 'OPERATOR'
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Pulihkan/ }).length).toBeGreaterThan(0)
   })
 })

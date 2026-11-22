@@ -148,6 +148,12 @@ const ROUTES: Array<{ method: 'get' | 'post' | 'patch' | 'delete'; path: string;
   { method: 'get', path: '/api/reports/materials', access: 'user' },
   { method: 'get', path: '/api/reports/productions', access: 'user' },
   { method: 'get', path: '/api/reports/sales', access: 'user' },
+
+  // Arsip & penghapusan permanen: seluruhnya khusus Admin.
+  { method: 'get', path: '/api/archive/summary', access: 'admin' },
+  { method: 'delete', path: '/api/archive/products/id-tidak-ada', access: 'admin' },
+  { method: 'delete', path: '/api/archive/materials/id-tidak-ada', access: 'admin' },
+  { method: 'delete', path: '/api/archive/users/id-tidak-ada', access: 'admin' },
 ];
 
 function call(route: (typeof ROUTES)[number], token?: string) {

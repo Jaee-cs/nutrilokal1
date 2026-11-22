@@ -3,8 +3,9 @@
  *
  * Menampilkan master data yang dinonaktifkan/arsip (Produk, Bahan Baku, Akun
  * Pengguna) dari endpoint /api/archive. Halaman ini tidak menyimpan salinan:
- * data tetap berada di tabel asal dengan ID yang sama. Tidak ada aksi hapus
- * permanen di sini — satu-satunya tindakan adalah Pemulihan.
+ * data tetap berada di tabel asal dengan ID yang sama. Selain Pemulihan,
+ * Admin dapat menghapus permanen data yang lolos audit relasi di backend;
+ * tombol Hapus tetap tampil, tetapi penolakan ditentukan oleh server.
  *
  * Tab "Lainnya" sengaja tidak ada karena tidak ada master lain yang relevan
  * untuk diarsipkan. Transaksi/produksi/penjualan/pergerakan stok adalah
@@ -14,8 +15,9 @@
  * dari tanggal arsip terbaru ke terlama.
  */
 import { useEffect, useState, type ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, Eye, RotateCcw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Eye, RotateCcw, Trash2 } from 'lucide-react'
 import api from '../lib/api'
+import { useAuth } from '../hooks/useAuth'
 import { Modal } from '../components/Modal'
 import { useNotify } from '../components/NotificationProvider'
 import { isoToDateTimeDisplay } from '../utils/dates'
@@ -119,6 +121,8 @@ function ArchiveBadges({ row }: { row: ArchiveRow }) {
 
 export function ArchivePage() {
   const notify = useNotify()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'ADMIN'
 
   const [activeTab, setActiveTab] = useState<ArchiveKind>('products')
   const [page, setPage] = useState(1)
@@ -138,6 +142,7 @@ export function ArchivePage() {
   const [detail, setDetail] = useState<ArchiveRow | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [restoringId, setRestoringId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -261,6 +266,51 @@ export function ArchivePage() {
     }
   }
 
+  async function requestDelete(row: ArchiveRow) {
+    const label = identityOf(row)
+    const confirmed = await notify.confirm({
+      title: 'Hapus Permanen',
+      message: `Hapus permanen "${label}" dari Arsip?`,
+      tone: 'danger',
+      confirmLabel: 'Hapus Permanen',
+      cancelLabel: 'Batal',
+      details: (
+        <div className="archive-restore-details">
+          <p>
+            Penghapusan bersifat permanen dan tidak dapat dipulihkan. Sistem memeriksa ulang
+            seluruh riwayat dan relasi saat konfirmasi. Bila data masih digunakan, penghapusan
+            dibatalkan dan data tetap tersimpan di Arsip.
+          </p>
+          <div className="account-delete-row">
+            <span>Jenis</span>
+            <strong>{KIND_CONFIG[activeTab].label}</strong>
+          </div>
+          <div className="account-delete-row">
+            <span>ID</span>
+            <strong>{row.id}</strong>
+          </div>
+        </div>
+      ),
+    })
+    if (!confirmed) return
+
+    setDeletingId(row.id)
+    try {
+      const res = await api.delete(`/archive/${activeTab}/${row.id}`)
+      setDetail(null)
+      setReloadToken((value) => value + 1)
+      if (rows.length === 1 && page > 1) setPage((value) => value - 1)
+      notify.success(res.data?.message || 'Data berhasil dihapus permanen.')
+    } catch (err: any) {
+      notify.error(
+        err.response?.data?.message || 'Gagal menghapus data. Periksa riwayat dan relasinya.',
+        'Penghapusan Ditolak'
+      )
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const startItem = meta.total === 0 ? 0 : (meta.page - 1) * meta.pageSize + 1
   const endItem = Math.min(meta.page * meta.pageSize, meta.total)
 
@@ -367,11 +417,22 @@ export function ArchivePage() {
                             type="button"
                             className="button"
                             onClick={() => void requestRestore(row)}
-                            disabled={restoringId === row.id}
+                            disabled={restoringId === row.id || deletingId === row.id}
                           >
                             <RotateCcw size={15} aria-hidden="true" />
                             {restoringId === row.id ? 'Memulihkan...' : 'Pulihkan'}
                           </button>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="button danger-outline"
+                              onClick={() => void requestDelete(row)}
+                              disabled={deletingId === row.id || restoringId === row.id}
+                            >
+                              <Trash2 size={15} aria-hidden="true" />
+                              {deletingId === row.id ? 'Menghapus...' : 'Hapus'}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -428,10 +489,21 @@ export function ArchivePage() {
                     type="button"
                     className="button"
                     onClick={() => void requestRestore(row)}
-                    disabled={restoringId === row.id}
+                    disabled={restoringId === row.id || deletingId === row.id}
                   >
                     <RotateCcw size={15} aria-hidden="true" /> Pulihkan
                   </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="button danger-outline"
+                      onClick={() => void requestDelete(row)}
+                      disabled={deletingId === row.id || restoringId === row.id}
+                    >
+                      <Trash2 size={15} aria-hidden="true" />
+                      {deletingId === row.id ? 'Menghapus...' : 'Hapus'}
+                    </button>
+                  )}
                 </div>
               </article>
             ))
@@ -469,8 +541,9 @@ export function ArchivePage() {
       </section>
 
       <p className="archive-footnote text-muted">
-        Data arsip tidak ikut dihapus dan tidak muncul pada daftar operasional aktif.
-        Riwayat produksi, penjualan, transaksi, dan pergerakan stok tidak diubah.
+        Data arsip tidak muncul pada daftar operasional aktif. Riwayat produksi, penjualan,
+        transaksi, dan pergerakan stok tidak diubah. Hapus permanen hanya tersedia untuk Admin
+        dan hanya berhasil bila backend menyatakan data tidak memiliki riwayat atau relasi.
       </p>
 
       {detail && (
@@ -486,11 +559,22 @@ export function ArchivePage() {
                 type="button"
                 className="button"
                 onClick={() => void requestRestore(detail)}
-                disabled={restoringId === detail.id}
+                disabled={restoringId === detail.id || deletingId === detail.id}
               >
                 <RotateCcw size={15} aria-hidden="true" />
                 {restoringId === detail.id ? 'Memulihkan...' : 'Pulihkan'}
               </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="button danger-outline"
+                  onClick={() => void requestDelete(detail)}
+                  disabled={deletingId === detail.id || restoringId === detail.id}
+                >
+                  <Trash2 size={15} aria-hidden="true" />
+                  {deletingId === detail.id ? 'Menghapus...' : 'Hapus'}
+                </button>
+              )}
             </>
           }
         >
