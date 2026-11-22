@@ -419,7 +419,7 @@ export function ReportsPage() {
             <>
               <div className="summary-row" style={{ marginBottom: '1rem' }}>
                 <div className="summary-item">
-                  <span className="card-label">Transaksi Aktif</span>
+                  <span className="card-label">Transaksi</span>
                   <span className="summary-value">{sales.summary.transactionCount}</span>
                 </div>
                 <div className="summary-item">
