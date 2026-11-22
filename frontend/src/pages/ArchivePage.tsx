@@ -403,7 +403,7 @@ export function ArchivePage() {
                       <td>{archivedBy(row)}</td>
                       <td className="text-muted">{row.archiveReason || '-'}</td>
                       <td>
-                        <div className="row-actions">
+                        <div className="row-actions archive-actions">
                           <button
                             type="button"
                             className="button secondary"
@@ -475,7 +475,7 @@ export function ArchivePage() {
                     </div>
                   )}
                 </div>
-                <div className="row-actions archive-card-actions">
+                <div className="row-actions archive-actions archive-card-actions">
                   <button
                     type="button"
                     className="button secondary"
