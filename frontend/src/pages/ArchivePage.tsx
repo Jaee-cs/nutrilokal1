@@ -319,8 +319,7 @@ export function ArchivePage() {
       <div className="page-head">
         <h1 className="page-title">Arsip</h1>
         <p className="page-subtitle">
-          Data yang diarsipkan tetap tersimpan dengan ID dan riwayat yang sama. Pulihkan
-          kapan saja tanpa membuat duplikat.
+          Kelola dan pulihkan data yang sudah tidak digunakan.
         </p>
       </div>
 
