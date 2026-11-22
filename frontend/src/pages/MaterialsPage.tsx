@@ -97,7 +97,6 @@ const EMPTY_ADD: AddForm = {
   description: '',
 }
 const EMPTY_ADD_OB = { quantity: '', date: '', reason: '' }
-const EMPTY_OB = { materialId: '', quantity: '', date: '', reason: '' }
 const EMPTY_ADJ = { materialId: '', quantity: '', date: '', reason: '' }
 const EMPTY_RECEIPT = { materialId: '', quantity: '', receivedAt: '', note: '' }
 const EMPTY_UNIT: UnitForm = {
@@ -114,7 +113,6 @@ function todayForms() {
   const today = todayDateCode()
   return {
     addOb: { ...EMPTY_ADD_OB, date: today },
-    ob: { ...EMPTY_OB, date: today },
     adj: { ...EMPTY_ADJ, date: today },
     receipt: { ...EMPTY_RECEIPT, receivedAt: today },
   }
@@ -309,10 +307,6 @@ export function MaterialsPage() {
   const [unitForm, setUnitForm] = useState<UnitForm>(EMPTY_UNIT)
   const [submittingUnit, setSubmittingUnit] = useState(false)
 
-  // Saldo awal bahan yang sudah ada (Admin)
-  const [obForm, setObForm] = useState(EMPTY_OB)
-  const [submittingOb, setSubmittingOb] = useState(false)
-
   // Riwayat pergerakan stok (Admin & Operator)
   const [movements, setMovements] = useState<Movement[]>([])
   const [movementMaterialId, setMovementMaterialId] = useState('')
@@ -391,7 +385,6 @@ export function MaterialsPage() {
     const forms = todayForms()
     setAddForm(EMPTY_ADD)
     setAddObForm(forms.addOb)
-    setObForm(forms.ob)
     setObEnabled(false)
     setActiveModal('add')
   }
@@ -664,9 +657,6 @@ export function MaterialsPage() {
       if (receiptForm.materialId === m.id) {
         setReceiptForm({ ...EMPTY_RECEIPT, receivedAt: todayDateCode() })
       }
-      if (obForm.materialId === m.id) {
-        setObForm({ ...EMPTY_OB, date: todayDateCode() })
-      }
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal mengarsipkan bahan baku')
     } finally {
@@ -765,54 +755,6 @@ export function MaterialsPage() {
       notify.error(err.response?.data?.message || 'Gagal mencatat penerimaan')
     } finally {
       setSubmittingReceipt(false)
-    }
-  }
-
-  async function submitOpeningBalance(e: React.FormEvent) {
-    e.preventDefault()
-
-    const materialId = obForm.materialId
-    const quantity = Number(obForm.quantity)
-    const date = obForm.date
-    const reason = obForm.reason.trim()
-
-    if (!materialId) {
-      notify.error('Pilih bahan baku untuk saldo awal.')
-      return
-    }
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      notify.error('Jumlah saldo awal harus lebih besar dari nol.')
-      return
-    }
-    if (!date) {
-      notify.error('Tanggal saldo awal wajib diisi.')
-      return
-    }
-    if (!reason) {
-      notify.error('Alasan saldo awal wajib diisi.')
-      return
-    }
-
-    setSubmittingOb(true)
-    try {
-      await api.post(`/materials/${materialId}/opening-balances`, { quantity, date, reason })
-      setObForm({ ...EMPTY_OB, date: todayDateCode() })
-
-      // Saldo awal menambah stok DAN membuat pergerakan baru — segarkan
-      // keduanya dulu, baru tampilkan pesan sukses.
-      const stockRefreshed = await fetchMaterials()
-      let historyRefreshed = true
-      if (!movementMaterialId || movementMaterialId === materialId) {
-        setMovementMaterialId(materialId)
-        historyRefreshed = await loadMovements(materialId)
-      }
-      if (stockRefreshed && historyRefreshed) {
-        notify.success('Saldo awal bahan baku berhasil dicatat')
-      }
-    } catch (err: any) {
-      notify.error(err.response?.data?.message || 'Gagal mencatat saldo awal')
-    } finally {
-      setSubmittingOb(false)
     }
   }
 
@@ -1359,72 +1301,6 @@ export function MaterialsPage() {
               </button>
             </div>
           </form>
-
-          <details className="material-ob-details">
-            <summary>Catat saldo awal bahan yang sudah ada</summary>
-            <p className="text-muted">
-              Untuk bahan yang sudah terdaftar tetapi saldo awalnya belum tercatat. Bahan baru
-              cukup dicatat lewat formulir di atas — jangan mencatat saldo awal dua kali untuk
-              bahan yang sama. Tanggal, alasan, dan pengguna pencatat tersimpan pada riwayat
-              pergerakan.
-            </p>
-            <form onSubmit={submitOpeningBalance} className="material-modal-form">
-              <div className="form-row">
-                <div className="field">
-                  <label htmlFor="ob-material">Bahan Baku</label>
-                  <select
-                    id="ob-material"
-                    value={obForm.materialId}
-                    onChange={e => setObForm(f => ({ ...f, materialId: e.target.value }))}
-                    required
-                  >
-                    <option value="">Pilih bahan baku</option>
-                    {activeMaterials.map(m => (
-                      <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field">
-                  <label htmlFor="ob-qty">Jumlah</label>
-                  <input
-                    id="ob-qty"
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    value={obForm.quantity}
-                    onChange={e => setObForm(f => ({ ...f, quantity: e.target.value }))}
-                    required
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="ob-date">Tanggal Saldo Awal</label>
-                  <DateField
-                    id="ob-date"
-                    value={obForm.date}
-                    onChange={(date) => setObForm(f => ({ ...f, date }))}
-                    required
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="ob-reason">Alasan</label>
-                  <input
-                    id="ob-reason"
-                    value={obForm.reason}
-                    onChange={e => setObForm(f => ({ ...f, reason: e.target.value }))}
-                    required
-                  />
-                </div>
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="button secondary" onClick={closeModal}>
-                  Tutup
-                </button>
-                <button className="button" disabled={submittingOb}>
-                  {submittingOb ? 'Menyimpan...' : 'Catat Saldo Awal'}
-                </button>
-              </div>
-            </form>
-          </details>
         </div>
       </MaterialModal>
 
