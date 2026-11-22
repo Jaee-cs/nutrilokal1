@@ -365,6 +365,30 @@ describe('Hapus permanen terbatas dari Arsip', () => {
     expect(again.status).toBe(404);
     expect(again.body.message).toBe('Produk tidak ditemukan.');
   });
+
+  it('11. Produk arsip dengan stok tersisa ditolak dan tetap di Arsip', async () => {
+    const product = await createProduct('stok-tersisa');
+    await archive('products', product.id);
+    await prisma.batch.create({
+      data: {
+        code: `${runId}-batch-stok-tersisa`,
+        productId: product.id,
+        stockQuantity: 7,
+      },
+    });
+
+    const res = await remove('products', product.id);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('stok tersisa');
+    expect(res.body.message).toContain('Data tetap tersimpan di Arsip.');
+    expect(res.body.blockers).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'stok tersisa', count: 1 })])
+    );
+    expect(await prisma.product.findUnique({ where: { id: product.id } })).not.toBeNull();
+    expect(
+      await prisma.batch.count({ where: { productId: product.id, stockQuantity: 7 } })
+    ).toBe(1);
+  });
 });
 
 describe('Hapus permanen langsung dari daftar produk aktif', () => {

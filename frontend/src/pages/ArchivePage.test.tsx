@@ -81,7 +81,7 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     mockApi()
   })
 
-  it('menampilkan tiga tab master tanpa tab Lainnya dan tanpa aksi hapus permanen', async () => {
+  it('menampilkan tiga tab master dengan tiga aksi hanya pada produk', async () => {
     renderPage()
 
     const tabs = await screen.findAllByRole('tab')
@@ -91,12 +91,12 @@ describe('ArchivePage — halaman Arsip Admin', () => {
       'Akun Pengguna (3)',
     ])
     expect(screen.queryByRole('tab', { name: /Lainnya/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
 
     expect((await screen.findAllByText('Keripik Arsip')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('Admin Utama').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Tidak diproduksi lagi').length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: /Pulihkan/ }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: 'Hapus' }).length).toBeGreaterThan(0)
   })
 
   it('menampilkan detail arsip beserta stok, alasan, dan Admin', async () => {
@@ -153,7 +153,7 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     ])
   })
 
-  it('hanya menyediakan Detail dan Pulihkan pada detail arsip', async () => {
+  it('detail produk arsip menyediakan Detail, Pulihkan, dan Hapus', async () => {
     const user = userEvent.setup()
     renderPage()
 
@@ -163,7 +163,83 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     const dialog = await screen.findByRole('dialog', { name: /Detail Produk: Keripik Arsip/ })
     expect(within(dialog).getAllByRole('button', { name: 'Tutup' }).length).toBeGreaterThan(0)
     expect(within(dialog).getByRole('button', { name: /Pulihkan/ })).toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Hapus' })).toBeInTheDocument()
+  })
+
+  it('Hapus memakai konfirmasi danger bermama produk dan hanya jalan setelah disetujui', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    const [deleteButton] = screen.getAllByRole('button', { name: 'Hapus' })
+    await user.click(deleteButton)
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen Produk' })
+    expect(within(dialog).getAllByText(/Keripik Arsip/).length).toBeGreaterThan(0)
+    expect(within(dialog).getByText(/bersifat permanen/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/dibatalkan dan produk tetap tersimpan di Arsip/i)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Batal' }))
+    expect(mocks.delete).not.toHaveBeenCalled()
+
+    await user.click(screen.getAllByRole('button', { name: 'Hapus' })[0])
+    const dialog2 = await screen.findByRole('alertdialog', { name: 'Hapus Permanen Produk' })
+    await user.click(within(dialog2).getByRole('button', { name: 'Hapus Permanen' }))
+
+    await waitFor(() => {
+      expect(mocks.delete).toHaveBeenCalledWith('/archive/products/p-arsip')
+    })
+    expect(await screen.findByText('Produk berhasil dihapus permanen dari Arsip.')).toBeInTheDocument()
+  })
+
+  it('menampilkan alasan penolakan backend dan menyatakan produk tetap di Arsip', async () => {
+    mocks.delete.mockRejectedValueOnce({
+      response: {
+        data: {
+          message:
+            'Produk tidak dapat dihapus karena masih memiliki riwayat produksi (1), stok tersisa (1). Data tetap tersimpan di Arsip.',
+        },
+      },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    await user.click(screen.getAllByRole('button', { name: 'Hapus' })[0])
+    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen Produk' })
+    await user.click(within(dialog).getByRole('button', { name: 'Hapus Permanen' }))
+
+    expect(await screen.findByText('Penghapusan Ditolak')).toBeInTheDocument()
+    expect(await screen.findByText(/masih memiliki riwayat produksi \(1\), stok tersisa \(1\)/i)).toBeInTheDocument()
+  })
+
+  it('bahan baku dan akun tidak mendapat tombol Hapus', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    await user.click(await screen.findByRole('tab', { name: /Bahan Baku/ }))
+    await waitFor(() =>
+      expect(mocks.get).toHaveBeenCalledWith('/archive/materials', {
+        params: { page: 1, pageSize: 20 },
+      })
+    )
     expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+
+    await user.click(await screen.findByRole('tab', { name: /Akun Pengguna/ }))
+    await waitFor(() =>
+      expect(mocks.get).toHaveBeenCalledWith('/archive/users', {
+        params: { page: 1, pageSize: 20 },
+      })
+    )
+    expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+  })
+
+  it('Operator tidak melihat tombol Hapus pada produk arsip', async () => {
+    authState.role = 'OPERATOR'
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Pulihkan/ }).length).toBeGreaterThan(0)
   })
 })

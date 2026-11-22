@@ -91,6 +91,7 @@ export async function permanentlyDeleteProduct(
     const [
       productions,
       batches,
+      stockBatches,
       saleItems,
       qrPublications,
       stockAdjustments,
@@ -100,6 +101,7 @@ export async function permanentlyDeleteProduct(
     ] = await Promise.all([
       tx.production.count({ where: { productId: id } }),
       tx.batch.count({ where: { productId: id } }),
+      tx.batch.count({ where: { productId: id, stockQuantity: { gt: 0 } } }),
       tx.saleItem.count({ where: { productId: id } }),
       tx.qrPublication.count({ where: { batch: { productId: id } } }),
       tx.stockAdjustment.count({ where: { batch: { productId: id } } }),
@@ -111,6 +113,7 @@ export async function permanentlyDeleteProduct(
     const blockers = collect([
       { label: 'riwayat produksi', count: productions },
       { label: 'riwayat stok/batch', count: batches },
+      { label: 'stok tersisa', count: stockBatches },
       { label: 'riwayat penjualan', count: saleItems },
       { label: 'publikasi QR', count: qrPublications },
       { label: 'riwayat penyesuaian stok batch', count: stockAdjustments },
