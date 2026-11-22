@@ -333,7 +333,7 @@ export function ArchivePage() {
           <span className="summary-value">{summary?.materials ?? '-'}</span>
         </div>
         <div className="summary-item">
-          <span className="card-label">Akun Pengguna</span>
+          <span className="card-label">Akun</span>
           <span className="summary-value">{summary?.users ?? '-'}</span>
         </div>
       </div>
