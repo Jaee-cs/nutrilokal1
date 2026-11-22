@@ -3,9 +3,9 @@
  *
  * Menampilkan master data yang dinonaktifkan/arsip (Produk, Bahan Baku, Akun
  * Pengguna) dari endpoint /api/archive. Halaman ini tidak menyimpan salinan:
- * data tetap berada di tabel asal dengan ID yang sama. Kartu produk arsip
- * menyediakan Detail, Pulihkan, dan Hapus permanen (Admin) dengan validasi
- * relasi di backend. Bahan baku dan akun sengaja tidak mendapat tombol Hapus.
+ * data tetap berada di tabel asal dengan ID yang sama. Setiap kartu menyediakan
+ * Detail, Pulihkan, dan Hapus permanen (Admin). Validasi relasi di backend
+ * disesuaikan dengan jenis datanya (produk, bahan baku, atau akun).
  *
  * Tab "Lainnya" sengaja tidak ada karena tidak ada master lain yang relevan
  * untuk diarsipkan. Transaksi/produksi/penjualan/pergerakan stok adalah
@@ -106,12 +106,18 @@ function archivedBy(row: ArchiveRow): string {
 }
 
 /**
- * Hapus permanen hanya untuk kategori produk dan hanya untuk Admin.
- * Satu sumber keputusan ini dipakai tabel desktop, kartu mobile, modal detail,
- * dan pengaman handler agar tidak pernah diterapkan ke kategori lain.
+ * Hapus permanen tersedia untuk Admin pada semua kategori arsip.
+ * Jenis data yang dihapus ditentukan oleh tab aktif, bukan oleh tombol.
  */
-function canDeleteArchive(kind: ArchiveKind, isAdmin: boolean): boolean {
-  return kind === 'products' && isAdmin
+function canDeleteArchive(isAdmin: boolean): boolean {
+  return isAdmin
+}
+
+/** Kata benda yang dipakai pesan konfirmasi sesuai kategori arsip. */
+function archiveNoun(kind: ArchiveKind): string {
+  if (kind === 'products') return 'produk'
+  if (kind === 'materials') return 'bahan baku'
+  return 'akun'
 }
 
 /** Baris ringkas untuk tabel desktop maupun kartu mobile. */
@@ -276,30 +282,37 @@ export function ArchivePage() {
   }
 
   /**
-   * Hapus permanen khusus produk arsip. Backend memeriksa ulang seluruh
-   * relasi di dalam transaksi tepat sebelum penghapusan, jadi penolakan
-   * tetap berlaku bila endpoint dipanggil langsung lewat API.
+   * Hapus permanen untuk semua kategori arsip. Jenis data diambil dari tab
+   * aktif supaya endpoint dan validasi backend sesuai kategori. Backend
+   * memeriksa ulang seluruh relasi di dalam transaksi tepat sebelum hapus,
+   * jadi penolakan tetap berlaku bila API dipanggil langsung.
    */
   async function requestDelete(row: ArchiveRow) {
-    if (!canDeleteArchive(activeTab, isAdmin)) return
+    if (!canDeleteArchive(isAdmin)) return
     const label = identityOf(row)
+    const noun = archiveNoun(activeTab)
     const confirmed = await notify.confirm({
-      title: 'Hapus Permanen Produk',
+      title: `Hapus Permanen ${KIND_CONFIG[activeTab].label}`,
       message:
-        `Produk "${label}" akan dihapus permanen dari Arsip. Tindakan ini bersifat permanen ` +
-        'dan tidak dapat dipulihkan. Lanjutkan hanya bila produk ini benar-benar belum memiliki riwayat.',
+        `${KIND_CONFIG[activeTab].label} "${label}" akan dihapus permanen dari Arsip. ` +
+        'Tindakan ini bersifat permanen dan tidak dapat dipulihkan. Lanjutkan hanya bila data ' +
+        'ini benar-benar belum memiliki riwayat maupun relasi yang harus dipertahankan.',
       tone: 'danger',
       confirmLabel: 'Hapus Permanen',
       cancelLabel: 'Batal',
       details: (
         <div className="archive-restore-details">
           <p>
-            Sistem akan memeriksa ulang produksi, batch, stok, penjualan, pergerakan stok,
-            dan relasi lainnya tepat sebelum penghapusan. Bila ditemukan riwayat, penghapusan
-            dibatalkan dan produk tetap tersimpan di Arsip.
+            Sistem akan memeriksa ulang riwayat dan relasi {noun} sesuai jenisnya tepat sebelum
+            penghapusan. Bila ditemukan riwayat, penghapusan dibatalkan dan {noun} tetap
+            tersimpan di Arsip.
           </p>
           <div className="account-delete-row">
-            <span>Nama produk</span>
+            <span>Kategori</span>
+            <strong>{KIND_CONFIG[activeTab].label}</strong>
+          </div>
+          <div className="account-delete-row">
+            <span>Nama data</span>
             <strong>{label}</strong>
           </div>
           <div className="account-delete-row">
@@ -313,14 +326,15 @@ export function ArchivePage() {
 
     setDeletingId(row.id)
     try {
-      const res = await api.delete(`/archive/products/${row.id}`)
+      const res = await api.delete(`/archive/${activeTab}/${row.id}`)
       setDetail(null)
       setReloadToken((value) => value + 1)
       if (rows.length === 1 && page > 1) setPage((value) => value - 1)
-      notify.success(res.data?.message || 'Produk berhasil dihapus permanen.')
+      notify.success(res.data?.message || 'Data berhasil dihapus permanen.')
     } catch (err: any) {
       notify.error(
-        err.response?.data?.message || 'Produk tetap tersimpan di Arsip. Periksa riwayat dan relasinya.',
+        err.response?.data?.message ||
+          `${KIND_CONFIG[activeTab].label} tetap tersimpan di Arsip. Periksa riwayat dan relasinya.`,
         'Penghapusan Ditolak'
       )
     } finally {
@@ -438,7 +452,7 @@ export function ArchivePage() {
                             <RotateCcw size={15} aria-hidden="true" />
                             {restoringId === row.id ? 'Memulihkan...' : 'Pulihkan'}
                           </button>
-                          {canDeleteArchive(activeTab, isAdmin) && (
+                          {canDeleteArchive(isAdmin) && (
                             <button
                               type="button"
                               className="button danger-outline"
@@ -509,7 +523,7 @@ export function ArchivePage() {
                   >
                     <RotateCcw size={15} aria-hidden="true" /> Pulihkan
                   </button>
-                  {canDeleteArchive(activeTab, isAdmin) && (
+                  {canDeleteArchive(isAdmin) && (
                     <button
                       type="button"
                       className="button danger-outline"
@@ -558,9 +572,9 @@ export function ArchivePage() {
 
       <p className="archive-footnote text-muted">
         Data arsip tidak muncul pada daftar operasional aktif. Riwayat produksi, penjualan,
-        transaksi, dan pergerakan stok tidak diubah. Hapus permanen hanya tersedia untuk produk
-        arsip dan hanya berhasil bila backend menyatakan produk tidak memiliki riwayat atau
-        relasi; bahan baku dan akun tidak mendapat aksi ini.
+        transaksi, dan pergerakan stok tidak diubah. Hapus permanen tersedia untuk Admin pada
+        ketiga kategori dan hanya berhasil bila backend menyatakan data tidak memiliki riwayat
+        maupun relasi yang harus dipertahankan.
       </p>
 
       {detail && (
@@ -581,7 +595,7 @@ export function ArchivePage() {
                 <RotateCcw size={15} aria-hidden="true" />
                 {restoringId === detail.id ? 'Memulihkan...' : 'Pulihkan'}
               </button>
-              {canDeleteArchive(activeTab, isAdmin) && (
+              {canDeleteArchive(isAdmin) && (
                 <button
                   type="button"
                   className="button danger-outline"

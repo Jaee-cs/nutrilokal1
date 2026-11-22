@@ -146,7 +146,7 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     mockApi()
   })
 
-  it('menampilkan tiga tab master dengan tiga aksi hanya pada produk', async () => {
+  it('menampilkan tiga tab master dengan tiga aksi pada produk', async () => {
     renderPage()
 
     const tabs = await screen.findAllByRole('tab')
@@ -277,6 +277,75 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     expect(await screen.findByText(/masih memiliki riwayat produksi \(1\), stok tersisa \(1\)/i)).toBeInTheDocument()
   })
 
+  it('Hapus bahan baku memakai endpoint dan konfirmasi sesuai kategori', async () => {
+    mocks.delete.mockResolvedValueOnce({
+      data: { message: 'Bahan baku berhasil dihapus permanen dari Arsip.' },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+    await user.click(await screen.findByRole('tab', { name: /Bahan Baku/ }))
+    await screen.findAllByText('Tepung Arsip')
+
+    await user.click(screen.getAllByRole('button', { name: 'Hapus' })[0])
+    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen Bahan Baku' })
+    expect(within(dialog).getAllByText(/Tepung Arsip/).length).toBeGreaterThan(0)
+    expect(within(dialog).getByText(/bersifat permanen/i)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Hapus Permanen' }))
+
+    await waitFor(() => {
+      expect(mocks.delete).toHaveBeenCalledWith('/archive/materials/m-arsip')
+    })
+    expect(
+      await screen.findByText('Bahan baku berhasil dihapus permanen dari Arsip.')
+    ).toBeInTheDocument()
+  })
+
+  it('Hapus akun memakai endpoint dan konfirmasi sesuai kategori', async () => {
+    mocks.delete.mockResolvedValueOnce({
+      data: { message: 'Akun berhasil dihapus permanen dari Arsip.' },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+    await user.click(await screen.findByRole('tab', { name: /Akun Pengguna/ }))
+    await screen.findAllByText('operator.arsip')
+
+    await user.click(screen.getAllByRole('button', { name: 'Hapus' })[0])
+    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen Akun Pengguna' })
+    expect(within(dialog).getAllByText(/operator\.arsip/).length).toBeGreaterThan(0)
+    expect(within(dialog).getByText(/bersifat permanen/i)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Hapus Permanen' }))
+
+    await waitFor(() => {
+      expect(mocks.delete).toHaveBeenCalledWith('/archive/users/u-arsip')
+    })
+    expect(await screen.findByText('Akun berhasil dihapus permanen dari Arsip.')).toBeInTheDocument()
+  })
+
+  it('penolakan hapus akun menampilkan alasan backend tanpa menghapus data', async () => {
+    mocks.delete.mockRejectedValueOnce({
+      response: {
+        data: {
+          message:
+            'Akun tidak dapat dihapus karena masih memiliki riwayat transaksi (2). Data tetap tersimpan di Arsip.',
+        },
+      },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+    await user.click(await screen.findByRole('tab', { name: /Akun Pengguna/ }))
+    await screen.findAllByText('operator.arsip')
+
+    await user.click(screen.getAllByRole('button', { name: 'Hapus' })[0])
+    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen Akun Pengguna' })
+    await user.click(within(dialog).getByRole('button', { name: 'Hapus Permanen' }))
+
+    expect(await screen.findByText('Penghapusan Ditolak')).toBeInTheDocument()
+    expect(await screen.findByText(/masih memiliki riwayat transaksi \(2\)/i)).toBeInTheDocument()
+  })
+
   it('Produk: tiga aksi tampil di tabel desktop dan kartu mobile', async () => {
     renderPage()
     await screen.findAllByText('Keripik Arsip')
@@ -289,7 +358,7 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     expect(actionButtonsPerRow('mobile')).toEqual(expected)
   })
 
-  it('Bahan Baku: hanya Detail dan Pulihkan di desktop maupun mobile', async () => {
+  it('Bahan Baku: tiga aksi tampil di tabel desktop dan kartu mobile', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findAllByText('Keripik Arsip')
@@ -297,12 +366,12 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     await user.click(await screen.findByRole('tab', { name: /Bahan Baku/ }))
     await screen.findAllByText('Tepung Arsip')
 
-    expect(actionButtonsPerRow('desktop')).toEqual([['Detail', 'Pulihkan']])
-    expect(actionButtonsPerRow('mobile')).toEqual([['Detail', 'Pulihkan']])
-    expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+    const expected = [['Detail', 'Pulihkan', 'Hapus']]
+    expect(actionButtonsPerRow('desktop')).toEqual(expected)
+    expect(actionButtonsPerRow('mobile')).toEqual(expected)
   })
 
-  it('Akun Pengguna: hanya Detail dan Pulihkan di desktop maupun mobile', async () => {
+  it('Akun Pengguna: tiga aksi tampil di tabel desktop dan kartu mobile', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findAllByText('Keripik Arsip')
@@ -310,12 +379,12 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     await user.click(await screen.findByRole('tab', { name: /Akun Pengguna/ }))
     await screen.findAllByText('operator.arsip')
 
-    expect(actionButtonsPerRow('desktop')).toEqual([['Detail', 'Pulihkan']])
-    expect(actionButtonsPerRow('mobile')).toEqual([['Detail', 'Pulihkan']])
-    expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+    const expected = [['Detail', 'Pulihkan', 'Hapus']]
+    expect(actionButtonsPerRow('desktop')).toEqual(expected)
+    expect(actionButtonsPerRow('mobile')).toEqual(expected)
   })
 
-  it('modal detail mengikuti kategori: Hapus hanya pada produk', async () => {
+  it('modal detail memiliki tiga aksi pada semua kategori', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findAllByText('Keripik Arsip')
@@ -329,14 +398,14 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     await screen.findAllByText('Tepung Arsip')
     await user.click(screen.getAllByRole('button', { name: 'Detail' })[0])
     dialog = await screen.findByRole('dialog', { name: /Detail Bahan Baku: Tepung Arsip/ })
-    expect(within(dialog).queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Hapus' })).toBeInTheDocument()
     await user.click(within(dialog).getAllByRole('button', { name: 'Tutup' })[0])
 
     await user.click(await screen.findByRole('tab', { name: /Akun Pengguna/ }))
     await screen.findAllByText('operator.arsip')
     await user.click(screen.getAllByRole('button', { name: 'Detail' })[0])
     dialog = await screen.findByRole('dialog', { name: /Detail Akun Pengguna: operator.arsip/ })
-    expect(within(dialog).queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Hapus' })).toBeInTheDocument()
   })
 
   it('Operator tidak melihat tombol Hapus pada produk arsip', async () => {
