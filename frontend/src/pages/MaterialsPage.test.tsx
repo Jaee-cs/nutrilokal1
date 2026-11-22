@@ -141,10 +141,68 @@ describe('MaterialsPage — modal dan aksi per bahan', () => {
       'aria-selected',
       'true',
     )
-    expect(within(dialog).getByLabelText('Bahan Baku')).toHaveValue('m1')
+    const materialField = within(dialog).getByLabelText('Bahan Baku')
+    expect(materialField).toHaveValue('Sapi Segar (kg)')
+    expect(materialField).toHaveAttribute('readonly')
+    expect(within(dialog).queryByRole('combobox', { name: 'Bahan Baku' })).not.toBeInTheDocument()
     expect(within(dialog).getByLabelText('Jumlah (bertanda)')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Alasan')).toBeInTheDocument()
     expect(within(dialog).getByText(/Stok Sapi Segar saat ini: 12 kg/)).toBeInTheDocument()
+  })
+
+  it('modal mengikuti bahan pada kartu yang diklik, termasuk saat berpindah tab dan bahan', async () => {
+    const user = userEvent.setup()
+    render(<MaterialsPage />)
+
+    const first = await openEditDialog(user, 'Sapi Segar')
+    expect(within(first).getByLabelText('Bahan Baku')).toHaveValue('Sapi Segar (kg)')
+    expect(within(first).getByText(/Stok Sapi Segar saat ini: 12 kg/)).toBeInTheDocument()
+    expect(within(first).queryByRole('combobox', { name: 'Bahan Baku' })).not.toBeInTheDocument()
+    await user.click(within(first).getByRole('button', { name: 'Batal' }))
+
+    const second = await openEditDialog(user, 'Kemasan Khusus')
+    expect(within(second).getByLabelText('Bahan Baku')).toHaveValue('Kemasan Khusus (bungkus)')
+    expect(
+      within(second).getByText(/Stok Kemasan Khusus saat ini: 4 bungkus/)
+    ).toBeInTheDocument()
+    expect(within(second).queryByRole('combobox', { name: 'Bahan Baku' })).not.toBeInTheDocument()
+
+    await user.click(within(second).getByRole('tab', { name: 'Penyesuaian Satuan' }))
+    expect(within(second).getByLabelText('Bahan Baku')).toHaveValue('Kemasan Khusus')
+
+    await user.click(within(second).getByRole('tab', { name: 'Penyesuaian Stok' }))
+    expect(within(second).getByLabelText('Bahan Baku')).toHaveValue('Kemasan Khusus (bungkus)')
+    expect(
+      within(second).getByText(/Stok Kemasan Khusus saat ini: 4 bungkus/)
+    ).toBeInTheDocument()
+  })
+
+  it('Penyesuaian Stok mengirim ID bahan dari kartu yang diklik', async () => {
+    const user = userEvent.setup()
+    mocks.get.mockImplementation((url: string) => {
+      if (url === '/materials') return Promise.resolve({ data: { data: [material, manualMaterial] } })
+      if (url === '/materials/m2/movements') return Promise.resolve({ data: { data: [] } })
+      return Promise.reject(new Error(`URL tidak di-mock: ${url}`))
+    })
+    mocks.post.mockResolvedValue({ data: {} })
+
+    render(<MaterialsPage />)
+    const dialog = await openEditDialog(user, 'Kemasan Khusus')
+
+    await user.type(within(dialog).getByLabelText('Jumlah (bertanda)'), '-1')
+    await user.type(within(dialog).getByLabelText('Alasan'), 'Produk rusak')
+    await user.click(within(dialog).getByRole('button', { name: 'Catat Penyesuaian' }))
+
+    await waitFor(() =>
+      expect(mocks.post).toHaveBeenCalledWith('/stock-adjustments', {
+        targetType: 'MATERIAL',
+        targetId: 'm2',
+        quantity: -1,
+        date: todayDateCode(),
+        reason: 'Produk rusak',
+      })
+    )
+    expect(mocks.notify.success).toHaveBeenCalledWith('Penyesuaian stok berhasil dicatat')
   })
 
   it('mengisi tanggal penerimaan dan penyesuaian dengan hari ini secara default', async () => {

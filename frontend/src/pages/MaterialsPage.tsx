@@ -1410,19 +1410,22 @@ export function MaterialsPage() {
               aria-labelledby="edit-tab-stock"
             >
               <form onSubmit={submitAdjustment} className="material-modal-form">
+                {/*
+                 * Bahan baku ditentukan oleh tombol edit pada kartu yang
+                 * diklik (openEditModal). Tidak ada pilihan pengguna di sini,
+                 * sehingga ID yang dikirim ke backend selalu sesuai kartu.
+                 */}
                 <div className="field">
                   <label htmlFor="adj-material">Bahan Baku</label>
-                  <select
+                  <input
                     id="adj-material"
-                    value={adjForm.materialId}
-                    onChange={e => setAdjForm(f => ({ ...f, materialId: e.target.value }))}
-                    required
-                  >
-                    <option value="">Pilih bahan baku</option>
-                    {materials.map(m => (
-                      <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
-                    ))}
-                  </select>
+                    value={
+                      adjMaterial
+                        ? `${adjMaterial.name} (${adjMaterial.unit})`
+                        : 'Bahan baku tidak ditemukan'
+                    }
+                    readOnly
+                  />
                 </div>
                 <div className="form-grid">
                   <div className="field">
