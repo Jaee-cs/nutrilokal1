@@ -81,7 +81,7 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     mockApi()
   })
 
-  it('menampilkan tiga tab master tanpa tab Lainnya, dengan aksi hapus untuk Admin', async () => {
+  it('menampilkan tiga tab master tanpa tab Lainnya dan tanpa aksi hapus permanen', async () => {
     renderPage()
 
     const tabs = await screen.findAllByRole('tab')
@@ -91,7 +91,7 @@ describe('ArchivePage — halaman Arsip Admin', () => {
       'Akun Pengguna (3)',
     ])
     expect(screen.queryByRole('tab', { name: /Lainnya/i })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: 'Hapus' }).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
 
     expect((await screen.findAllByText('Keripik Arsip')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('Admin Utama').length).toBeGreaterThan(0)
@@ -153,68 +153,17 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     ])
   })
 
-  it('menghapus permanen setelah modal konfirmasi danger disetujui', async () => {
+  it('hanya menyediakan Detail dan Pulihkan pada detail arsip', async () => {
     const user = userEvent.setup()
     renderPage()
-    await screen.findAllByText('Keripik Arsip')
 
-    const [deleteButton] = screen.getAllByRole('button', { name: 'Hapus' })
-    await user.click(deleteButton)
+    const [detailButton] = await screen.findAllByRole('button', { name: /Detail/ })
+    await user.click(detailButton)
 
-    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen' })
-    expect(within(dialog).getByText(/bersifat permanen dan tidak dapat dipulihkan/i)).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Batal' })).toBeInTheDocument()
-    await user.click(within(dialog).getByRole('button', { name: 'Hapus Permanen' }))
-
-    await waitFor(() => {
-      expect(mocks.delete).toHaveBeenCalledWith('/archive/products/p-arsip')
-    })
-    expect(await screen.findByText('Produk berhasil dihapus permanen dari Arsip.')).toBeInTheDocument()
-  })
-
-  it('membatalkan konfirmasi tanpa memanggil endpoint hapus', async () => {
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findAllByText('Keripik Arsip')
-
-    const [deleteButton] = screen.getAllByRole('button', { name: 'Hapus' })
-    await user.click(deleteButton)
-    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen' })
-    await user.click(within(dialog).getByRole('button', { name: 'Batal' }))
-
-    expect(mocks.delete).not.toHaveBeenCalled()
-  })
-
-  it('menampilkan alasan penolakan backend sebagai notifikasi terpusat', async () => {
-    mocks.delete.mockRejectedValueOnce({
-      response: {
-        data: {
-          message:
-            'Produk tidak dapat dihapus karena masih memiliki riwayat produksi dan penjualan. Data tetap tersimpan di Arsip.',
-        },
-      },
-    })
-    const user = userEvent.setup()
-    renderPage()
-    await screen.findAllByText('Keripik Arsip')
-
-    const [deleteButton] = screen.getAllByRole('button', { name: 'Hapus' })
-    await user.click(deleteButton)
-    const dialog = await screen.findByRole('alertdialog', { name: 'Hapus Permanen' })
-    await user.click(within(dialog).getByRole('button', { name: 'Hapus Permanen' }))
-
-    expect(await screen.findByText('Penghapusan Ditolak')).toBeInTheDocument()
-    expect(
-      await screen.findByText(/masih memiliki riwayat produksi dan penjualan/i)
-    ).toBeInTheDocument()
-  })
-
-  it('Operator tidak melihat tombol hapus sama sekali', async () => {
-    authState.role = 'OPERATOR'
-    renderPage()
-    await screen.findAllByText('Keripik Arsip')
-
+    const dialog = await screen.findByRole('dialog', { name: /Detail Produk: Keripik Arsip/ })
+    expect(within(dialog).getAllByRole('button', { name: 'Tutup' }).length).toBeGreaterThan(0)
+    expect(within(dialog).getByRole('button', { name: /Pulihkan/ })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /Pulihkan/ }).length).toBeGreaterThan(0)
   })
 })

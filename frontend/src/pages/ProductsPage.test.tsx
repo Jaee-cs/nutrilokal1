@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
   patch: vi.fn(),
+  delete: vi.fn(),
   notify: {
     success: vi.fn(),
     error: vi.fn(),
@@ -27,7 +28,7 @@ vi.mock('../components/NotificationProvider', () => ({
 }))
 
 vi.mock('../lib/api', () => ({
-  default: { get: mocks.get, post: mocks.post, patch: mocks.patch },
+  default: { get: mocks.get, post: mocks.post, patch: mocks.patch, delete: mocks.delete },
   UNAUTHORIZED_EVENT: 'nutrilokal:unauthorized',
 }))
 
@@ -139,6 +140,7 @@ describe('ProductsPage — modal tambah produk', () => {
     mocks.get.mockReset()
     mocks.post.mockReset()
     mocks.patch.mockReset()
+    mocks.delete.mockReset()
     Object.values(mocks.notify).forEach((fn) => fn.mockReset())
     mockApi()
     mocks.post.mockResolvedValue({ data: { product: { ...product, id: 'p-new' } } })
@@ -163,6 +165,83 @@ describe('ProductsPage — modal tambah produk', () => {
     expect(within(dialog).getByRole('button', { name: 'Simpan Produk' })).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Tutup dialog produk' })).toBeInTheDocument()
     expect(document.body.style.overflow).toBe('hidden')
+  })
+
+  it('kartu produk menampilkan Arsipkan dan Hapus, bukan Nonaktifkan', async () => {
+    render(<ProductsPage />)
+
+    expect(await screen.findByRole('button', { name: 'Arsipkan Keripik Uji' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hapus Keripik Uji' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Nonaktifkan/ })).not.toBeInTheDocument()
+  })
+
+  it('Arsipkan menampilkan konfirmasi bermama produk dan hanya berjalan setelah disetujui', async () => {
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    mocks.notify.confirm.mockResolvedValueOnce(false)
+
+    await user.click(await screen.findByRole('button', { name: 'Arsipkan Keripik Uji' }))
+    expect(mocks.notify.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Arsipkan Produk',
+        confirmLabel: 'Ya, Arsipkan',
+        message: expect.stringContaining('Keripik Uji'),
+      })
+    )
+    expect(mocks.delete).not.toHaveBeenCalled()
+
+    mocks.notify.confirm.mockResolvedValueOnce(true)
+    mocks.delete.mockResolvedValueOnce({ data: { message: 'Produk diarsipkan.' } })
+    await user.click(screen.getByRole('button', { name: 'Arsipkan Keripik Uji' }))
+
+    await waitFor(() => expect(mocks.delete).toHaveBeenCalledWith('/products/p1'))
+    expect(mocks.notify.success).toHaveBeenCalledWith('Produk diarsipkan.')
+  })
+
+  it('Hapus memakai konfirmasi danger, menyebut nama produk, dan memanggil endpoint permanen', async () => {
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    mocks.notify.confirm.mockResolvedValueOnce(false)
+
+    await user.click(await screen.findByRole('button', { name: 'Hapus Keripik Uji' }))
+    expect(mocks.notify.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Hapus Permanen Produk',
+        tone: 'danger',
+        confirmLabel: 'Hapus Permanen',
+        cancelLabel: 'Batal',
+        message: expect.stringContaining('Keripik Uji'),
+      })
+    )
+    expect(mocks.delete).not.toHaveBeenCalled()
+
+    mocks.notify.confirm.mockResolvedValueOnce(true)
+    mocks.delete.mockResolvedValueOnce({ data: { message: 'Produk berhasil dihapus permanen.' } })
+    await user.click(screen.getByRole('button', { name: 'Hapus Keripik Uji' }))
+
+    await waitFor(() => expect(mocks.delete).toHaveBeenCalledWith('/products/p1/permanent'))
+    expect(mocks.notify.success).toHaveBeenCalledWith('Produk berhasil dihapus permanen.')
+  })
+
+  it('Hapus menampilkan alasan penolakan backend tanpa menghapus data', async () => {
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    mocks.notify.confirm.mockResolvedValueOnce(true)
+    mocks.delete.mockRejectedValueOnce({
+      response: {
+        data: {
+          message:
+            'Produk tidak dapat dihapus karena masih memiliki riwayat produksi (1). Gunakan Arsipkan bila produk masih diperlukan.',
+        },
+      },
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Hapus Keripik Uji' }))
+    await waitFor(() => expect(mocks.notify.error).toHaveBeenCalled())
+    expect(mocks.notify.error).toHaveBeenCalledWith(
+      expect.stringContaining('riwayat produksi'),
+      'Penghapusan Ditolak'
+    )
   })
 
   it('Admin menyimpan satu komponen nilai gizi dalam bentuk lama tanpa nama komponen', async () => {
@@ -444,6 +523,7 @@ describe('ProductsPage — riwayat pergerakan stok produk', () => {
     mocks.get.mockReset()
     mocks.post.mockReset()
     mocks.patch.mockReset()
+    mocks.delete.mockReset()
     Object.values(mocks.notify).forEach((fn) => fn.mockReset())
     mockApi()
     mocks.post.mockResolvedValue({ data: { product: { ...product, id: 'p-new' } } })

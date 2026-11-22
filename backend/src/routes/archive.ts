@@ -87,7 +87,7 @@ function sendResult<T>(
 }
 
 /** Respons hapus permanen: alasan penolakan ikut dikirim ke notifikasi Admin. */
-function sendDeleteResult<T>(
+export function sendDeleteResult<T>(
   res: Response,
   result: PermanentDeleteResult<T>,
   present: (data: T) => unknown

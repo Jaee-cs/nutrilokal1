@@ -64,6 +64,20 @@ function remove(kind: Kind, id: string, token = adminToken) {
   return request(app).delete(`/api/archive/${kind}/${id}`).set(auth(token));
 }
 
+function removeDirect(id: string, token = adminToken) {
+  return request(app).delete(`/api/products/${id}/permanent`).set(auth(token));
+}
+
+async function createBatch(productId: string, suffix: string) {
+  return prisma.batch.create({
+    data: {
+      code: `${runId}-batch-${suffix}`,
+      productId,
+      stockQuantity: 0,
+    },
+  });
+}
+
 beforeAll(async () => {
   const admin = await prisma.user.create({
     data: {
@@ -350,5 +364,108 @@ describe('Hapus permanen terbatas dari Arsip', () => {
     const again = await remove('products', product.id);
     expect(again.status).toBe(404);
     expect(again.body.message).toBe('Produk tidak ditemukan.');
+  });
+});
+
+describe('Hapus permanen langsung dari daftar produk aktif', () => {
+  it('1. Produk aktif tanpa riwayat dan tanpa stok dapat dihapus permanen', async () => {
+    const material = await createMaterial('resep-langsung');
+    const product = await createProduct('bersih-langsung');
+    await prisma.productRecipeItem.create({
+      data: {
+        productId: product.id,
+        materialId: material.id,
+        quantityPerUnit: 1,
+        recipeUnit: 'kg',
+      },
+    });
+
+    const res = await removeDirect(product.id);
+    expect(res.status).toBe(200);
+    expect(res.body.message).toContain('berhasil dihapus permanen');
+    expect(await prisma.product.findUnique({ where: { id: product.id } })).toBeNull();
+    expect(
+      await prisma.productRecipeItem.count({ where: { productId: product.id } })
+    ).toBe(0);
+    expect(await prisma.material.findUnique({ where: { id: material.id } })).not.toBeNull();
+  });
+
+  it('2. Produk dengan riwayat produksi ditolak dan diarahkan ke Arsipkan', async () => {
+    const product = await createProduct('produksi-langsung');
+    await prisma.production.create({
+      data: {
+        productId: product.id,
+        productionDate: new Date(),
+        yieldQuantity: 2,
+        recordedById: adminId,
+      },
+    });
+
+    const res = await removeDirect(product.id);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('riwayat produksi');
+    expect(res.body.message).toContain('Gunakan Arsipkan');
+    expect(res.body.blockers).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'riwayat produksi', count: 1 })])
+    );
+    expect(await prisma.product.findUnique({ where: { id: product.id } })).not.toBeNull();
+  });
+
+  it('3. Produk dengan riwayat penjualan ditolak', async () => {
+    const product = await createProduct('penjualan-langsung');
+    const tx = await prisma.saleTransaction.create({
+      data: { total: 12000, recordedById: adminId },
+    });
+    await prisma.saleItem.create({
+      data: {
+        transactionId: tx.id,
+        productId: product.id,
+        quantity: 1,
+        unitPrice: 12000,
+      },
+    });
+
+    const res = await removeDirect(product.id);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('riwayat penjualan');
+    expect(await prisma.product.findUnique({ where: { id: product.id } })).not.toBeNull();
+    expect(await prisma.saleItem.count({ where: { transactionId: tx.id } })).toBe(1);
+  });
+
+  it('4. Produk dengan riwayat pergerakan stok ditolak', async () => {
+    const product = await createProduct('pergerakan-langsung');
+    const batch = await createBatch(product.id, 'pergerakan');
+    await prisma.batchStockMovement.create({
+      data: {
+        batchId: batch.id,
+        type: 'OPENING_BALANCE',
+        quantity: 5,
+        occurredAt: new Date(),
+        recordedById: adminId,
+      },
+    });
+
+    const res = await removeDirect(product.id);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('riwayat pergerakan stok batch');
+    expect(await prisma.product.findUnique({ where: { id: product.id } })).not.toBeNull();
+  });
+
+  it('5. Produk yang masih memiliki batch atau stok ditolak', async () => {
+    const product = await createProduct('batch-langsung');
+    await createBatch(product.id, 'stok');
+
+    const res = await removeDirect(product.id);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('riwayat stok/batch');
+    expect(await prisma.product.findUnique({ where: { id: product.id } })).not.toBeNull();
+  });
+
+  it('6. Operator tidak dapat memanggil endpoint hapus permanen lewat API', async () => {
+    const product = await createProduct('operator-langsung');
+
+    const res = await removeDirect(product.id, operatorToken);
+    expect(res.status).toBe(403);
+    expect(await prisma.product.findUnique({ where: { id: product.id } })).not.toBeNull();
   });
 });

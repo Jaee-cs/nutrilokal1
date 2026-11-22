@@ -7,6 +7,8 @@
  * - DELETE kini berarti arsip (soft archive), bukan hapus permanen: baris yang
  *   sama diberi isActive = false plus waktu/Admin/alasan. Foto, resep, gizi,
  *   QR, batch, dan seluruh riwayat tidak diubah.
+ * - DELETE /:id/permanent adalah hapus permanen khusus produk yang benar-benar
+ *   belum memiliki riwayat; validasi backend yang sama berlaku lewat API.
  * - Daftar operasional hanya menampilkan produk aktif. Produk arsip tetap
  *   diakses lewat endpoint detail/riwayat dan halaman Arsip Admin.
  * - Produk nonaktif tidak tersedia untuk produksi/penjualan baru dan tidak
@@ -21,6 +23,8 @@ import {
 } from '../lib/archive';
 import { pathId } from '../lib/http';
 import { hasOperationalHistory } from '../lib/master-history';
+import { permanentlyDeleteProduct } from '../lib/permanent-delete';
+import { sendDeleteResult } from './archive';
 import { parseReportPeriod } from '../lib/report';
 import { prisma } from '../lib/prisma';
 import { toPublicProduct } from '../lib/product';
@@ -668,4 +672,18 @@ productsRouter.delete('/:id', authenticate, requireAdmin, async (req, res) => {
     archived: true,
     product: toPublicProduct(result.data),
   });
+});
+
+/**
+ * Hapus permanen dari daftar produk aktif (Admin only).
+ *
+ * Berbeda dengan DELETE /api/products/:id yang berarti arsip, endpoint ini
+ * benar-benar menghapus baris. Validasi relasi dijalankan ulang di dalam
+ * transaksi yang sama tepat sebelum penghapusan, jadi products dengan
+ * produksi, batch, penjualan, pergerakan stok, QR, atau peninjauan satuan
+ * tetap ditolak meskipun dipanggil langsung lewat API.
+ */
+productsRouter.delete('/:id/permanent', authenticate, requireAdmin, async (req, res) => {
+  const result = await permanentlyDeleteProduct(pathId(req), { allowActive: true });
+  sendDeleteResult(res, result, (data) => data);
 });

@@ -1,5 +1,5 @@
 /**
- * Penghapusan permanen terbatas untuk data yang sudah berada di Arsip.
+ * Penghapusan permanen terbatas untuk master yang benar-benar belum dipakai.
  *
  * Aturan utama: riwayat tidak boleh ikut terhapus. Sebelum menghapus, seluruh
  * relasi Prisma yang relevan dihitung ulang di dalam transaksi yang sama.
@@ -7,6 +7,10 @@
  * bersamaan tidak sama-sama lolos pemeriksaan. Tidak ada cascade delete:
  * resep produk (milik produk itu sendiri) dihapus secara eksplisit, sedangkan
  * semua tabel historis bersifat Restrict/SetNull dan diperiksa di sini.
+ *
+ * Produk aktif juga boleh dihapus lewat jalur daftar produk (allowActive),
+ * tetapi hanya bila lolos audit yang sama. Jalur Arsip tetap mempertahankan
+ * aturan lama: data harus sudah diarsipkan.
  */
 import type { Prisma } from '@prisma/client';
 import { userActivityBlockers, type ActivityBlocker } from './account-history';
@@ -30,12 +34,16 @@ function collect(
     .map((check) => ({ label: check.label, count: check.count }));
 }
 
-function blocked(label: string, blockers: DeleteBlocker[]): PermanentDeleteResult<never> {
+function blocked(
+  label: string,
+  blockers: DeleteBlocker[],
+  hint = 'Data tetap tersimpan di Arsip.'
+): PermanentDeleteResult<never> {
   const detail = blockers.map((item) => `${item.label} (${item.count})`).join(', ');
   return {
     ok: false,
     status: 409,
-    message: `${label} tidak dapat dihapus karena masih memiliki ${detail}. Data tetap tersimpan di Arsip.`,
+    message: `${label} tidak dapat dihapus karena masih memiliki ${detail}. ${hint}`,
     blockers,
   };
 }
@@ -58,15 +66,25 @@ async function lockRow(
   }
 }
 
-/** Hapus permanen produk yang sudah diarsipkan dan benar-benar tanpa riwayat. */
+type ProductDeleteOptions = {
+  /** Jalur daftar produk boleh menghapus produk aktif yang masih bersih. */
+  allowActive?: boolean;
+};
+
+/**
+ * Hapus permanen produk yang benar-benar belum memiliki riwayat.
+ * Jalur Arsip memakai aturan lama (harus diarsipkan); jalur daftar produk
+ * memakai `allowActive: true` setelah validasi yang sama persis.
+ */
 export async function permanentlyDeleteProduct(
-  id: string
+  id: string,
+  options: ProductDeleteOptions = {}
 ): Promise<PermanentDeleteResult<{ id: string }>> {
   return prisma.$transaction(async (tx) => {
     await lockRow(tx, 'product', id);
     const target = await tx.product.findUnique({ where: { id } });
     if (!target) return failed(404, 'Produk tidak ditemukan.');
-    if (target.isActive) {
+    if (target.isActive && !options.allowActive) {
       return failed(409, 'Produk masih aktif. Arsipkan terlebih dahulu sebelum menghapus permanen.');
     }
 
@@ -76,6 +94,8 @@ export async function permanentlyDeleteProduct(
       saleItems,
       qrPublications,
       stockAdjustments,
+      stockMovements,
+      saleAllocations,
       unitReviews,
     ] = await Promise.all([
       tx.production.count({ where: { productId: id } }),
@@ -83,7 +103,9 @@ export async function permanentlyDeleteProduct(
       tx.saleItem.count({ where: { productId: id } }),
       tx.qrPublication.count({ where: { batch: { productId: id } } }),
       tx.stockAdjustment.count({ where: { batch: { productId: id } } }),
-      tx.unitReview.count({ where: { entityId: id } }),
+      tx.batchStockMovement.count({ where: { batch: { productId: id } } }),
+      tx.saleAllocation.count({ where: { item: { productId: id } } }),
+      tx.unitReview.count({ where: { entityType: 'PRODUCT', entityId: id } }),
     ]);
 
     const blockers = collect([
@@ -92,9 +114,19 @@ export async function permanentlyDeleteProduct(
       { label: 'riwayat penjualan', count: saleItems },
       { label: 'publikasi QR', count: qrPublications },
       { label: 'riwayat penyesuaian stok batch', count: stockAdjustments },
+      { label: 'riwayat pergerakan stok batch', count: stockMovements },
+      { label: 'alokasi penjualan batch', count: saleAllocations },
       { label: 'riwayat peninjauan satuan', count: unitReviews },
     ]);
-    if (blockers.length > 0) return blocked('Produk', blockers);
+    if (blockers.length > 0) {
+      return blocked(
+        'Produk',
+        blockers,
+        target.isActive
+          ? 'Gunakan Arsipkan bila produk masih diperlukan; seluruh riwayat tetap tersimpan.'
+          : undefined
+      );
+    }
 
     // Resep adalah master milik produk ini (bukan riwayat). Dihapus eksplisit
     // agar tidak bergantung pada ON DELETE CASCADE.
@@ -103,7 +135,9 @@ export async function permanentlyDeleteProduct(
     return {
       ok: true,
       data: { id },
-      message: 'Produk berhasil dihapus permanen dari Arsip.',
+      message: target.isActive
+        ? 'Produk berhasil dihapus permanen.'
+        : 'Produk berhasil dihapus permanen dari Arsip.',
     };
   });
 }

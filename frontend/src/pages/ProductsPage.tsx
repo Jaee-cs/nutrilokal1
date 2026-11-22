@@ -417,8 +417,8 @@ export function ProductsPage() {
   // Mode edit (hanya Admin): id produk yang sedang diubah + datanya.
   const [editTarget, setEditTarget] = useState<Product | null>(null)
 
-  // Proses arsip berjalan setelah pengguna menyetujui dialog konfirmasi.
-  const [deleting, setDeleting] = useState(false)
+  // Aksi kartu berjalan setelah Admin menyetujui dialog konfirmasi.
+  const [busyProductId, setBusyProductId] = useState<string | null>(null)
 
   // Jumlah produk arsip berasal dari endpoint Arsip (daftar operasional
   // sekarang hanya berisi produk aktif).
@@ -982,23 +982,11 @@ export function ProductsPage() {
     setSubmitting(false)
   }
 
-  async function toggleActive(id: string, current: boolean) {
-    try {
-      await api.patch(`/products/${id}`, { isActive: !current })
-      const refreshed = await fetchProducts()
-      if (refreshed) {
-        notify.success(current ? 'Produk dinonaktifkan' : 'Produk diaktifkan kembali')
-      }
-    } catch (err: any) {
-      notify.error(err.response?.data?.message || 'Gagal mengubah status')
-    }
-  }
-
   /**
-   * Konfirmasi arsip memakai dialog terpusat. Rincian stok dan batch tetap
-   * ditampilkan agar Admin memahami dampak tindakan sebelum menyetujuinya.
+   * Arsipkan: soft archive dengan konfirmasi yang menyebut nama produk.
+   * ID, foto, resep, gizi, QR, stok, dan riwayat tidak diubah.
    */
-  async function requestDelete(product: Product) {
+  async function requestArchive(product: Product) {
     const photo = productPhotoUrl(product.photoUrl)
     const confirmed = await notify.confirm({
       title: 'Arsipkan Produk',
@@ -1031,7 +1019,7 @@ export function ProductsPage() {
     })
     if (!confirmed) return
 
-    setDeleting(true)
+    setBusyProductId(product.id)
     try {
       // Kompatibilitas endpoint: DELETE kini selalu berarti arsip.
       const res = await api.delete(`/products/${product.id}`)
@@ -1044,7 +1032,63 @@ export function ProductsPage() {
     } catch (err: any) {
       notify.error(err.response?.data?.message || 'Gagal mengarsipkan produk')
     } finally {
-      setDeleting(false)
+      setBusyProductId(null)
+    }
+  }
+
+  /**
+   * Hapus permanen hanya untuk produk yang benar-benar belum dipakai.
+   * Backend memeriksa ulang seluruh relasi di dalam transaksi tepat sebelum
+   * penghapusan, jadi validasi tetap berlaku bila API dipanggil langsung.
+   */
+  async function requestPermanentDelete(product: Product) {
+    const confirmed = await notify.confirm({
+      title: 'Hapus Permanen Produk',
+      message:
+        `Produk "${product.name}" akan dihapus permanen dan tidak dapat dipulihkan. ` +
+        'Lanjutkan hanya bila produk ini belum pernah digunakan.',
+      tone: 'danger',
+      confirmLabel: 'Hapus Permanen',
+      cancelLabel: 'Batal',
+      details: (
+        <div className="archive-restore-details">
+          <p>
+            Sistem akan memeriksa ulang produksi, batch, penjualan, pergerakan stok, QR,
+            dan riwayat lainnya tepat sebelum penghapusan. Bila ditemukan riwayat,
+            penghapusan dibatalkan dan Admin diarahkan untuk memakai <strong>Arsipkan</strong>.
+          </p>
+          <div className="account-delete-row">
+            <span>Nama produk</span>
+            <strong>{product.name}</strong>
+          </div>
+          <div className="account-delete-row">
+            <span>ID</span>
+            <strong>{product.id}</strong>
+          </div>
+          <div className="account-delete-row">
+            <span>Stok / Batch</span>
+            <strong>
+              {Number(product.stock ?? 0).toLocaleString('id-ID')} {product.unit} ·{' '}
+              {Number(product.batchCount ?? 0).toLocaleString('id-ID')} batch
+            </strong>
+          </div>
+        </div>
+      ),
+    })
+    if (!confirmed) return
+
+    setBusyProductId(product.id)
+    try {
+      const res = await api.delete(`/products/${product.id}/permanent`)
+      const refreshed = await fetchProducts()
+      if (refreshed) notify.success(res.data?.message || 'Produk berhasil dihapus permanen.')
+    } catch (err: any) {
+      notify.error(
+        err.response?.data?.message || 'Penghapusan ditolak. Periksa riwayat produk.',
+        'Penghapusan Ditolak'
+      )
+    } finally {
+      setBusyProductId(null)
     }
   }
 
@@ -1151,20 +1195,25 @@ export function ProductsPage() {
                 </div>
 
                 <div className="product-actions">
-                  <button
-                    className="button secondary"
-                    onClick={() => toggleActive(p.id, p.isActive)}
-                  >
-                    {p.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                  </button>
                   {isAdmin && (
                     <button
-                      className="button danger-outline"
-                      onClick={() => requestDelete(p)}
-                      disabled={deleting}
+                      className="button secondary"
+                      onClick={() => void requestArchive(p)}
+                      disabled={busyProductId === p.id}
                       aria-label={`Arsipkan ${p.name}`}
                     >
                       Arsipkan
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <button
+                      className="button danger-outline"
+                      onClick={() => void requestPermanentDelete(p)}
+                      disabled={busyProductId === p.id}
+                      aria-label={`Hapus ${p.name}`}
+                      title="Hapus permanen produk yang belum memiliki riwayat"
+                    >
+                      Hapus
                     </button>
                   )}
                 </div>
