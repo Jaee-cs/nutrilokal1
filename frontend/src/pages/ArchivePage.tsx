@@ -105,6 +105,15 @@ function archivedBy(row: ArchiveRow): string {
   return row.archivedByName || row.archivedById || '-'
 }
 
+/**
+ * Hapus permanen hanya untuk kategori produk dan hanya untuk Admin.
+ * Satu sumber keputusan ini dipakai tabel desktop, kartu mobile, modal detail,
+ * dan pengaman handler agar tidak pernah diterapkan ke kategori lain.
+ */
+function canDeleteArchive(kind: ArchiveKind, isAdmin: boolean): boolean {
+  return kind === 'products' && isAdmin
+}
+
 /** Baris ringkas untuk tabel desktop maupun kartu mobile. */
 function ArchiveBadges({ row }: { row: ArchiveRow }) {
   return (
@@ -272,7 +281,7 @@ export function ArchivePage() {
    * tetap berlaku bila endpoint dipanggil langsung lewat API.
    */
   async function requestDelete(row: ArchiveRow) {
-    if (activeTab !== 'products') return
+    if (!canDeleteArchive(activeTab, isAdmin)) return
     const label = identityOf(row)
     const confirmed = await notify.confirm({
       title: 'Hapus Permanen Produk',
@@ -429,7 +438,7 @@ export function ArchivePage() {
                             <RotateCcw size={15} aria-hidden="true" />
                             {restoringId === row.id ? 'Memulihkan...' : 'Pulihkan'}
                           </button>
-                          {activeTab === 'products' && isAdmin && (
+                          {canDeleteArchive(activeTab, isAdmin) && (
                             <button
                               type="button"
                               className="button danger-outline"
@@ -500,7 +509,7 @@ export function ArchivePage() {
                   >
                     <RotateCcw size={15} aria-hidden="true" /> Pulihkan
                   </button>
-                  {activeTab === 'products' && isAdmin && (
+                  {canDeleteArchive(activeTab, isAdmin) && (
                     <button
                       type="button"
                       className="button danger-outline"
@@ -572,7 +581,7 @@ export function ArchivePage() {
                 <RotateCcw size={15} aria-hidden="true" />
                 {restoringId === detail.id ? 'Memulihkan...' : 'Pulihkan'}
               </button>
-              {activeTab === 'products' && isAdmin && (
+              {canDeleteArchive(activeTab, isAdmin) && (
                 <button
                   type="button"
                   className="button danger-outline"

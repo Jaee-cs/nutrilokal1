@@ -40,6 +40,33 @@ const olderProduct = {
   archivedAt: '2026-11-01T02:15:00.000Z',
 }
 
+const archivedMaterial = {
+  id: 'm-arsip',
+  name: 'Tepung Arsip',
+  unit: 'kg',
+  stock: 2,
+  isManual: false,
+  isActive: false,
+  archivedAt: '2026-11-17T02:15:00.000Z',
+  archivedById: 'admin-1',
+  archivedByName: 'Admin Utama',
+  archiveReason: 'Tidak dipakai',
+}
+
+const archivedUser = {
+  id: 'u-arsip',
+  username: 'operator.arsip',
+  name: 'Operator Arsip',
+  role: 'OPERATOR',
+  hasActivityHistory: false,
+  lastLoginAt: null,
+  isActive: false,
+  archivedAt: '2026-11-16T02:15:00.000Z',
+  archivedById: 'admin-1',
+  archivedByName: 'Admin Utama',
+  archiveReason: 'Account lama',
+}
+
 function renderPage() {
   return render(
     <NotificationProvider>
@@ -47,6 +74,22 @@ function renderPage() {
         <ArchivePage />
       </MemoryRouter>
     </NotificationProvider>,
+  )
+}
+
+/** Tombol aksi per baris pada dua representasi yang dipilih CSS (desktop/mobile). */
+function actionButtonsPerRow(view: 'desktop' | 'mobile'): string[][] {
+  const container = document.querySelector(view === 'desktop' ? '.desktop-table' : '.mobile-list')
+  if (!container) throw new Error(`Kontainer ${view} tidak ditemukan`)
+  const rows = Array.from(
+    view === 'desktop'
+      ? container.querySelectorAll('tbody tr')
+      : container.querySelectorAll('.archive-card'),
+  )
+  return rows.map((row) =>
+    Array.from(row.querySelectorAll('.archive-actions button')).map(
+      (button) => button.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    ),
   )
 }
 
@@ -63,8 +106,30 @@ function mockApi() {
         },
       })
     }
+    if (url === '/archive/materials') {
+      return Promise.resolve({
+        data: {
+          data: [archivedMaterial],
+          meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+        },
+      })
+    }
+    if (url === '/archive/users') {
+      return Promise.resolve({
+        data: {
+          data: [archivedUser],
+          meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+        },
+      })
+    }
     if (url === '/archive/products/p-arsip') {
       return Promise.resolve({ data: { product: archivedProduct } })
+    }
+    if (url === '/archive/materials/m-arsip') {
+      return Promise.resolve({ data: { material: archivedMaterial } })
+    }
+    if (url === '/archive/users/u-arsip') {
+      return Promise.resolve({ data: { user: archivedUser } })
     }
     return Promise.resolve({ data: { data: [], meta: { page: 1, pageSize: 20, total: 0, totalPages: 1 } } })
   })
@@ -212,26 +277,66 @@ describe('ArchivePage — halaman Arsip Admin', () => {
     expect(await screen.findByText(/masih memiliki riwayat produksi \(1\), stok tersisa \(1\)/i)).toBeInTheDocument()
   })
 
-  it('bahan baku dan akun tidak mendapat tombol Hapus', async () => {
+  it('Produk: tiga aksi tampil di tabel desktop dan kartu mobile', async () => {
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    const expected = [
+      ['Detail', 'Pulihkan', 'Hapus'],
+      ['Detail', 'Pulihkan', 'Hapus'],
+    ]
+    expect(actionButtonsPerRow('desktop')).toEqual(expected)
+    expect(actionButtonsPerRow('mobile')).toEqual(expected)
+  })
+
+  it('Bahan Baku: hanya Detail dan Pulihkan di desktop maupun mobile', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findAllByText('Keripik Arsip')
 
     await user.click(await screen.findByRole('tab', { name: /Bahan Baku/ }))
-    await waitFor(() =>
-      expect(mocks.get).toHaveBeenCalledWith('/archive/materials', {
-        params: { page: 1, pageSize: 20 },
-      })
-    )
+    await screen.findAllByText('Tepung Arsip')
+
+    expect(actionButtonsPerRow('desktop')).toEqual([['Detail', 'Pulihkan']])
+    expect(actionButtonsPerRow('mobile')).toEqual([['Detail', 'Pulihkan']])
     expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+  })
+
+  it('Akun Pengguna: hanya Detail dan Pulihkan di desktop maupun mobile', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
 
     await user.click(await screen.findByRole('tab', { name: /Akun Pengguna/ }))
-    await waitFor(() =>
-      expect(mocks.get).toHaveBeenCalledWith('/archive/users', {
-        params: { page: 1, pageSize: 20 },
-      })
-    )
+    await screen.findAllByText('operator.arsip')
+
+    expect(actionButtonsPerRow('desktop')).toEqual([['Detail', 'Pulihkan']])
+    expect(actionButtonsPerRow('mobile')).toEqual([['Detail', 'Pulihkan']])
     expect(screen.queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+  })
+
+  it('modal detail mengikuti kategori: Hapus hanya pada produk', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Keripik Arsip')
+
+    await user.click(screen.getAllByRole('button', { name: 'Detail' })[0])
+    let dialog = await screen.findByRole('dialog', { name: /Detail Produk: Keripik Arsip/ })
+    expect(within(dialog).getByRole('button', { name: 'Hapus' })).toBeInTheDocument()
+    await user.click(within(dialog).getAllByRole('button', { name: 'Tutup' })[0])
+
+    await user.click(await screen.findByRole('tab', { name: /Bahan Baku/ }))
+    await screen.findAllByText('Tepung Arsip')
+    await user.click(screen.getAllByRole('button', { name: 'Detail' })[0])
+    dialog = await screen.findByRole('dialog', { name: /Detail Bahan Baku: Tepung Arsip/ })
+    expect(within(dialog).queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
+    await user.click(within(dialog).getAllByRole('button', { name: 'Tutup' })[0])
+
+    await user.click(await screen.findByRole('tab', { name: /Akun Pengguna/ }))
+    await screen.findAllByText('operator.arsip')
+    await user.click(screen.getAllByRole('button', { name: 'Detail' })[0])
+    dialog = await screen.findByRole('dialog', { name: /Detail Akun Pengguna: operator.arsip/ })
+    expect(within(dialog).queryByRole('button', { name: 'Hapus' })).not.toBeInTheDocument()
   })
 
   it('Operator tidak melihat tombol Hapus pada produk arsip', async () => {
