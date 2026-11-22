@@ -325,15 +325,15 @@ export function ArchivePage() {
 
       <div className="summary-row">
         <div className="summary-item">
-          <span className="card-label">Produk Diarsipkan</span>
+          <span className="card-label">Produk</span>
           <span className="summary-value">{summary?.products ?? '-'}</span>
         </div>
         <div className="summary-item">
-          <span className="card-label">Bahan Diarsipkan</span>
+          <span className="card-label">Bahan Baku</span>
           <span className="summary-value">{summary?.materials ?? '-'}</span>
         </div>
         <div className="summary-item">
-          <span className="card-label">Akun Diarsipkan</span>
+          <span className="card-label">Akun Pengguna</span>
           <span className="summary-value">{summary?.users ?? '-'}</span>
         </div>
       </div>
