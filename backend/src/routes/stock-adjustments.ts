@@ -29,7 +29,12 @@ import {
   STOCK_ADJUSTMENT_INCLUDE,
   toPublicStockAdjustment,
 } from '../lib/stock-view';
-import { validateAdjustmentQuantity, validateDateOnly, validateReason } from '../lib/validate';
+import {
+  validateAdjustmentQuantity,
+  validateDateOnly,
+  validateNote,
+  validateReason,
+} from '../lib/validate';
 import { authenticate, requireAdmin } from '../middleware/auth';
 
 export const stockAdjustmentsRouter = Router();
@@ -37,7 +42,7 @@ export const stockAdjustmentsRouter = Router();
 const ADJUSTMENT_ENDPOINT = 'POST /api/stock-adjustments';
 
 stockAdjustmentsRouter.post('/', authenticate, requireAdmin, async (req, res) => {
-  const { targetType, targetId, quantity, reason, date } = req.body ?? {};
+  const { targetType, targetId, quantity, reason, date, note } = req.body ?? {};
 
   if (targetType !== 'MATERIAL' && targetType !== 'BATCH') {
     res.status(400).json({ message: 'targetType harus "MATERIAL" atau "BATCH".' });
@@ -58,6 +63,13 @@ stockAdjustmentsRouter.post('/', authenticate, requireAdmin, async (req, res) =>
   const reasonError = validateReason(reason);
   if (reasonError) {
     res.status(400).json({ message: reasonError });
+    return;
+  }
+
+  // Keterangan tambahan bersifat opsional dan disimpan terpisah dari alasan.
+  const noteError = validateNote(note);
+  if (noteError) {
+    res.status(400).json({ message: noteError });
     return;
   }
 
@@ -93,6 +105,7 @@ stockAdjustmentsRouter.post('/', authenticate, requireAdmin, async (req, res) =>
 
   const quantityText = quantity.toFixed(3);
   const reasonText = reason.trim();
+  const noteText = typeof note === 'string' && note.trim() !== '' ? note.trim() : null;
   const adjustedById = req.user!.id;
   // Tanggal aktivitas mengikuti input pengguna; `adjustedAt` tetap menjadi
   // waktu pencatatan sistem sehingga keduanya tidak saling menimpa.
@@ -107,7 +120,7 @@ stockAdjustmentsRouter.post('/', authenticate, requireAdmin, async (req, res) =>
       // stok, semuanya dalam SATU transaksi (README 6).
       if (targetType === 'MATERIAL') {
         const adjustment = await tx.stockAdjustment.create({
-          data: { targetType: 'MATERIAL', materialId: id, quantity: quantityText, reason: reasonText, adjustedById },
+          data: { targetType: 'MATERIAL', materialId: id, quantity: quantityText, reason: reasonText, note: noteText, adjustedById },
           include: STOCK_ADJUSTMENT_INCLUDE,
         });
 
@@ -136,7 +149,7 @@ stockAdjustmentsRouter.post('/', authenticate, requireAdmin, async (req, res) =>
 
       // Penyesuaian stok batch produk jadi.
       const adjustment = await tx.stockAdjustment.create({
-        data: { targetType: 'BATCH', batchId: id, quantity: quantityText, reason: reasonText, adjustedById },
+        data: { targetType: 'BATCH', batchId: id, quantity: quantityText, reason: reasonText, note: noteText, adjustedById },
         include: STOCK_ADJUSTMENT_INCLUDE,
       });
 

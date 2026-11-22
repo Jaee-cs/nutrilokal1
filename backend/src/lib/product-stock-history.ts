@@ -35,7 +35,7 @@ export const PRODUCT_STOCK_MOVEMENT_INCLUDE = {
   batch: { select: { id: true, code: true } },
   recordedBy: RECORDED_BY_SELECT,
   production: { select: { id: true } },
-  adjustment: { select: { id: true } },
+  adjustment: { select: { id: true, note: true } },
   openingBalance: { select: { id: true } },
   saleAllocation: {
     select: {
@@ -106,6 +106,8 @@ export interface PublicProductStockMovement {
   recordedAt: Date;
   recordedBy: { id: string; username: string; name: string | null } | null;
   reason: string | null;
+  /** Keterangan tambahan penyesuaian stok (bila ada). */
+  note: string | null;
   reference: ProductStockHistoryReference | null;
   /** ID catatan sumber; null untuk baris saldo awal historis. */
   sourceId: string | null;
@@ -146,6 +148,8 @@ interface InternalStockMovement {
   recordedAt: Date;
   recordedBy: { id: string; username: string; name: string | null } | null;
   reason: string | null;
+  /** Keterangan tambahan penyesuaian stok (bila ada). */
+  note: string | null;
   reference: ProductStockHistoryReference | null;
   sourceId: string | null;
   isHistoricalFallback: boolean;
@@ -231,6 +235,7 @@ function realMovementToInternal(
     recordedAt: movement.recordedAt,
     recordedBy: movement.recordedBy,
     reason: movement.reason,
+    note: movement.adjustment?.note ?? null,
     reference: referenceFor(movement),
     sourceId: sourceIdFor(movement),
     isHistoricalFallback: false,
@@ -310,6 +315,7 @@ export function buildProductStockHistory(input: {
         recordedAt: fallbackAt,
         recordedBy: null,
         reason: 'Saldo Awal (Riwayat Sebelumnya Tidak Tersedia)',
+        note: null,
         reference: null,
         sourceId: null,
         isHistoricalFallback: true,
@@ -371,6 +377,7 @@ export function buildProductStockHistory(input: {
         recordedAt: row.recordedAt,
         recordedBy: row.recordedBy,
         reason: row.reason,
+        note: row.note,
         reference: row.reference,
         sourceId: row.sourceId,
         isHistoricalFallback: row.isHistoricalFallback,

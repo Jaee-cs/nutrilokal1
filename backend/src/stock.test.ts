@@ -782,6 +782,45 @@ describe('Penyesuaian stok (hanya Admin)', () => {
     await auditProductTotals([product.id]);
   });
 
+  it('Koreksi stok menyimpan keterangan tambahan dan menampilkannya pada riwayat produk', async () => {
+    const product = await createProduct('koreksi-catatan');
+    const opening = await openingStock({ productId: product.id, quantity: 5 });
+    expect(opening.status).toBe(201);
+    const batchId = opening.body.batch.id;
+
+    const res = await adjust({
+      targetType: 'BATCH',
+      targetId: batchId,
+      quantity: -2,
+      reason: 'Kedaluwarsa',
+      note: 'Dua boks mendekati tanggal kedaluwarsa',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.adjustment.reason).toBe('Kedaluwarsa');
+    expect(res.body.adjustment.note).toBe('Dua boks mendekati tanggal kedaluwarsa');
+    expect(res.body.stock).toBe(3);
+    expect(await getProductSummary(product.id)).toEqual({ stock: 3, batchCount: 1 });
+
+    const adjustment = await prisma.stockAdjustment.findFirst({
+      where: { targetType: 'BATCH', batchId },
+    });
+    expect(adjustment?.note).toBe('Dua boks mendekati tanggal kedaluwarsa');
+
+    const history = await request(app)
+      .get(`/api/products/${product.id}/stock-movements`)
+      .set(auth(operatorToken));
+    expect(history.status).toBe(200);
+    const correction = history.body.data.find(
+      (row: { type: string }) => row.type === 'ADJUSTMENT'
+    );
+    expect(correction.reason).toBe('Kedaluwarsa');
+    expect(correction.note).toBe('Dua boks mendekati tanggal kedaluwarsa');
+    expect(correction.batchBalanceAfter).toBe(3);
+
+    await auditBatchStock([product.id]);
+    await auditProductTotals([product.id]);
+  });
+
   it('Penyesuaian yang membuat stok bahan/batch negatif DITOLAK (409) tanpa perubahan apa pun', async () => {
     const material = await createMaterial('negatif');
     await stockViaReceipt(material.id, 10);

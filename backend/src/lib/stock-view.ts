@@ -153,6 +153,8 @@ export interface PublicStockAdjustment {
   /** Tanda: positif menambah stok, negatif mengurangi. */
   quantity: number;
   reason: string;
+  /** Keterangan tambahan opsional dari pengguna. */
+  note: string | null;
   adjustedBy: { id: string; username: string; name: string | null };
   adjustedAt: Date;
   target:
@@ -187,6 +189,7 @@ export function toPublicStockAdjustment(
     targetId: adjustment.materialId ?? adjustment.batchId,
     quantity: Number(adjustment.quantity),
     reason: adjustment.reason,
+    note: adjustment.note,
     adjustedBy: adjustment.adjustedBy,
     adjustedAt: adjustment.adjustedAt,
     target,

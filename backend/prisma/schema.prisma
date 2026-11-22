@@ -437,6 +437,8 @@ model StockAdjustment {
   /// Nilai TANDA: positif menambah stok, negatif mengurangi.
   quantity   Decimal  @db.Decimal(14, 3)
   reason     String
+  /// Keterangan tambahan opsional, terpisah dari alasan yang dipilih.
+  note       String?
   adjustedBy User     @relation(fields: [adjustedById], references: [id])
   adjustedById String
   adjustedAt DateTime @default(now())

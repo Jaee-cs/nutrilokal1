@@ -630,4 +630,264 @@ describe('ProductsPage — riwayat pergerakan stok produk', () => {
       screen.getByText('Pilih produk untuk melihat riwayat pergerakan stok.'),
     ).toBeInTheDocument()
   })
+
+  it('koreksi stok menampilkan alasan, keterangan, jenis, dan stok sebelum/sesudah pada riwayat', async () => {
+    const original = mocks.get.getMockImplementation()!
+    mocks.get.mockImplementation((url: string, config?: { params?: Record<string, string> }) => {
+      if (url === '/products/p1/stock-movements') {
+        return Promise.resolve({
+          data: {
+            data: [
+              ...movements.map((row) =>
+                row.id === 'm1' ? { ...row, note: 'Retur supplier' } : row
+              ),
+              {
+                id: 'adj1',
+                product: { id: 'p1', name: 'Keripik Uji', unit: 'pcs' },
+                batch: { id: 'b1', code: 'NL-20261031-001', currentStock: 8 },
+                type: 'ADJUSTMENT',
+                quantity: 2,
+                stockIn: 2,
+                stockOut: 0,
+                balanceAfter: 8,
+                batchBalanceAfter: 8,
+                occurredAt: '2026-11-01T03:00:00.000Z',
+                recordedAt: '2026-11-01T03:00:00.000Z',
+                recordedBy: { id: 'u1', username: 'admin', name: 'Admin Uji' },
+                reason: 'Produk rusak',
+                note: 'Retur dari gudang',
+                reference: { kind: 'ADJUSTMENT', id: 'adj1', label: 'Penyesuaian #ADJ1' },
+                sourceId: 'adj1',
+                isHistoricalFallback: false,
+              },
+            ],
+            summary,
+          },
+        })
+      }
+      return original(url, config)
+    })
+
+    render(<ProductsPage />)
+    await selectProduct()
+
+    const table = screen.getByRole('table')
+    expect(within(table).getByText('Keterangan: Retur supplier')).toBeInTheDocument()
+    expect(within(table).getByText('Produk rusak')).toBeInTheDocument()
+    expect(within(table).getByText('Keterangan: Retur dari gudang')).toBeInTheDocument()
+    expect(
+      within(table).getByText('Penambahan · Stok batch 6 → 8 pcs')
+    ).toBeInTheDocument()
+  })
+})
+
+describe('ProductsPage — Edit Stok', () => {
+  beforeEach(() => {
+    mocks.get.mockReset()
+    mocks.post.mockReset()
+    mocks.patch.mockReset()
+    mocks.delete.mockReset()
+    Object.values(mocks.notify).forEach((fn) => fn.mockReset())
+    mockApi()
+    mocks.post.mockResolvedValue({ data: { product } })
+    mocks.patch.mockResolvedValue({ data: { product } })
+    mocks.notify.confirm.mockResolvedValue(true)
+  })
+
+  async function openStockDialog() {
+    const user = userEvent.setup()
+    render(<ProductsPage />)
+    await user.click(await screen.findByRole('button', { name: 'Edit Stok Keripik Uji' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Stok' })
+    await within(dialog).findByRole('option', { name: /NL-20261031-001/ })
+    return { user, dialog }
+  }
+
+  it('kartu produk menampilkan tiga aksi berurutan: Edit Stok, Arsipkan, Hapus', async () => {
+    render(<ProductsPage />)
+    const archive = await screen.findByRole('button', { name: 'Arsipkan Keripik Uji' })
+    const actions = archive.parentElement!
+    expect(Array.from(actions.querySelectorAll('button')).map((button) => button.textContent)).toEqual([
+      'Edit Stok',
+      'Arsipkan',
+      'Hapus',
+    ])
+  })
+
+  it('modal menampilkan produk, batch, stok tersedia, jenis, jumlah, alasan, dan keterangan', async () => {
+    const { dialog } = await openStockDialog()
+
+    expect(within(dialog).getByText('Keripik Uji')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Batch')).toBeInTheDocument()
+    expect(within(dialog).getByText(/Stok tersedia pada batch terpilih/)).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Jenis Koreksi')).toHaveValue('TAMBAH')
+    expect(within(dialog).getByLabelText('Jumlah Stok')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Keterangan Tambahan (opsional)')).toBeInTheDocument()
+
+    const reason = within(dialog).getByLabelText('Alasan Koreksi')
+    expect(Array.from(reason.querySelectorAll('option')).map((option) => option.textContent)).toEqual([
+      'Pilih alasan...',
+      'Kedaluwarsa',
+      'Produk rusak',
+      'Produk hilang',
+      'Selisih stok opname',
+      'Kesalahan pencatatan',
+      'Lainnya',
+    ])
+  })
+
+  it('Penambahan mengirim jumlah positif, menampilkan konfirmasi, dan menutup modal', async () => {
+    const { user, dialog } = await openStockDialog()
+    await user.selectOptions(within(dialog).getByLabelText('Batch'), 'b1')
+    await user.type(within(dialog).getByLabelText('Jumlah Stok'), '2')
+    await user.selectOptions(within(dialog).getByLabelText('Alasan Koreksi'), 'Produk rusak')
+    await user.type(
+      within(dialog).getByLabelText('Keterangan Tambahan (opsional)'),
+      'Retur dari gudang'
+    )
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Koreksi' }))
+
+    expect(mocks.notify.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Konfirmasi Koreksi Stok',
+        tone: 'warning',
+        confirmLabel: 'Simpan Koreksi',
+        message: expect.stringContaining('Keripik Uji'),
+      })
+    )
+    await waitFor(() =>
+      expect(mocks.post).toHaveBeenCalledWith('/stock-adjustments', {
+        targetType: 'BATCH',
+        targetId: 'b1',
+        quantity: 2,
+        reason: 'Produk rusak',
+        note: 'Retur dari gudang',
+      })
+    )
+    expect(mocks.notify.success).toHaveBeenCalledWith(expect.stringContaining('6 → 8'))
+    expect(screen.queryByRole('dialog', { name: 'Edit Stok' })).not.toBeInTheDocument()
+  })
+
+  it('Pengurangan mengirim jumlah negatif dan menghitung stok sesudah dengan benar', async () => {
+    const { user, dialog } = await openStockDialog()
+    await user.selectOptions(within(dialog).getByLabelText('Batch'), 'b1')
+    await user.selectOptions(within(dialog).getByLabelText('Jenis Koreksi'), 'KURANG')
+    await user.type(within(dialog).getByLabelText('Jumlah Stok'), '2.5')
+    await user.selectOptions(within(dialog).getByLabelText('Alasan Koreksi'), 'Selisih stok opname')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Koreksi' }))
+
+    await waitFor(() =>
+      expect(mocks.post).toHaveBeenCalledWith('/stock-adjustments', {
+        targetType: 'BATCH',
+        targetId: 'b1',
+        quantity: -2.5,
+        reason: 'Selisih stok opname',
+        note: undefined,
+      })
+    )
+    expect(mocks.notify.success).toHaveBeenCalledWith(expect.stringContaining('6 → 3,5'))
+  })
+
+  it('Pengurangan melebihi stok tersedia ditolak sebelum konfirmasi', async () => {
+    const { user, dialog } = await openStockDialog()
+    await user.selectOptions(within(dialog).getByLabelText('Batch'), 'b1')
+    await user.selectOptions(within(dialog).getByLabelText('Jenis Koreksi'), 'KURANG')
+    await user.type(within(dialog).getByLabelText('Jumlah Stok'), '7')
+    await user.selectOptions(within(dialog).getByLabelText('Alasan Koreksi'), 'Kedaluwarsa')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Koreksi' }))
+
+    expect(mocks.notify.error).toHaveBeenCalledWith(
+      expect.stringContaining('hanya 6 pcs')
+    )
+    expect(mocks.notify.confirm).not.toHaveBeenCalled()
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
+
+  it('batch belum dipilih ditolak sebelum konfirmasi', async () => {
+    const { user, dialog } = await openStockDialog()
+    fireEvent.change(within(dialog).getByLabelText('Jumlah Stok'), { target: { value: '1' } })
+    fireEvent.change(within(dialog).getByLabelText('Alasan Koreksi'), { target: { value: 'Lainnya' } })
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Koreksi' }))
+
+    expect(mocks.notify.error).toHaveBeenCalledWith('Pilih batch yang akan dikoreksi.')
+    expect(mocks.notify.confirm).not.toHaveBeenCalled()
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
+
+  it('jumlah nol ditolak sebelum konfirmasi', async () => {
+    const { dialog } = await openStockDialog()
+    fireEvent.change(within(dialog).getByLabelText('Batch'), { target: { value: 'b1' } })
+    fireEvent.change(within(dialog).getByLabelText('Jumlah Stok'), { target: { value: '0' } })
+    fireEvent.change(within(dialog).getByLabelText('Alasan Koreksi'), { target: { value: 'Lainnya' } })
+
+    // Browser menahan submit karena atribut min; submit langsung menguji
+    // pengaman aplikasi bila validasi bawaan dilewati.
+    fireEvent.submit(within(dialog).getByRole('button', { name: 'Simpan Koreksi' }).closest('form')!)
+
+    expect(mocks.notify.error).toHaveBeenCalledWith('Jumlah koreksi harus lebih besar dari nol.')
+    expect(mocks.notify.confirm).not.toHaveBeenCalled()
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
+
+  it('alasan kosong ditolak sebelum konfirmasi', async () => {
+    const { user, dialog } = await openStockDialog()
+    fireEvent.change(within(dialog).getByLabelText('Batch'), { target: { value: 'b1' } })
+    fireEvent.change(within(dialog).getByLabelText('Jumlah Stok'), { target: { value: '1' } })
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Koreksi' }))
+
+    expect(mocks.notify.error).toHaveBeenCalledWith('Pilih alasan koreksi stok.')
+    expect(mocks.notify.confirm).not.toHaveBeenCalled()
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
+
+  it('batch yang tidak ditemukan ditolak sebelum konfirmasi', async () => {
+    const { user, dialog } = await openStockDialog()
+    fireEvent.change(within(dialog).getByLabelText('Batch'), { target: { value: 'batch-hilang' } })
+    fireEvent.change(within(dialog).getByLabelText('Jumlah Stok'), { target: { value: '1' } })
+    fireEvent.change(within(dialog).getByLabelText('Alasan Koreksi'), { target: { value: 'Lainnya' } })
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Koreksi' }))
+
+    expect(mocks.notify.error).toHaveBeenCalledWith('Pilih batch yang akan dikoreksi.')
+    expect(mocks.notify.confirm).not.toHaveBeenCalled()
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
+
+  it('membatalkan konfirmasi tidak mengirim koreksi', async () => {
+    const { user, dialog } = await openStockDialog()
+    mocks.notify.confirm.mockResolvedValueOnce(false)
+    await user.selectOptions(within(dialog).getByLabelText('Batch'), 'b1')
+    await user.type(within(dialog).getByLabelText('Jumlah Stok'), '1')
+    await user.selectOptions(within(dialog).getByLabelText('Alasan Koreksi'), 'Lainnya')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Koreksi' }))
+
+    expect(mocks.post).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Edit Stok' })).toBeInTheDocument()
+  })
+
+  it('Menolak koreksi ketika backend menolak stok tidak mencukupi', async () => {
+    const { user, dialog } = await openStockDialog()
+    mocks.post.mockRejectedValueOnce({
+      response: { data: { message: 'Penyesuaian ditolak: Stok batch tidak mencukupi.' } },
+    })
+    await user.selectOptions(within(dialog).getByLabelText('Batch'), 'b1')
+    await user.type(within(dialog).getByLabelText('Jumlah Stok'), '1')
+    await user.selectOptions(within(dialog).getByLabelText('Alasan Koreksi'), 'Produk hilang')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Koreksi' }))
+
+    await waitFor(() =>
+      expect(mocks.notify.error).toHaveBeenCalledWith(
+        'Penyesuaian ditolak: Stok batch tidak mencukupi.',
+        'Koreksi Ditolak'
+      )
+    )
+    expect(screen.getByRole('dialog', { name: 'Edit Stok' })).toBeInTheDocument()
+  })
 })

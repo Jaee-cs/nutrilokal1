@@ -106,6 +106,8 @@ interface ProductStockMovement {
   recordedAt: string
   recordedBy: { id: string; username: string; name?: string | null } | null
   reason?: string | null
+  /** Keterangan tambahan penyesuaian stok, terpisah dari alasan. */
+  note?: string | null
   reference?: { kind: string; id: string; label: string } | null
   sourceId?: string | null
   isHistoricalFallback: boolean
@@ -134,6 +136,26 @@ const EMPTY_FORM = {
   description: '',
   composition: '',
   storageInstructions: '',
+}
+
+/** Alasan koreksi stok yang diizinkan. Alasan wajib dipilih dari daftar ini. */
+const STOCK_CORRECTION_REASONS = [
+  'Kedaluwarsa',
+  'Produk rusak',
+  'Produk hilang',
+  'Selisih stok opname',
+  'Kesalahan pencatatan',
+  'Lainnya',
+] as const
+
+type StockCorrectionType = 'TAMBAH' | 'KURANG'
+
+const EMPTY_STOCK_FORM = {
+  batchId: '',
+  type: 'TAMBAH' as StockCorrectionType,
+  amount: '',
+  reason: '',
+  note: '',
 }
 
 const STANDARD_NUTRITION_COMPONENTS = [
@@ -278,6 +300,13 @@ function movementRecorder(row: ProductStockMovement): string {
   return row.recordedBy?.name || row.recordedBy?.username || 'Tidak tercatat'
 }
 
+/** Ringkasan koreksi: jenis, stok batch sebelum, dan stok batch sesudah. */
+function stockCorrectionSummary(row: ProductStockMovement): string {
+  const before = row.batchBalanceAfter - row.quantity
+  const type = row.quantity > 0 ? 'Penambahan' : 'Pengurangan'
+  return `${type} · Stok batch ${formatQuantity(before)} → ${formatQuantity(row.batchBalanceAfter)} ${row.product.unit}`
+}
+
 interface ProductModalProps {
   open: boolean
   title: string
@@ -419,6 +448,25 @@ export function ProductsPage() {
 
   // Aksi kartu berjalan setelah Admin menyetujui dialog konfirmasi.
   const [busyProductId, setBusyProductId] = useState<string | null>(null)
+
+  // Edit Stok: koreksi dilakukan pada satu batch, bukan pada total produk.
+  // Daftar batch diambil dari endpoint yang sama dengan riwayat stok.
+  const [stockProduct, setStockProduct] = useState<Product | null>(null)
+  const [stockFormOpen, setStockFormOpen] = useState(false)
+  const [stockBatches, setStockBatches] = useState<ProductBatchOption[]>([])
+  const [stockForm, setStockForm] = useState(EMPTY_STOCK_FORM)
+  const [submittingStock, setSubmittingStock] = useState(false)
+  // Pengaman sinkron menahan dua pengiriman sebelum state sempat diperbarui.
+  const stockSubmittingRef = useRef(false)
+  const selectedStockBatch = stockBatches.find((item) => item.id === stockForm.batchId)
+  const stockAvailable = Number(selectedStockBatch?.stock ?? 0)
+  const stockAmount = Number(stockForm.amount)
+  const stockPreview =
+    Number.isFinite(stockAmount) && stockAmount > 0
+      ? stockForm.type === 'TAMBAH'
+        ? stockAvailable + stockAmount
+        : stockAvailable - stockAmount
+      : null
 
   // Jumlah produk arsip berasal dari endpoint Arsip (daftar operasional
   // sekarang hanya berisi produk aktif).
@@ -983,6 +1031,182 @@ export function ProductsPage() {
   }
 
   /**
+   * Edit Stok membuka modal koreksi untuk SATU batch. Batch dimuat ulang
+   * setiap kali modal dibuka agar daftar dan stok yang ditampilkan mutakhir.
+   */
+  async function openStockForm(product: Product) {
+    setStockProduct(product)
+    setStockForm(EMPTY_STOCK_FORM)
+    setStockFormOpen(true)
+    setStockBatches([])
+    try {
+      const res = await api.get('/batches', { params: { productId: product.id } })
+      setStockBatches(res.data.data || res.data || [])
+    } catch (err: any) {
+      notify.error(err.response?.data?.message || 'Gagal memuat daftar batch produk.')
+    }
+  }
+
+  function closeStockForm() {
+    if (stockSubmittingRef.current) return
+    setStockFormOpen(false)
+    setStockProduct(null)
+    setStockForm(EMPTY_STOCK_FORM)
+  }
+
+  /**
+   * Koreksi stok memakai endpoint penyesuaian yang sudah ada dengan sasaran
+   * BATCH. Nilai bertanda: positif untuk penambahan, negatif untuk
+   * pengurangan. Backend menulis catatan penyesuaian, pergerakan stok, dan
+   * perubahan stok batch dalam satu transaksi; stok total produk adalah
+   * turunan dari batch sehingga ikut konsisten tanpa penulisan terpisah.
+   */
+  async function submitStockCorrection(e: React.FormEvent) {
+    e.preventDefault()
+    if (stockSubmittingRef.current) return
+
+    const product = stockProduct
+    const batch = stockBatches.find((item) => item.id === stockForm.batchId)
+    const type = stockForm.type
+    const amountText = stockForm.amount.trim()
+    const reason = stockForm.reason
+    const note = stockForm.note.trim()
+
+    if (!product) {
+      notify.error('Data produk tidak ditemukan. Tutup dan buka kembali Edit Stok.')
+      return
+    }
+    if (!batch) {
+      notify.error('Pilih batch yang akan dikoreksi.')
+      return
+    }
+    if (type !== 'TAMBAH' && type !== 'KURANG') {
+      notify.error('Pilih jenis koreksi stok.')
+      return
+    }
+    if (!/^\d+(\.\d{1,3})?$/.test(amountText)) {
+      notify.error('Jumlah koreksi harus angka positif maksimal 3 angka di belakang koma.')
+      return
+    }
+    const amount = Number(amountText)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      notify.error('Jumlah koreksi harus lebih besar dari nol.')
+      return
+    }
+    const before = Number(batch.stock ?? 0)
+    if (type === 'KURANG' && amount > before) {
+      notify.error(
+        `Stok batch ${batch.code} hanya ${formatQuantity(before)} ${product.unit}. ` +
+          'Pengurangan tidak boleh melebihi stok tersedia.'
+      )
+      return
+    }
+    if (!STOCK_CORRECTION_REASONS.some((item) => item === reason)) {
+      notify.error('Pilih alasan koreksi stok.')
+      return
+    }
+
+    const after = type === 'TAMBAH' ? before + amount : before - amount
+    const actionLabel = type === 'TAMBAH' ? 'Penambahan' : 'Pengurangan'
+    // Kunci sejak sebelum dialog konfirmasi agar klik ganda tidak menumpuk
+    // dialog maupun pengiriman. Dilepas bila pengguna membatalkan.
+    stockSubmittingRef.current = true
+    const confirmed = await notify.confirm({
+      title: 'Konfirmasi Koreksi Stok',
+      message:
+        `Stok batch ${batch.code} pada produk "${product.name}" akan dikoreksi ` +
+        `(${actionLabel} ${formatQuantity(amount)} ${product.unit}).`,
+      tone: 'warning',
+      confirmLabel: 'Simpan Koreksi',
+      cancelLabel: 'Batal',
+      details: (
+        <div className="archive-restore-details">
+          <p>
+            Koreksi dicatat pada batch terpilih dan tidak menambah transaksi penjualan
+            maupun produksi. Riwayat operasional yang sudah ada tidak diubah.
+          </p>
+          <div className="account-delete-row">
+            <span>Nama produk</span>
+            <strong>{product.name}</strong>
+          </div>
+          <div className="account-delete-row">
+            <span>Batch</span>
+            <strong>{batch.code}</strong>
+          </div>
+          <div className="account-delete-row">
+            <span>Jenis koreksi</span>
+            <strong>{actionLabel}</strong>
+          </div>
+          <div className="account-delete-row">
+            <span>Jumlah</span>
+            <strong>
+              {formatQuantity(amount)} {product.unit}
+            </strong>
+          </div>
+          <div className="account-delete-row">
+            <span>Stok sebelum → sesudah</span>
+            <strong>
+              {formatQuantity(before)} → {formatQuantity(after)} {product.unit}
+            </strong>
+          </div>
+          <div className="account-delete-row">
+            <span>Alasan</span>
+            <strong>{reason}</strong>
+          </div>
+          {note && (
+            <div className="account-delete-row">
+              <span>Keterangan</span>
+              <strong>{note}</strong>
+            </div>
+          )}
+        </div>
+      ),
+    })
+    if (!confirmed) {
+      stockSubmittingRef.current = false
+      return
+    }
+
+    setSubmittingStock(true)
+    try {
+      const quantity = type === 'TAMBAH' ? amount : -amount
+      await api.post('/stock-adjustments', {
+        targetType: 'BATCH',
+        targetId: batch.id,
+        quantity,
+        reason,
+        note: note || undefined,
+      })
+
+      // Muat ulang stok/riwayat DULU, lalu tampilkan pesan sukses agar pesan
+      // tidak langsung tertimpa pemuatan ulang (pola yang sama di bahan baku).
+      const stockRefreshed = await fetchProducts()
+      let historyRefreshed = true
+      if (historyProductId === product.id) {
+        await loadHistoryBatches(product.id)
+        historyRefreshed = await fetchProductHistory(product.id)
+      }
+      if (stockRefreshed && historyRefreshed) {
+        notify.success(
+          `Koreksi stok tersimpan. Batch ${batch.code}: ${formatQuantity(before)} → ` +
+            `${formatQuantity(after)} ${product.unit}. Stok total produk ikut diperbarui.`
+        )
+      }
+      setStockFormOpen(false)
+      setStockProduct(null)
+      setStockForm(EMPTY_STOCK_FORM)
+    } catch (err: any) {
+      notify.error(
+        err.response?.data?.message || 'Gagal menyimpan koreksi stok.',
+        'Koreksi Ditolak'
+      )
+    } finally {
+      stockSubmittingRef.current = false
+      setSubmittingStock(false)
+    }
+  }
+
+  /**
    * Arsipkan: soft archive dengan konfirmasi yang menyebut nama produk.
    * ID, foto, resep, gizi, QR, stok, dan riwayat tidak diubah.
    */
@@ -1195,6 +1419,16 @@ export function ProductsPage() {
                 </div>
 
                 <div className="product-actions">
+                  {isAdmin && (
+                    <button
+                      className="button secondary"
+                      onClick={() => void openStockForm(p)}
+                      disabled={busyProductId === p.id}
+                      aria-label={`Edit Stok ${p.name}`}
+                    >
+                      Edit Stok
+                    </button>
+                  )}
                   {isAdmin && (
                     <button
                       className="button secondary"
@@ -1443,6 +1677,12 @@ export function ProductsPage() {
                       </td>
                       <td className="product-history-notes">
                         <div>{row.reason || '—'}</div>
+                        {row.note && (
+                          <div className="product-history-sub">Keterangan: {row.note}</div>
+                        )}
+                        {row.type === 'ADJUSTMENT' && (
+                          <div className="product-history-sub">{stockCorrectionSummary(row)}</div>
+                        )}
                         {row.reference && (
                           <div className="product-history-reference">{row.reference.label}</div>
                         )}
@@ -1516,6 +1756,12 @@ export function ProductsPage() {
                     {row.reason || 'Tanpa keterangan'}
                     {row.reference ? ` · ${row.reference.label}` : ''}
                   </div>
+                  {row.note && (
+                    <div className="history-item-note">Keterangan: {row.note}</div>
+                  )}
+                  {row.type === 'ADJUSTMENT' && (
+                    <div className="history-item-note">{stockCorrectionSummary(row)}</div>
+                  )}
                   <div className="history-item-note">
                     Dicatat oleh {movementRecorder(row)} · {isoToDateTimeDisplay(row.recordedAt)} WIB
                   </div>
@@ -2007,6 +2253,118 @@ export function ProductsPage() {
                 : editTarget
                   ? 'Simpan Perubahan'
                   : 'Simpan Produk'}
+            </button>
+          </div>
+        </form>
+      </ProductModal>
+
+      {/* Modal Edit Stok: koreksi pada satu batch produk. */}
+      <ProductModal open={stockFormOpen} title="Edit Stok" onClose={closeStockForm}>
+        <form onSubmit={submitStockCorrection} className="product-modal-form">
+          <div className="product-modal-body">
+            <div className="field">
+              <span className="card-label">Nama Produk</span>
+              <div className="product-stock-readonly">{stockProduct?.name || '—'}</div>
+            </div>
+            <div className="field">
+              <label htmlFor="stock-batch">Batch</label>
+              <select
+                id="stock-batch"
+                value={stockForm.batchId}
+                onChange={(e) => setStockForm((f) => ({ ...f, batchId: e.target.value }))}
+                disabled={submittingStock}
+              >
+                <option value="">Pilih batch...</option>
+                {stockBatches.map((batch) => (
+                  <option key={batch.id} value={batch.id}>
+                    {batch.code} — stok {formatQuantity(Number(batch.stock ?? 0))}{' '}
+                    {stockProduct?.unit || ''}
+                  </option>
+                ))}
+              </select>
+              {stockBatches.length === 0 && (
+                <small className="text-muted">Batch produk belum tersedia.</small>
+              )}
+            </div>
+            <div className="field">
+              <span className="card-label">Stok tersedia pada batch terpilih</span>
+              <div className="product-stock-readonly">
+                <strong>{formatQuantity(stockAvailable)}</strong> {stockProduct?.unit || ''}
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="field">
+                <label htmlFor="stock-type">Jenis Koreksi</label>
+                <select
+                  id="stock-type"
+                  value={stockForm.type}
+                  onChange={(e) =>
+                    setStockForm((f) => ({
+                      ...f,
+                      type: e.target.value as StockCorrectionType,
+                    }))
+                  }
+                  disabled={submittingStock}
+                >
+                  <option value="TAMBAH">Penambahan</option>
+                  <option value="KURANG">Pengurangan</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="stock-amount">Jumlah Stok</label>
+                <input
+                  id="stock-amount"
+                  type="number"
+                  min="0.001"
+                  step="0.001"
+                  value={stockForm.amount}
+                  onChange={(e) => setStockForm((f) => ({ ...f, amount: e.target.value }))}
+                  placeholder="Contoh: 2"
+                  disabled={submittingStock}
+                />
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="stock-reason">Alasan Koreksi</label>
+              <select
+                id="stock-reason"
+                value={stockForm.reason}
+                onChange={(e) => setStockForm((f) => ({ ...f, reason: e.target.value }))}
+                disabled={submittingStock}
+              >
+                <option value="">Pilih alasan...</option>
+                {STOCK_CORRECTION_REASONS.map((reason) => (
+                  <option key={reason} value={reason}>
+                    {reason}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="stock-note">Keterangan Tambahan (opsional)</label>
+              <textarea
+                id="stock-note"
+                rows={2}
+                maxLength={500}
+                value={stockForm.note}
+                onChange={(e) => setStockForm((f) => ({ ...f, note: e.target.value }))}
+                placeholder="Detail tambahan bila diperlukan"
+                disabled={submittingStock}
+              />
+            </div>
+            {stockPreview !== null && selectedStockBatch && (
+              <p className="text-muted product-stock-preview">
+                Stok batch {selectedStockBatch.code} setelah koreksi:{' '}
+                <strong>{formatQuantity(stockPreview)} {stockProduct?.unit || ''}</strong>
+              </p>
+            )}
+          </div>
+          <div className="modal-actions product-modal-actions">
+            <button type="button" className="button secondary" onClick={closeStockForm}>
+              Batal
+            </button>
+            <button className="button" disabled={submittingStock}>
+              {submittingStock ? 'Menyimpan...' : 'Simpan Koreksi'}
             </button>
           </div>
         </form>
