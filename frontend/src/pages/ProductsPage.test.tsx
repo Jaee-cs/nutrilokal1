@@ -165,6 +165,185 @@ describe('ProductsPage — modal tambah produk', () => {
     expect(document.body.style.overflow).toBe('hidden')
   })
 
+  it('Admin menyimpan satu komponen nilai gizi dalam bentuk lama tanpa nama komponen', async () => {
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: /Tambah Produk/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Tambah Produk' })
+
+    await user.type(within(dialog).getByLabelText('Nama Produk'), 'Produk Gizi')
+    await user.type(within(dialog).getByLabelText('Satuan Dasar'), 'pcs')
+    await user.type(within(dialog).getByLabelText('Harga Jual (Rp)'), '10000')
+    await user.click(within(dialog).getByRole('button', { name: /Informasi Nilai Gizi/ }))
+
+    expect(within(dialog).queryByLabelText('Nama Komponen')).not.toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText('Takaran Saji'), '30')
+    await user.type(within(dialog).getByLabelText('Satuan takaran saji komponen 1'), 'g')
+    await user.type(within(dialog).getByLabelText('Jumlah Sajian per Kemasan'), '4')
+    await user.type(within(dialog).getAllByLabelText('Jumlah')[0], '120')
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Produk' }))
+
+    await waitFor(() => expect(mocks.post).toHaveBeenCalled())
+    const payload = mocks.post.mock.calls[0][1]
+    expect(payload.nutrition.sections).toBeUndefined()
+    expect(payload.nutrition).toMatchObject({
+      servingSizeAmount: 30,
+      servingSizeUnit: 'g',
+      servingsPerPackage: 4,
+      components: [expect.objectContaining({ name: 'Energi Total', amount: 120 })],
+    })
+  })
+
+  it('Admin menambah dua komponen kemasan dan menyimpan datanya secara terpisah', async () => {
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: /Tambah Produk/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Tambah Produk' })
+
+    await user.type(within(dialog).getByLabelText('Nama Produk'), 'NUGALOE')
+    await user.type(within(dialog).getByLabelText('Satuan Dasar'), 'pcs')
+    await user.type(within(dialog).getByLabelText('Harga Jual (Rp)'), '15000')
+    await user.click(within(dialog).getByRole('button', { name: /Informasi Nilai Gizi/ }))
+    await user.click(within(dialog).getByRole('button', { name: 'Tambah Komponen' }))
+
+    const names = within(dialog).getAllByLabelText('Nama Komponen')
+    expect(names).toHaveLength(2)
+    await user.type(names[0], 'NUGALOE — Nugget Lele')
+    await user.type(names[1], 'ALOE VERA SAOS')
+
+    const servings = within(dialog).getAllByLabelText('Takaran Saji')
+    await user.type(servings[0], '80')
+    await user.type(servings[1], '30')
+    const units = within(dialog).getAllByLabelText(/Satuan takaran saji komponen/)
+    await user.type(units[0], 'g')
+    await user.type(units[1], 'g')
+    const amounts = within(dialog).getAllByLabelText('Jumlah')
+    await user.type(amounts[0], '12.5')
+    await user.type(amounts[8], '4')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Produk' }))
+    await waitFor(() => expect(mocks.post).toHaveBeenCalled())
+    const payload = mocks.post.mock.calls[0][1]
+    expect(payload.nutrition.servingSizeAmount).toBeUndefined()
+    expect(payload.nutrition.sections).toHaveLength(2)
+    expect(payload.nutrition.sections[0]).toMatchObject({
+      name: 'NUGALOE — Nugget Lele',
+      servingSizeAmount: 80,
+      servingSizeUnit: 'g',
+      components: [expect.objectContaining({ name: 'Energi Total', amount: 12.5 })],
+    })
+    expect(payload.nutrition.sections[1]).toMatchObject({
+      name: 'ALOE VERA SAOS',
+      servingSizeAmount: 30,
+      servingSizeUnit: 'g',
+      components: [expect.objectContaining({ name: 'Energi Total', amount: 4 })],
+    })
+  })
+
+  it('Admin menghapus salah satu komponen tanpa mengubah komponen lainnya', async () => {
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: /Tambah Produk/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Tambah Produk' })
+
+    await user.type(within(dialog).getByLabelText('Nama Produk'), 'NUGALOE')
+    await user.type(within(dialog).getByLabelText('Satuan Dasar'), 'pcs')
+    await user.type(within(dialog).getByLabelText('Harga Jual (Rp)'), '15000')
+    await user.click(within(dialog).getByRole('button', { name: /Informasi Nilai Gizi/ }))
+    await user.click(within(dialog).getByRole('button', { name: 'Tambah Komponen' }))
+
+    const names = within(dialog).getAllByLabelText('Nama Komponen')
+    await user.type(names[1], 'ALOE VERA SAOS')
+    const servings = within(dialog).getAllByLabelText('Takaran Saji')
+    await user.type(servings[1], '30')
+    const amounts = within(dialog).getAllByLabelText('Jumlah')
+    await user.type(amounts[8], '4')
+
+    await user.click(within(dialog).getByRole('button', { name: 'Hapus komponen kemasan 1' }))
+    expect(within(dialog).queryByLabelText('Nama Komponen')).not.toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Produk' }))
+    await waitFor(() => expect(mocks.post).toHaveBeenCalled())
+    const payload = mocks.post.mock.calls[0][1]
+    expect(payload.nutrition.sections).toBeUndefined()
+    expect(payload.nutrition).toMatchObject({
+      servingSizeAmount: 30,
+      components: [expect.objectContaining({ name: 'Energi Total', amount: 4 })],
+    })
+    expect(payload.nutrition.name).toBeUndefined()
+  })
+
+  it('Admin menolak simpan bila nama komponen kemasan kosong', async () => {
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: /Tambah Produk/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Tambah Produk' })
+
+    await user.type(within(dialog).getByLabelText('Nama Produk'), 'NUGALOE')
+    await user.type(within(dialog).getByLabelText('Satuan Dasar'), 'pcs')
+    await user.type(within(dialog).getByLabelText('Harga Jual (Rp)'), '15000')
+    await user.click(within(dialog).getByRole('button', { name: /Informasi Nilai Gizi/ }))
+    await user.click(within(dialog).getByRole('button', { name: 'Tambah Komponen' }))
+
+    const servings = within(dialog).getAllByLabelText('Takaran Saji')
+    await user.type(servings[0], '80')
+    await user.type(servings[1], '30')
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan Produk' }))
+
+    await waitFor(() => expect(mocks.notify.error).toHaveBeenCalled())
+    expect(mocks.notify.error).toHaveBeenCalledWith('Nama komponen kemasan 1 wajib diisi.')
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
+
+  it('Admin melihat komponen gizi yang tersimpan saat mengedit produk', async () => {
+    const original = mocks.get.getMockImplementation()!
+    mocks.get.mockImplementation((url: string, config?: { params?: Record<string, string> }) => {
+      if (url === '/products') {
+        return Promise.resolve({
+          data: {
+            data: [
+              {
+                ...product,
+                nutrition: {
+                  sections: [
+                    {
+                      name: 'NUGALOE — Nugget Lele',
+                      servingSizeAmount: 80,
+                      servingSizeUnit: 'g',
+                      components: [{ name: 'Energi Total', amount: 12, unit: 'kkal' }],
+                    },
+                    {
+                      name: 'ALOE VERA SAOS',
+                      servingSizeAmount: 30,
+                      servingSizeUnit: 'g',
+                      components: [{ name: 'Gula Total', amount: 4, unit: 'g' }],
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        })
+      }
+      return original(url, config)
+    })
+
+    render(<ProductsPage />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Edit Keripik Uji' }))
+    const dialog = screen.getByRole('dialog', { name: 'Edit Produk' })
+    await user.click(within(dialog).getByRole('button', { name: /Informasi Nilai Gizi/ }))
+
+    const names = within(dialog).getAllByLabelText('Nama Komponen')
+    expect(names).toHaveLength(2)
+    expect(names[0]).toHaveValue('NUGALOE — Nugget Lele')
+    expect(names[1]).toHaveValue('ALOE VERA SAOS')
+    const servings = within(dialog).getAllByLabelText('Takaran Saji')
+    expect(servings[0]).toHaveValue(80)
+    expect(servings[1]).toHaveValue(30)
+    expect(within(dialog).getAllByLabelText('Nama Kandungan')[6]).toHaveValue('Gula Total')
+  })
+
   it('menutup modal lewat tombol X, Escape, dan backdrop tanpa menutup saat isian diklik', async () => {
     render(<ProductsPage />)
     const user = userEvent.setup()

@@ -27,11 +27,17 @@ interface PublicNutritionComponent {
   akgPercent?: number
 }
 
+interface PublicNutritionSection extends PublicProductNutrition {
+  name?: string
+}
+
 interface PublicProductNutrition {
   servingSizeAmount?: number
   servingSizeUnit?: string
   servingsPerPackage?: number
   components?: PublicNutritionComponent[]
+  /** Komponen kemasan. Urutan array dipertahankan dari form Admin. */
+  sections?: PublicNutritionSection[]
 }
 
 interface PublicProductPageData {
@@ -83,7 +89,7 @@ function componentAkgLabel(component: PublicNutritionComponent): string | null {
   return akg ? `${akg}% AKG` : null
 }
 
-function hasPublicNutrition(nutrition?: PublicProductNutrition): nutrition is PublicProductNutrition {
+function hasNutritionValues(nutrition?: PublicProductNutrition): boolean {
   if (!nutrition) return false
   const hasServing =
     nutrition.servingSizeAmount !== undefined ||
@@ -93,6 +99,33 @@ function hasPublicNutrition(nutrition?: PublicProductNutrition): nutrition is Pu
     (c) => c.amount !== undefined || !!c.unit?.trim() || c.akgPercent !== undefined,
   )
   return hasServing || hasComponents
+}
+
+function hasPublicNutrition(nutrition?: PublicProductNutrition): nutrition is PublicProductNutrition {
+  if (!nutrition) return false
+  return (
+    hasNutritionValues(nutrition) ||
+    (nutrition.sections ?? []).some((section) => hasNutritionValues(section))
+  )
+}
+
+/**
+ * Data lama (satu tabel) dan data baru (beberapa section) disatukan di sini.
+ * Satu section tanpa nama sengaja dikembalikan tanpa nama agar tampilannya
+ * sama persis seperti sebelum fitur multi-komponen ditambahkan.
+ */
+function toNutritionViews(nutrition: PublicProductNutrition): PublicNutritionSection[] {
+  const sections = nutrition.sections ?? []
+  if (sections.length > 1) {
+    return sections
+      .filter((section) => hasNutritionValues(section))
+      .map((section) => ({ ...section, name: section.name?.trim() || undefined }))
+  }
+  if (sections.length === 1) {
+    const only = sections[0]
+    return hasNutritionValues(only) ? [{ ...only, name: undefined }] : []
+  }
+  return hasNutritionValues(nutrition) ? [nutrition] : []
 }
 
 function DetailCard({
@@ -153,6 +186,7 @@ export function ProductPublicPage() {
   const product = data?.product
   const photo = productPhotoUrl(product?.photoUrl)
   const nutrition = hasPublicNutrition(product?.nutrition) ? product?.nutrition : undefined
+  const nutritionViews = nutrition ? toNutritionViews(nutrition) : []
   const storageLines = (product?.storageInstructions ?? '')
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -269,45 +303,59 @@ export function ProductPublicPage() {
                 </DetailCard>
               )}
 
-              {nutrition && (
+              {nutritionViews.length > 0 && (
                 <DetailCard title="Informasi Nilai Gizi" className="detail-nutrition">
-                  {formatServingSize(nutrition) && (
-                    <div className="detail-nutrition-row">
-                      <span>Takaran Saji</span>
-                      <strong>{formatServingSize(nutrition)}</strong>
-                    </div>
-                  )}
-                  {formatServingsPerPackage(nutrition) && (
-                    <div className="detail-nutrition-row">
-                      <span>Jumlah Sajian per Kemasan</span>
-                      <strong>{formatServingsPerPackage(nutrition)}</strong>
-                    </div>
-                  )}
-                  {(nutrition.components?.length ?? 0) > 0 && (
-                    <div className="detail-nutrition-table" role="table" aria-label="Kandungan gizi">
-                      <div className="detail-nutrition-head" role="row">
-                        <span role="columnheader">Kandungan Gizi</span>
-                        <span role="columnheader">Jumlah</span>
-                        <span role="columnheader">%AKG</span>
-                      </div>
-                      {nutrition.components!.map((component, index) => {
-                        const amount = componentAmountLabel(component)
-                        const akg = componentAkgLabel(component)
-                        if (!amount && !akg) return null
-                        return (
-                          <div
-                            className="detail-nutrition-item"
-                            role="row"
-                            key={`${component.name}-${index}`}
-                          >
-                            <span className="detail-nutrition-name" role="cell">{component.name}</span>
-                            <span className="detail-nutrition-amount" role="cell">{amount || '—'}</span>
-                            <span className="detail-nutrition-akg" role="cell">{akg || ''}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
+                  <div className="detail-nutrition-sections">
+                    {nutritionViews.map((section, sectionIndex) => {
+                      const servingSize = formatServingSize(section)
+                      const servingsPerPackage = formatServingsPerPackage(section)
+                      const showName = nutritionViews.length > 1 && !!section.name
+                      return (
+                        <div className="detail-nutrition-section" key={section.name || sectionIndex}>
+                          {showName && (
+                            <h3 className="detail-nutrition-section-name">{section.name}</h3>
+                          )}
+                          {servingSize && (
+                            <div className="detail-nutrition-row">
+                              <span>Takaran Saji</span>
+                              <strong>{servingSize}</strong>
+                            </div>
+                          )}
+                          {servingsPerPackage && (
+                            <div className="detail-nutrition-row">
+                              <span>Jumlah Sajian per Kemasan</span>
+                              <strong>{servingsPerPackage}</strong>
+                            </div>
+                          )}
+                          {(section.components?.length ?? 0) > 0 && (
+                            <div className="detail-nutrition-table" role="table" aria-label="Kandungan gizi">
+                              <div className="detail-nutrition-head" role="row">
+                                <span role="columnheader">Kandungan Gizi</span>
+                                <span role="columnheader">Jumlah</span>
+                                <span role="columnheader">%AKG</span>
+                              </div>
+                              {section.components!.map((component, index) => {
+                                const amount = componentAmountLabel(component)
+                                const akg = componentAkgLabel(component)
+                                if (!amount && !akg) return null
+                                return (
+                                  <div
+                                    className="detail-nutrition-item"
+                                    role="row"
+                                    key={`${component.name}-${index}`}
+                                  >
+                                    <span className="detail-nutrition-name" role="cell">{component.name}</span>
+                                    <span className="detail-nutrition-amount" role="cell">{amount || '—'}</span>
+                                    <span className="detail-nutrition-akg" role="cell">{akg || ''}</span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
                 </DetailCard>
               )}
 

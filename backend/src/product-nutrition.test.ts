@@ -228,5 +228,177 @@ describe('Informasi nilai gizi produk', () => {
       .set(auth(adminToken))
       .send({ nutrition: { components: [{ amount: 1, unit: 'g' }] } });
     expect(missingName.status).toBe(400);
+
+    const deniedSections = await request(app)
+      .patch(`/api/products/${id}`)
+      .set(auth(operatorToken))
+      .send({
+        nutrition: {
+          sections: [
+            { name: 'NUGALOE — Nugget Lele', servingSizeAmount: 80, servingSizeUnit: 'g' },
+            { name: 'ALOE VERA SAOS', servingSizeAmount: 30, servingSizeUnit: 'g' },
+          ],
+        },
+      });
+    expect(deniedSections.status).toBe(403);
+  });
+
+  it('Admin dapat menyimpan beberapa komponen kemasan dengan tabel gizi terpisah dan urut', async () => {
+    const nutrition = {
+      sections: [
+        {
+          name: 'NUGALOE — Nugget Lele',
+          servingSizeAmount: 80,
+          servingSizeUnit: 'g',
+          servingsPerPackage: 5,
+          components: [{ name: 'Protein', amount: 12.5, unit: 'g', akgPercent: 25 }],
+        },
+        {
+          name: 'ALOE VERA SAOS',
+          servingSizeAmount: 30,
+          servingSizeUnit: 'g',
+          servingsPerPackage: 5,
+          components: [{ name: 'Gula Total', amount: 4, unit: 'g' }],
+        },
+      ],
+    };
+    const created = await request(app)
+      .post('/api/products')
+      .set(auth(adminToken))
+      .send({ ...baseProduct('multi'), nutrition });
+    expect(created.status).toBe(201);
+    expect(created.body.product.nutrition.servingSizeAmount).toBeUndefined();
+    expect(created.body.product.nutrition.components).toBeUndefined();
+    expect(created.body.product.nutrition.sections).toHaveLength(2);
+    expect(created.body.product.nutrition.sections[0]).toMatchObject({
+      name: 'NUGALOE — Nugget Lele',
+      servingSizeAmount: 80,
+      servingSizeUnit: 'g',
+      servingsPerPackage: 5,
+    });
+    expect(created.body.product.nutrition.sections[1].components[0]).toMatchObject({
+      name: 'Gula Total',
+      amount: 4,
+    });
+
+    const id = created.body.product.id as string;
+    const published = await request(app).get(`/api/public/products/${id}`);
+    expect(published.status).toBe(200);
+    expect(published.body.product.nutrition.sections.map((s: any) => s.name)).toEqual([
+      'NUGALOE — Nugget Lele',
+      'ALOE VERA SAOS',
+    ]);
+
+    // Edit komponen pertama + tambah komponen ketiga, urutan tetap terjaga.
+    const edited = await request(app)
+      .patch(`/api/products/${id}`)
+      .set(auth(adminToken))
+      .send({
+        nutrition: {
+          sections: [
+            {
+              name: 'NUGALOE — Nugget Lele',
+              servingSizeAmount: 90,
+              servingSizeUnit: 'g',
+              components: [{ name: 'Protein', amount: 14, unit: 'g' }],
+            },
+            nutrition.sections[1],
+            {
+              name: 'SAUS TAMBAHAN',
+              servingSizeAmount: 10,
+              servingSizeUnit: 'ml',
+              components: [{ name: 'Natrium', unit: 'mg' }],
+            },
+          ],
+        },
+      });
+    expect(edited.status).toBe(200);
+    expect(edited.body.product.nutrition.sections).toHaveLength(3);
+    expect(edited.body.product.nutrition.sections[0].servingSizeAmount).toBe(90);
+    expect(edited.body.product.nutrition.sections[0].components[0].amount).toBe(14);
+    expect(edited.body.product.nutrition.sections[1].name).toBe('ALOE VERA SAOS');
+    expect(edited.body.product.nutrition.sections[2].name).toBe('SAUS TAMBAHAN');
+
+    // Hapus komponen lain: komponen yang tersisa tidak berubah dan bentuknya jadi lama.
+    const removed = await request(app)
+      .patch(`/api/products/${id}`)
+      .set(auth(adminToken))
+      .send({ nutrition: { sections: [nutrition.sections[1]] } });
+    expect(removed.status).toBe(200);
+    expect(removed.body.product.nutrition.sections).toBeUndefined();
+    expect(removed.body.product.nutrition).toMatchObject({
+      servingSizeAmount: 30,
+      servingSizeUnit: 'g',
+      servingsPerPackage: 5,
+    });
+    expect(removed.body.product.nutrition.components[0].name).toBe('Gula Total');
+
+    const afterRemove = await request(app).get(`/api/public/products/${id}`);
+    expect(afterRemove.body.product.nutrition.sections).toBeUndefined();
+    expect(afterRemove.body.product.nutrition.components[0].name).toBe('Gula Total');
+  });
+
+  it('satu komponen tanpa nama tetap dinormalkan ke bentuk lama', async () => {
+    const created = await request(app)
+      .post('/api/products')
+      .set(auth(adminToken))
+      .send({
+        ...baseProduct('satu-section'),
+        nutrition: {
+          sections: [
+            {
+              servingSizeAmount: 55,
+              servingSizeUnit: 'g',
+              components: [{ name: 'Protein', amount: 6, unit: 'g' }],
+            },
+          ],
+        },
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.product.nutrition.sections).toBeUndefined();
+    expect(created.body.product.nutrition.servingSizeAmount).toBe(55);
+    expect(created.body.product.nutrition.components[0].name).toBe('Protein');
+    expect(created.body.product.nutrition.name).toBeUndefined();
+  });
+
+  it('komponen kemasan tanpa nama ditolak bila lebih dari satu; bagian kosong tidak ditampilkan', async () => {
+    const created = await request(app)
+      .post('/api/products')
+      .set(auth(adminToken))
+      .send(baseProduct('validasi-section'));
+    const id = created.body.product.id as string;
+
+    const missing = await request(app)
+      .patch(`/api/products/${id}`)
+      .set(auth(adminToken))
+      .send({
+        nutrition: {
+          sections: [
+            { name: 'NUGALOE', servingSizeAmount: 80, servingSizeUnit: 'g' },
+            { servingSizeAmount: 30, servingSizeUnit: 'g' },
+          ],
+        },
+      });
+    expect(missing.status).toBe(400);
+    expect(missing.body.message).toContain('Nama komponen kemasan 2 wajib diisi.');
+
+    const skipped = await request(app)
+      .patch(`/api/products/${id}`)
+      .set(auth(adminToken))
+      .send({
+        nutrition: {
+          sections: [
+            { servingSizeAmount: 80, servingSizeUnit: 'g' },
+            { name: ' ', servingSizeAmount: '', servingSizeUnit: '', components: [] },
+          ],
+        },
+      });
+    expect(skipped.status).toBe(200);
+    expect(skipped.body.product.nutrition.sections).toBeUndefined();
+    expect(skipped.body.product.nutrition.servingSizeAmount).toBe(80);
+
+    const publicRes = await request(app).get(`/api/public/products/${id}`);
+    expect(publicRes.body.product.nutrition.sections).toBeUndefined();
+    expect(publicRes.body.product.nutrition.servingSizeAmount).toBe(80);
   });
 });

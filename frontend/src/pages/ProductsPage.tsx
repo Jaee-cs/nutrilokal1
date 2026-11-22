@@ -37,11 +37,22 @@ interface ProductNutritionComponent {
   akgPercent?: number
 }
 
-interface ProductNutrition {
+interface ProductNutritionSection {
+  name?: string
   servingSizeAmount?: number
   servingSizeUnit?: string
   servingsPerPackage?: number
   components?: ProductNutritionComponent[]
+}
+
+interface ProductNutrition {
+  /** Dipakai produk lama/satu komponen. */
+  servingSizeAmount?: number
+  servingSizeUnit?: string
+  servingsPerPackage?: number
+  components?: ProductNutritionComponent[]
+  /** Dipakai bila produk memiliki lebih dari satu komponen kemasan. */
+  sections?: ProductNutritionSection[]
 }
 
 interface Product {
@@ -143,15 +154,24 @@ type NutritionComponentForm = {
   akgPercent: string
 }
 
-type NutritionForm = {
+type NutritionSectionForm = {
+  id: string
+  name: string
   servingSizeAmount: string
   servingSizeUnit: string
   servingsPerPackage: string
   components: NutritionComponentForm[]
 }
 
-function emptyNutritionForm(): NutritionForm {
+type NutritionForm = NutritionSectionForm[]
+
+let nutritionSectionSeq = 0
+
+function newNutritionSectionForm(): NutritionSectionForm {
+  nutritionSectionSeq += 1
   return {
+    id: `nutrition-section-${nutritionSectionSeq}`,
+    name: '',
     servingSizeAmount: '',
     servingSizeUnit: '',
     servingsPerPackage: '',
@@ -164,9 +184,12 @@ function emptyNutritionForm(): NutritionForm {
   }
 }
 
-function nutritionToForm(nutrition?: ProductNutrition | null): NutritionForm {
-  if (!nutrition) return emptyNutritionForm()
-  const existing = (nutrition.components ?? []).map((c) => ({
+function emptyNutritionForm(): NutritionForm {
+  return [newNutritionSectionForm()]
+}
+
+function nutritionComponentsToForm(components?: ProductNutritionComponent[]): NutritionComponentForm[] {
+  const existing = (components ?? []).map((c) => ({
     name: c.name ?? '',
     amount: c.amount === undefined || c.amount === null ? '' : String(c.amount),
     unit: c.unit ?? '',
@@ -189,18 +212,35 @@ function nutritionToForm(nutrition?: ProductNutrition | null): NutritionForm {
       byLower.delete(item.name.trim().toLowerCase())
     }
   }
+  return ordered
+}
+
+function nutritionSectionToForm(
+  section?: ProductNutrition | ProductNutritionSection | null,
+): NutritionSectionForm {
+  const source = section ?? {}
   return {
+    ...newNutritionSectionForm(),
+    name: (section as ProductNutritionSection | undefined)?.name ?? '',
     servingSizeAmount:
-      nutrition.servingSizeAmount === undefined || nutrition.servingSizeAmount === null
+      source.servingSizeAmount === undefined || source.servingSizeAmount === null
         ? ''
-        : String(nutrition.servingSizeAmount),
-    servingSizeUnit: nutrition.servingSizeUnit ?? '',
+        : String(source.servingSizeAmount),
+    servingSizeUnit: source.servingSizeUnit ?? '',
     servingsPerPackage:
-      nutrition.servingsPerPackage === undefined || nutrition.servingsPerPackage === null
+      source.servingsPerPackage === undefined || source.servingsPerPackage === null
         ? ''
-        : String(nutrition.servingsPerPackage),
-    components: ordered.length > 0 ? ordered : emptyNutritionForm().components,
+        : String(source.servingsPerPackage),
+    components: nutritionComponentsToForm(source.components),
   }
+}
+
+function nutritionToForm(nutrition?: ProductNutrition | null): NutritionForm {
+  if (!nutrition) return emptyNutritionForm()
+  if (nutrition.sections && nutrition.sections.length > 0) {
+    return nutrition.sections.map((section) => nutritionSectionToForm(section))
+  }
+  return [nutritionSectionToForm(nutrition)]
 }
 
 const MOVEMENT_LABELS: Record<MovementType, string> = {
@@ -595,45 +635,96 @@ export function ProductsPage() {
     setRecipeRows((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }
 
+  function nutritionSectionHasData(section: NutritionSectionForm): boolean {
+    return (
+      section.servingSizeAmount.trim() !== '' ||
+      section.servingSizeUnit.trim() !== '' ||
+      section.servingsPerPackage.trim() !== '' ||
+      section.components.some(
+        (c) => c.amount.trim() !== '' || c.unit.trim() !== '' || c.akgPercent.trim() !== '',
+      )
+    )
+  }
+
   function nutritionStatus(): { label: string; filled: boolean } {
-    const hasServing =
-      nutritionForm.servingSizeAmount.trim() !== '' ||
-      nutritionForm.servingSizeUnit.trim() !== '' ||
-      nutritionForm.servingsPerPackage.trim() !== ''
-    const filledComponents = nutritionForm.components.filter(
-      (c) =>
-        c.amount.trim() !== '' ||
-        c.unit.trim() !== '' ||
-        c.akgPercent.trim() !== '',
-    ).length
-    if (!hasServing && filledComponents === 0) {
+    if (nutritionForm.length === 0 || !nutritionForm.some(nutritionSectionHasData)) {
       return { label: 'Belum diisi', filled: false }
     }
+    const filledComponents = nutritionForm.reduce(
+      (total, section) =>
+        total +
+        section.components.filter(
+          (c) => c.amount.trim() !== '' || c.unit.trim() !== '' || c.akgPercent.trim() !== '',
+        ).length,
+      0,
+    )
+    const hasServing = nutritionForm.some(
+      (section) =>
+        section.servingSizeAmount.trim() !== '' ||
+        section.servingSizeUnit.trim() !== '' ||
+        section.servingsPerPackage.trim() !== '',
+    )
     const parts: string[] = []
+    if (nutritionForm.length > 1) parts.push(`${nutritionForm.length} komponen kemasan`)
     if (filledComponents > 0) parts.push(`${filledComponents} komponen terisi`)
     if (hasServing) parts.push('takaran/sajian terisi')
     return { label: parts.join(' · '), filled: true }
   }
 
-  function addNutritionComponent() {
-    setNutritionForm((f) => ({
-      ...f,
-      components: [...f.components, { name: '', amount: '', unit: '', akgPercent: '' }],
-    }))
+  function addNutritionSection() {
+    setNutritionForm((sections) => [...sections, newNutritionSectionForm()])
   }
 
-  function removeNutritionComponent(index: number) {
-    setNutritionForm((f) => ({
-      ...f,
-      components: f.components.filter((_, i) => i !== index),
-    }))
+  function removeNutritionSection(index: number) {
+    setNutritionForm((sections) => sections.filter((_, i) => i !== index))
   }
 
-  function updateNutritionComponent(index: number, patch: Partial<NutritionComponentForm>) {
-    setNutritionForm((f) => ({
-      ...f,
-      components: f.components.map((row, i) => (i === index ? { ...row, ...patch } : row)),
-    }))
+  function updateNutritionSection(index: number, patch: Partial<NutritionSectionForm>) {
+    setNutritionForm((sections) =>
+      sections.map((section, i) => (i === index ? { ...section, ...patch } : section)),
+    )
+  }
+
+  function addNutritionComponent(sectionIndex: number) {
+    setNutritionForm((sections) =>
+      sections.map((section, i) =>
+        i === sectionIndex
+          ? {
+              ...section,
+              components: [...section.components, { name: '', amount: '', unit: '', akgPercent: '' }],
+            }
+          : section,
+      ),
+    )
+  }
+
+  function removeNutritionComponent(sectionIndex: number, rowIndex: number) {
+    setNutritionForm((sections) =>
+      sections.map((section, i) =>
+        i === sectionIndex
+          ? { ...section, components: section.components.filter((_, j) => j !== rowIndex) }
+          : section,
+      ),
+    )
+  }
+
+  function updateNutritionComponent(
+    sectionIndex: number,
+    rowIndex: number,
+    patch: Partial<NutritionComponentForm>,
+  ) {
+    setNutritionForm((sections) =>
+      sections.map((section, i) =>
+        i === sectionIndex
+          ? {
+              ...section,
+              components: section.components.map((row, j) =>
+                j === rowIndex ? { ...row, ...patch } : row,
+              ),
+            }
+          : section,
+      ),
+    )
   }
 
   function parseOptionalNumberInput(
@@ -655,51 +746,91 @@ export function ProductsPage() {
   }
 
   function buildNutritionPayload(): { nutrition: ProductNutrition | null } | { error: string } {
-    const servingAmount = parseOptionalNumberInput(
-      nutritionForm.servingSizeAmount,
-      'Takaran saji',
-      3,
-    )
-    if (servingAmount.error) return { error: servingAmount.error }
-    const servingsPerPackage = parseOptionalNumberInput(
-      nutritionForm.servingsPerPackage,
-      'Jumlah sajian per kemasan',
-      3,
-    )
-    if (servingsPerPackage.error) return { error: servingsPerPackage.error }
+    const multi = nutritionForm.length > 1
+    const candidates: Array<{ position: number; section: ProductNutritionSection }> = []
 
-    const components: ProductNutritionComponent[] = []
-    for (let i = 0; i < nutritionForm.components.length; i++) {
-      const row = nutritionForm.components[i]
-      const name = row.name.trim()
-      const unit = row.unit.trim()
-      const amount = parseOptionalNumberInput(row.amount, `Jumlah komponen gizi baris ${i + 1}`, 3)
-      if (amount.error) return { error: amount.error }
-      const akg = parseOptionalNumberInput(row.akgPercent, `%AKG komponen gizi baris ${i + 1}`, 2)
-      if (akg.error) return { error: akg.error }
-      const hasAny = !!name || amount.value !== undefined || !!unit || akg.value !== undefined
-      if (!hasAny) continue
-      if (!name) return { error: `Nama komponen gizi baris ${i + 1} wajib diisi.` }
-      const item: ProductNutritionComponent = { name }
-      if (amount.value !== undefined) item.amount = amount.value
-      if (unit) item.unit = unit
-      if (akg.value !== undefined) item.akgPercent = akg.value
-      components.push(item)
+    for (let i = 0; i < nutritionForm.length; i++) {
+      const section = nutritionForm[i]
+      const prefix = multi ? `Komponen kemasan ${i + 1}: ` : ''
+
+      const servingAmount = parseOptionalNumberInput(
+        section.servingSizeAmount,
+        `${prefix}Takaran saji`,
+        3,
+      )
+      if (servingAmount.error) return { error: servingAmount.error }
+      const servingsPerPackage = parseOptionalNumberInput(
+        section.servingsPerPackage,
+        `${prefix}Jumlah sajian per kemasan`,
+        3,
+      )
+      if (servingsPerPackage.error) return { error: servingsPerPackage.error }
+
+      const components: ProductNutritionComponent[] = []
+      for (let j = 0; j < section.components.length; j++) {
+        const row = section.components[j]
+        const name = row.name.trim()
+        const unit = row.unit.trim()
+        const amount = parseOptionalNumberInput(
+          row.amount,
+          `${prefix}Jumlah komponen gizi baris ${j + 1}`,
+          3,
+        )
+        if (amount.error) return { error: amount.error }
+        const akg = parseOptionalNumberInput(
+          row.akgPercent,
+          `${prefix}%AKG komponen gizi baris ${j + 1}`,
+          2,
+        )
+        if (akg.error) return { error: akg.error }
+        const hasValue = amount.value !== undefined || !!unit || akg.value !== undefined
+        if (!hasValue) continue // baris hanya berisi nama tidak disimpan
+        if (!name) return { error: `${prefix}Nama komponen gizi baris ${j + 1} wajib diisi.` }
+        const item: ProductNutritionComponent = { name }
+        if (amount.value !== undefined) item.amount = amount.value
+        if (unit) item.unit = unit
+        if (akg.value !== undefined) item.akgPercent = akg.value
+        components.push(item)
+      }
+
+      const block: ProductNutritionSection = {}
+      const name = section.name.trim()
+      if (name) block.name = name
+      if (servingAmount.value !== undefined) block.servingSizeAmount = servingAmount.value
+      const servingUnit = section.servingSizeUnit.trim()
+      if (servingUnit) block.servingSizeUnit = servingUnit
+      if (servingsPerPackage.value !== undefined) block.servingsPerPackage = servingsPerPackage.value
+      if (components.length > 0) block.components = components
+
+      const hasData =
+        block.servingSizeAmount !== undefined ||
+        !!block.servingSizeUnit ||
+        block.servingsPerPackage !== undefined ||
+        (block.components?.length ?? 0) > 0
+      if (hasData) candidates.push({ position: i + 1, section: block })
     }
 
-    const nutrition: ProductNutrition = {}
-    if (servingAmount.value !== undefined) nutrition.servingSizeAmount = servingAmount.value
-    const servingUnit = nutritionForm.servingSizeUnit.trim()
-    if (servingUnit) nutrition.servingSizeUnit = servingUnit
-    if (servingsPerPackage.value !== undefined) nutrition.servingsPerPackage = servingsPerPackage.value
-    if (components.length > 0) nutrition.components = components
+    if (candidates.length === 0) return { nutrition: null }
 
-    const hasData =
-      nutrition.servingSizeAmount !== undefined ||
-      !!nutrition.servingSizeUnit ||
-      nutrition.servingsPerPackage !== undefined ||
-      (nutrition.components?.length ?? 0) > 0
-    return { nutrition: hasData ? nutrition : null }
+    if (candidates.length === 1) {
+      // Satu komponen: samakan dengan bentuk lama, tanpa nama/sections.
+      const only = candidates[0].section
+      const legacy: ProductNutrition = {}
+      if (only.servingSizeAmount !== undefined) legacy.servingSizeAmount = only.servingSizeAmount
+      if (only.servingSizeUnit) legacy.servingSizeUnit = only.servingSizeUnit
+      if (only.servingsPerPackage !== undefined) {
+        legacy.servingsPerPackage = only.servingsPerPackage
+      }
+      if (only.components) legacy.components = only.components
+      return { nutrition: legacy }
+    }
+
+    for (const candidate of candidates) {
+      if (!candidate.section.name) {
+        return { error: `Nama komponen kemasan ${candidate.position} wajib diisi.` }
+      }
+    }
+    return { nutrition: { sections: candidates.map((candidate) => candidate.section) } }
   }
 
     function buildRecipePayload(): { recipe: Array<{ materialId: string; quantityPerUnit: number; recipeUnit: string }> } | { error: string } {
@@ -1465,133 +1596,217 @@ export function ProductsPage() {
                       dihitung otomatis. {isAdmin ? '' : 'Hanya Admin yang dapat mengubah nilai gizi.'}
                     </p>
 
-                    <div className="form-row product-nutrition-serving">
-                      <div className="field">
-                        <label htmlFor="nutrition-serving-amount">Takaran Saji</label>
-                        <div className="product-nutrition-inline">
-                          <input
-                            id="nutrition-serving-amount"
-                            type="number"
-                            step="0.001"
-                            min="0"
-                            value={nutritionForm.servingSizeAmount}
-                            onChange={(e) =>
-                              setNutritionForm((f) => ({ ...f, servingSizeAmount: e.target.value }))
-                            }
-                            placeholder="Jumlah"
-                            disabled={!isAdmin}
-                          />
-                          <input
-                            id="nutrition-serving-unit"
-                            value={nutritionForm.servingSizeUnit}
-                            onChange={(e) =>
-                              setNutritionForm((f) => ({ ...f, servingSizeUnit: e.target.value }))
-                            }
-                            placeholder="Satuan (g, ml, sajian)"
-                            disabled={!isAdmin}
-                            aria-label="Satuan takaran saji"
-                          />
-                        </div>
+                    {nutritionForm.length === 0 ? (
+                      <div className="product-nutrition-components">
+                        <p className="text-muted">Belum ada komponen kemasan.</p>
+                        {isAdmin && (
+                          <div className="form-actions" style={{ marginTop: 0 }}>
+                            <button type="button" className="button secondary" onClick={addNutritionSection}>
+                              Tambah Komponen
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <div className="field">
-                        <label htmlFor="nutrition-servings-per-package">Jumlah Sajian per Kemasan</label>
-                        <input
-                          id="nutrition-servings-per-package"
-                          type="number"
-                          step="0.001"
-                          min="0"
-                          value={nutritionForm.servingsPerPackage}
-                          onChange={(e) =>
-                            setNutritionForm((f) => ({ ...f, servingsPerPackage: e.target.value }))
-                          }
-                          placeholder="Contoh: 4"
-                          disabled={!isAdmin}
-                        />
-                      </div>
-                    </div>
+                    ) : (
+                      <div className="stack-form product-nutrition-sections">
+                        {nutritionForm.map((section, sectionIndex) => (
+                          <section className="product-nutrition-section" key={section.id}>
+                            <div className="product-nutrition-section-head">
+                              <span className="card-label">
+                                {nutritionForm.length > 1 ? `Komponen ${sectionIndex + 1}` : 'Nilai Gizi'}
+                              </span>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  className="button secondary product-nutrition-section-remove"
+                                  onClick={() => removeNutritionSection(sectionIndex)}
+                                  aria-label={`Hapus komponen kemasan ${sectionIndex + 1}`}
+                                  title="Hapus komponen kemasan"
+                                >
+                                  Hapus Komponen
+                                </button>
+                              )}
+                            </div>
 
-                    <div className="product-nutrition-components">
-                      <div className="product-nutrition-components-head">
-                        <span className="card-label">Kandungan Gizi</span>
-                        <span className="card-label">%AKG (opsional)</span>
-                      </div>
-                      {nutritionForm.components.length === 0 ? (
-                        <p className="text-muted">Belum ada komponen gizi.</p>
-                      ) : (
-                        <div className="stack-form product-nutrition-list">
-                          {nutritionForm.components.map((row, idx) => (
-                            <div key={`${idx}-${row.name}`} className="product-nutrition-row">
+                            {nutritionForm.length > 1 && (
                               <div className="field">
-                                <label htmlFor={`nutrition-name-${idx}`}>Nama Komponen</label>
+                                <label htmlFor={`nutrition-component-name-${sectionIndex}`}>
+                                  Nama Komponen
+                                </label>
                                 <input
-                                  id={`nutrition-name-${idx}`}
-                                  value={row.name}
-                                  onChange={(e) => updateNutritionComponent(idx, { name: e.target.value })}
-                                  placeholder="Contoh: Vitamin C"
+                                  id={`nutrition-component-name-${sectionIndex}`}
+                                  value={section.name}
+                                  onChange={(e) =>
+                                    updateNutritionSection(sectionIndex, { name: e.target.value })
+                                  }
+                                  placeholder="Contoh: NUGALOE — Nugget Lele"
                                   disabled={!isAdmin}
                                 />
                               </div>
+                            )}
+
+                            <div className="form-row product-nutrition-serving">
                               <div className="field">
-                                <label htmlFor={`nutrition-amount-${idx}`}>Jumlah</label>
+                                <label htmlFor={`nutrition-serving-amount-${sectionIndex}`}>
+                                  Takaran Saji
+                                </label>
+                                <div className="product-nutrition-inline">
+                                  <input
+                                    id={`nutrition-serving-amount-${sectionIndex}`}
+                                    type="number"
+                                    step="0.001"
+                                    min="0"
+                                    value={section.servingSizeAmount}
+                                    onChange={(e) =>
+                                      updateNutritionSection(sectionIndex, {
+                                        servingSizeAmount: e.target.value,
+                                      })
+                                    }
+                                    placeholder="Jumlah"
+                                    disabled={!isAdmin}
+                                  />
+                                  <input
+                                    id={`nutrition-serving-unit-${sectionIndex}`}
+                                    value={section.servingSizeUnit}
+                                    onChange={(e) =>
+                                      updateNutritionSection(sectionIndex, {
+                                        servingSizeUnit: e.target.value,
+                                      })
+                                    }
+                                    placeholder="Satuan (g, ml, sajian)"
+                                    disabled={!isAdmin}
+                                    aria-label={`Satuan takaran saji komponen ${sectionIndex + 1}`}
+                                  />
+                                </div>
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`nutrition-servings-per-package-${sectionIndex}`}>
+                                  Jumlah Sajian per Kemasan
+                                </label>
                                 <input
-                                  id={`nutrition-amount-${idx}`}
+                                  id={`nutrition-servings-per-package-${sectionIndex}`}
                                   type="number"
                                   step="0.001"
                                   min="0"
-                                  value={row.amount}
-                                  onChange={(e) => updateNutritionComponent(idx, { amount: e.target.value })}
-                                  placeholder="—"
+                                  value={section.servingsPerPackage}
+                                  onChange={(e) =>
+                                    updateNutritionSection(sectionIndex, {
+                                      servingsPerPackage: e.target.value,
+                                    })
+                                  }
+                                  placeholder="Contoh: 4"
                                   disabled={!isAdmin}
                                 />
                               </div>
-                              <div className="field">
-                                <label htmlFor={`nutrition-unit-${idx}`}>Satuan</label>
-                                <input
-                                  id={`nutrition-unit-${idx}`}
-                                  value={row.unit}
-                                  onChange={(e) => updateNutritionComponent(idx, { unit: e.target.value })}
-                                  placeholder="g, mg, kkal"
-                                  disabled={!isAdmin}
-                                />
+                            </div>
+
+                            <div className="product-nutrition-components">
+                              <div className="product-nutrition-components-head">
+                                <span className="card-label">Kandungan Gizi</span>
+                                <span className="card-label">%AKG (opsional)</span>
                               </div>
-                              <div className="field">
-                                <label htmlFor={`nutrition-akg-${idx}`}>%AKG</label>
-                                <input
-                                  id={`nutrition-akg-${idx}`}
-                                  type="number"
-                                  step="0.01"
-                                  min="0"
-                                  value={row.akgPercent}
-                                  onChange={(e) => updateNutritionComponent(idx, { akgPercent: e.target.value })}
-                                  placeholder="—"
-                                  disabled={!isAdmin}
-                                />
-                              </div>
+                              {section.components.length === 0 ? (
+                                <p className="text-muted">Belum ada baris gizi.</p>
+                              ) : (
+                                <div className="stack-form product-nutrition-list">
+                                  {section.components.map((row, idx) => (
+                                    <div key={`${section.id}-${idx}-${row.name}`} className="product-nutrition-row">
+                                      <div className="field">
+                                        <label htmlFor={`nutrition-name-${sectionIndex}-${idx}`}>
+                                          Nama Kandungan
+                                        </label>
+                                        <input
+                                          id={`nutrition-name-${sectionIndex}-${idx}`}
+                                          value={row.name}
+                                          onChange={(e) =>
+                                            updateNutritionComponent(sectionIndex, idx, { name: e.target.value })
+                                          }
+                                          placeholder="Contoh: Vitamin C"
+                                          disabled={!isAdmin}
+                                        />
+                                      </div>
+                                      <div className="field">
+                                        <label htmlFor={`nutrition-amount-${sectionIndex}-${idx}`}>Jumlah</label>
+                                        <input
+                                          id={`nutrition-amount-${sectionIndex}-${idx}`}
+                                          type="number"
+                                          step="0.001"
+                                          min="0"
+                                          value={row.amount}
+                                          onChange={(e) =>
+                                            updateNutritionComponent(sectionIndex, idx, { amount: e.target.value })
+                                          }
+                                          placeholder="—"
+                                          disabled={!isAdmin}
+                                        />
+                                      </div>
+                                      <div className="field">
+                                        <label htmlFor={`nutrition-unit-${sectionIndex}-${idx}`}>Satuan</label>
+                                        <input
+                                          id={`nutrition-unit-${sectionIndex}-${idx}`}
+                                          value={row.unit}
+                                          onChange={(e) =>
+                                            updateNutritionComponent(sectionIndex, idx, { unit: e.target.value })
+                                          }
+                                          placeholder="g, mg, kkal"
+                                          disabled={!isAdmin}
+                                        />
+                                      </div>
+                                      <div className="field">
+                                        <label htmlFor={`nutrition-akg-${sectionIndex}-${idx}`}>%AKG</label>
+                                        <input
+                                          id={`nutrition-akg-${sectionIndex}-${idx}`}
+                                          type="number"
+                                          step="0.01"
+                                          min="0"
+                                          value={row.akgPercent}
+                                          onChange={(e) =>
+                                            updateNutritionComponent(sectionIndex, idx, { akgPercent: e.target.value })
+                                          }
+                                          placeholder="—"
+                                          disabled={!isAdmin}
+                                        />
+                                      </div>
+                                      {isAdmin && (
+                                        <div className="form-actions product-nutrition-remove">
+                                          <button
+                                            type="button"
+                                            className="button secondary production-usage-remove"
+                                            onClick={() => removeNutritionComponent(sectionIndex, idx)}
+                                            aria-label={`Hapus baris gizi ${idx + 1} komponen ${sectionIndex + 1}`}
+                                            title="Hapus baris gizi"
+                                          >
+                                            Hapus
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                               {isAdmin && (
-                                <div className="form-actions product-nutrition-remove">
+                                <div className="form-actions" style={{ marginTop: 0 }}>
                                   <button
                                     type="button"
-                                    className="button secondary production-usage-remove"
-                                    onClick={() => removeNutritionComponent(idx)}
-                                    aria-label={`Hapus komponen gizi ${idx + 1}`}
-                                    title="Hapus komponen"
+                                    className="button secondary"
+                                    onClick={() => addNutritionComponent(sectionIndex)}
                                   >
-                                    Hapus
+                                    Tambah Baris Gizi
                                   </button>
                                 </div>
                               )}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                      {isAdmin && (
-                        <div className="form-actions" style={{ marginTop: 0 }}>
-                          <button type="button" className="button secondary" onClick={addNutritionComponent}>
-                            Tambah Komponen
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                          </section>
+                        ))}
+                        {isAdmin && (
+                          <div className="form-actions" style={{ marginTop: 0 }}>
+                            <button type="button" className="button secondary" onClick={addNutritionSection}>
+                              Tambah Komponen
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

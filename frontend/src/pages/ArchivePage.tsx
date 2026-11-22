@@ -633,13 +633,29 @@ function ArchiveDetailContent({ kind, row }: { kind: ArchiveKind; row: ArchiveRo
         )}
       </div>
     )
-    const nutrition = row.nutrition as
-      | { components?: Array<{ name?: string; amount?: number; unit?: string }> }
-      | null
-      | undefined
+    type ArchiveNutritionInfo = {
+      servingSizeAmount?: number
+      servingSizeUnit?: string
+      servingsPerPackage?: number
+      components?: unknown[]
+      sections?: ArchiveNutritionInfo[]
+    }
+    const nutrition = row.nutrition as ArchiveNutritionInfo | null | undefined
+    const nutritionFilled =
+      nutrition?.servingSizeAmount !== undefined ||
+      !!nutrition?.servingSizeUnit ||
+      nutrition?.servingsPerPackage !== undefined ||
+      (nutrition?.components?.length ?? 0) > 0 ||
+      (nutrition?.sections ?? []).some(
+        (section) =>
+          section.servingSizeAmount !== undefined ||
+          !!section.servingSizeUnit ||
+          section.servingsPerPackage !== undefined ||
+          (section.components?.length ?? 0) > 0,
+      )
     sections.push(
       <p className="text-muted" key="nutrition">
-        Informasi gizi: {nutrition?.components?.length ? 'tersimpan utuh' : 'tidak diisi'}.
+        Informasi gizi: {nutritionFilled ? 'tersimpan utuh' : 'tidak diisi'}.
         QR/URL produk memakai ID yang sama dan tidak diubah saat pengarsipan.
       </p>
     )

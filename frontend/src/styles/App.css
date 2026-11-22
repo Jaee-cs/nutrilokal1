@@ -4267,6 +4267,29 @@ table tbody tr:hover { background: var(--surface-low); }
 .product-nutrition-row .field { gap: 0.25rem; }
 .product-nutrition-row label { font-size: 11px; }
 .product-nutrition-remove { margin: 0; justify-content: flex-start; }
+
+/* Komponen kemasan: tiap bagian membawa takaran saji + tabel gizinya sendiri. */
+.product-nutrition-sections { gap: 1rem; }
+.product-nutrition-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius);
+  background: var(--surface-lowest);
+}
+.product-nutrition-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.product-nutrition-section-remove {
+  height: 2.25rem;
+  padding: 0 0.75rem;
+}
 @media (min-width: 640px) {
   .product-nutrition-row {
     grid-template-columns: 1.4fr 0.7fr 0.7fr 0.7fr auto;
@@ -4283,6 +4306,25 @@ table tbody tr:hover { background: var(--surface-low); }
   .product-nutrition-components-head span:nth-child(2) { grid-column: 4; }
   .product-nutrition-remove { align-self: end; }
   .product-nutrition-remove .button { height: 2.5rem; }
+  .product-nutrition-section { padding: 0.875rem; }
+}
+
+/* Beberapa komponen kemasan: tabel tetap sama, hanya diberi jarak + nama. */
+.detail-nutrition-sections {
+  display: flex;
+  flex-direction: column;
+}
+.detail-nutrition-section + .detail-nutrition-section {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid #e2e8f0;
+}
+.detail-nutrition-section-name {
+  margin: 0 0 0.25rem;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 700;
+  color: #1b4332;
 }
 
 /* Tabel nilai gizi publik (halaman produk/QR) ------------------------------- */

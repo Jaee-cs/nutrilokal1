@@ -171,6 +171,172 @@ describe('ProductPublicPage', () => {
     expect(screen.queryByRole('heading', { name: 'Informasi Nilai Gizi' })).not.toBeInTheDocument()
   })
 
+  it('menampilkan dua komponen kemasan secara vertikal dengan nama dan tabel terpisah', async () => {
+    mocks.get.mockResolvedValue({
+      data: {
+        ...published,
+        product: {
+          ...published.product,
+          nutrition: {
+            sections: [
+              {
+                name: 'NUGALOE — Nugget Lele',
+                servingSizeAmount: 80,
+                servingSizeUnit: 'g',
+                servingsPerPackage: 5,
+                components: [{ name: 'Protein Lele', amount: 12.5, unit: 'g', akgPercent: 25 }],
+              },
+              {
+                name: 'ALOE VERA SAOS',
+                servingSizeAmount: 30,
+                servingSizeUnit: 'g',
+                servingsPerPackage: 5,
+                components: [{ name: 'Gula Saos', amount: 4, unit: 'g' }],
+              },
+            ],
+          },
+        },
+      },
+    })
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'Keripik Uji' })
+    const tables = screen.getAllByRole('table', { name: 'Kandungan gizi' })
+    expect(tables).toHaveLength(2)
+    expect(
+      screen.getByRole('heading', { name: 'NUGALOE — Nugget Lele', level: 3 }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'ALOE VERA SAOS', level: 3 })).toBeInTheDocument()
+    expect(tables[0].textContent).toContain('Protein Lele')
+    expect(tables[1].textContent).toContain('Gula Saos')
+    expect(tables[0].textContent).not.toContain('Gula Saos')
+    expect(screen.getByText('80 g')).toBeInTheDocument()
+    expect(screen.getByText('30 g')).toBeInTheDocument()
+    expect(screen.getByText('12,5 g')).toBeInTheDocument()
+    expect(screen.getByText('25% AKG')).toBeInTheDocument()
+    expect(screen.getByText('4 g')).toBeInTheDocument()
+  })
+
+  it('menampilkan tiga komponen kemasan tanpa menggabungkan nilainya', async () => {
+    mocks.get.mockResolvedValue({
+      data: {
+        ...published,
+        product: {
+          ...published.product,
+          nutrition: {
+            sections: [
+              {
+                name: 'Komponen Satu',
+                servingSizeAmount: 10,
+                servingSizeUnit: 'g',
+                components: [{ name: 'Protein Satu', amount: 1, unit: 'g' }],
+              },
+              {
+                name: 'Komponen Dua',
+                servingSizeAmount: 20,
+                servingSizeUnit: 'g',
+                components: [{ name: 'Serat Dua', amount: 2, unit: 'g' }],
+              },
+              {
+                name: 'Komponen Tiga',
+                servingSizeAmount: 30,
+                servingSizeUnit: 'g',
+                components: [{ name: 'Natrium Tiga', amount: 3, unit: 'mg' }],
+              },
+            ],
+          },
+        },
+      },
+    })
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'Keripik Uji' })
+    const tables = screen.getAllByRole('table', { name: 'Kandungan gizi' })
+    expect(tables).toHaveLength(3)
+    expect(tables.map((table) => table.textContent)).toEqual([
+      expect.stringContaining('Protein Satu'),
+      expect.stringContaining('Serat Dua'),
+      expect.stringContaining('Natrium Tiga'),
+    ])
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(3)
+  })
+
+  it('produk lama satu tabel dan satu section tetap tampil tanpa nama komponen', async () => {
+    mocks.get.mockResolvedValue({
+      data: {
+        ...published,
+        product: {
+          ...published.product,
+          nutrition: {
+            servingSizeAmount: 250,
+            servingSizeUnit: 'ml',
+            components: [{ name: 'Protein Lama', amount: 0.5, unit: 'g' }],
+          },
+        },
+      },
+    })
+    renderPage('p-lama')
+
+    await screen.findByRole('heading', { name: 'Keripik Uji' })
+    expect(screen.getAllByRole('table', { name: 'Kandungan gizi' })).toHaveLength(1)
+    expect(screen.queryByRole('heading', { level: 3 })).not.toBeInTheDocument()
+    expect(screen.getByText('Protein Lama')).toBeInTheDocument()
+    expect(screen.getByText('250 ml')).toBeInTheDocument()
+
+    mocks.get.mockResolvedValue({
+      data: {
+        ...published,
+        product: {
+          ...published.product,
+          nutrition: {
+            sections: [
+              {
+                name: 'Nama yang tidak perlu',
+                servingSizeAmount: 60,
+                servingSizeUnit: 'g',
+                components: [{ name: 'Protein Tunggal', amount: 2, unit: 'g' }],
+              },
+            ],
+          },
+        },
+      },
+    })
+    renderPage('p-satu-section')
+    await waitFor(() => {
+      expect(screen.getAllByRole('table', { name: 'Kandungan gizi' })).toHaveLength(2)
+    })
+    expect(screen.queryByText('Nama yang tidak perlu')).not.toBeInTheDocument()
+  })
+
+  it('komponen tanpa data gizi tidak menampilkan tabel kosong', async () => {
+    mocks.get.mockResolvedValue({
+      data: {
+        ...published,
+        product: {
+          ...published.product,
+          nutrition: {
+            sections: [
+              {
+                name: 'Komponen Terisi',
+                servingSizeAmount: 45,
+                servingSizeUnit: 'g',
+                components: [{ name: 'Protein Ada', amount: 3, unit: 'g' }],
+              },
+              { name: 'Komponen Kosong', components: [{ name: 'Protein Kosong' }] },
+            ],
+          },
+        },
+      },
+    })
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'Keripik Uji' })
+    expect(screen.getAllByRole('table', { name: 'Kandungan gizi' })).toHaveLength(1)
+    expect(screen.getByText('Protein Ada')).toBeInTheDocument()
+    expect(screen.queryByText('Komponen Kosong')).not.toBeInTheDocument()
+    expect(screen.queryByText('Protein Kosong')).not.toBeInTheDocument()
+  })
+
   it('menampilkan pesan yang jelas untuk produk tanpa batch', async () => {
     mocks.get.mockResolvedValue({
       data: {
